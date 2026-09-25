@@ -52,11 +52,19 @@ export const delegateInput = z.object({
 export const DELEGATE_RUNNING_NOTE =
     'The child is still running and keeps going. Do not call delegate again without `follow`: a new call starts a SECOND child on the same objective. To wait for this one, call delegate with the same assignee and objective and `follow` set to this taskId; or go on with other work and follow it later.';
 
+/** Bounds on the list a refusal carries: a daemon's `tool.result` error message is at most 4096 characters (`LIMITS.text`). */
+const DESCRIBE_ENVIRONMENTS = 12;
+const DESCRIBE_ROOTS = 4;
+const DESCRIBE_CHARS = 2_000;
+
 /** The environments an assignee can run in, as a refusal names them (#599): id, machine and roots, so the retry can fill `environmentId`. */
 export function describeEnvironments(assignee: string, envs: readonly DelegateEnvironment[]): string {
     if (envs.length === 0) return `No paired machine reports an environment agent ${assignee} can run in.`;
-    const one = (e: DelegateEnvironment) => `${e.id} on machine ${e.machineId}${e.machineName ? ` (${e.machineName})` : ''}${e.online ? '' : ', offline'} — roots ${e.cwdRoots.length ? e.cwdRoots.join(', ') : '(none)'}`;
-    return `Environments agent ${assignee} can run in: ${envs.map(one).join('; ')}. Pass one as environmentId (with its machineId when the id is on more than one machine) and a workdir inside its roots.`;
+    const roots = (r: readonly string[]) => (r.length === 0 ? '(none)' : r.length > DESCRIBE_ROOTS ? `${r.slice(0, DESCRIBE_ROOTS).join(', ')} and ${r.length - DESCRIBE_ROOTS} more` : r.join(', '));
+    const one = (e: DelegateEnvironment) => `${e.id} on machine ${e.machineId}${e.machineName ? ` (${e.machineName})` : ''}${e.online ? '' : ', offline'} — roots ${roots(e.cwdRoots)}`;
+    const shown = envs.slice(0, DESCRIBE_ENVIRONMENTS).map(one).join('; ') + (envs.length > DESCRIBE_ENVIRONMENTS ? `; and ${envs.length - DESCRIBE_ENVIRONMENTS} more` : '');
+    const list = shown.length > DESCRIBE_CHARS ? `${shown.slice(0, DESCRIBE_CHARS)}…` : shown;
+    return `Environments agent ${assignee} can run in: ${list}. Pass one as environmentId (with its machineId when the id is on more than one machine) and a workdir inside its roots.`;
 }
 
 /** What the model gets back: the child task's id and status, and its result flattened (COL-07). */

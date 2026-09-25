@@ -532,10 +532,16 @@ export function createActorToolPorts(options: ActorToolPortsOptions): PlatformPo
                 }
                 // An environment no machine reports would leave the child queued for a machine that never comes: refused
                 // before any child exists, naming where the assignee can run so the retry can fill it in (#599).
+                // One reported for another runtime is refused the same way — unless the assignee runs in none at all (a
+                // platform-hosted runtime, which ignores the environment). A `machineId` that does not report it is the router's
+                // to leave aside and record (EXE-12), as before.
                 if (spec.environmentId !== undefined && options.machines) {
                     const views = await machineViews();
-                    if (!views.some((m) => m.environments.some((e) => e.id === spec.environmentId))) {
-                        throw new ToolCallError('invalid', `delegate: no machine of this workspace reports environment ${spec.environmentId}. ${describeEnvironments(spec.assignee, await usableBy(spec.assignee, views))}`);
+                    const usable = await usableBy(spec.assignee, views);
+                    const reported = views.some((m) => m.environments.some((e) => e.id === spec.environmentId));
+                    if (!reported || (usable.length > 0 && !usable.some((e) => e.id === spec.environmentId))) {
+                        const why = reported ? `environment ${spec.environmentId} does not run agent ${spec.assignee}'s runtime` : `no machine of this workspace reports environment ${spec.environmentId}`;
+                        throw new ToolCallError('invalid', `delegate: ${why}. ${describeEnvironments(spec.assignee, usable)}`);
                     }
                 }
                 let childId: TaskId;

@@ -1,7 +1,7 @@
 /** The platform tools over fake ports: validation, what reaches the port, what the model gets back. */
 import { SchemaValidationError, type ToolContext } from '@sigx/ai';
 import type { EnvironmentId, MachineId, NewMemoryEntry, TaskId } from '@agentic/core';
-import { type DelegateCall, type DelegateOutcome, type DelegateSpec, grantedPlatformTools, platformTools, PLATFORM_TOOL_NAMES, isPlatformToolName } from '../../src/index';
+import { type DelegateCall, type DelegateOutcome, type DelegateSpec, describeEnvironments, grantedPlatformTools, platformTools, PLATFORM_TOOL_NAMES, isPlatformToolName } from '../../src/index';
 import { fakePorts, memoryEntry } from '../anthropic/helpers';
 
 const ctx = (id = 'call_1', signal = new AbortController().signal): ToolContext => ({ toolCallId: id, signal });
@@ -137,6 +137,17 @@ describe('delegate', () => {
         expect(emitted).toEqual([expect.objectContaining({ type: 'agent-start', agentId: 'task_p.call_1' })]);
         await tool('delegate').run({ assignee: 'agent_bob', objective: 'Go.', follow: 'task_p.call_1' }, ctx('call_2'));
         expect(base.calls[1]!.args).toMatchObject({ assignee: 'agent_bob', follow: 'task_p.call_1' });
+    });
+    it('the environments a refusal names are bounded, under a daemon tool.result message (#599)', () => {
+        const many = Array.from({ length: 40 }, (_, i) => ({ id: `env_${i}` as EnvironmentId, machineId: `machine_${i}` as MachineId, cwdRoots: Array.from({ length: 30 }, (_, j) => `/very/long/root/path/number/${j}`), online: true }));
+        const text = describeEnvironments('agent_bob', many);
+        expect(text.length).toBeLessThan(2_500);
+        expect(text).toContain('env_0 on machine machine_0');
+        expect(text).toContain('and 26 more');
+        // Twelve of forty, four roots each, and the whole cut to its character budget.
+        expect(text).toContain('…');
+        expect(text).not.toContain('env_12 ');
+        expect(describeEnvironments('agent_bob', [])).toBe('No paired machine reports an environment agent agent_bob can run in.');
     });
     it('the description says a verbatim retry starts a second child and how to follow instead (#599)', () => {
         const d = byName().tool('delegate').description;
