@@ -98,16 +98,16 @@ export interface ProjectSummaryLine {
     readonly projectId: ProjectId;
     /** Chats in the project that are not archived. */
     readonly openChats: number;
-    /** Archived chats in the project: always 0 until chats have an archive state (#774). */
+    /** Archived chats in the project (#774, `Chat.archive`); they are not in `openChats`. */
     readonly archivedChats: number;
-    /** The newest entry's `at` across the project's chats; absent while none has one. */
+    /** The newest entry's `at` across the project's open chats; absent while none has one. */
     readonly lastActivityAt?: number;
 }
 
 /** What `projectSummaries` returns: one line per project in creation order, and the chats outside any project. */
 export interface ProjectSummaries {
     readonly projects: readonly ProjectSummaryLine[];
-    /** Chats in no project, or in one the workspace no longer has (the "outside any project" strip). */
+    /** Open chats in no project, or in one the workspace no longer has (the "outside any project" strip); archived ones are left out. */
     readonly unassigned: { readonly openChats: number; readonly lastActivityAt?: number };
 }
 
@@ -481,28 +481,35 @@ export function defineWorkspace(options: WorkspaceOptions = {}) {
                 const projectIds = (ctx.state.projects ?? []).map((p) => p.id);
                 const chatIds = [...ctx.state.chats];
                 const workspaceId = ownerOfWorkspaceKey(ctx.key) as WorkspaceId;
-                type Line = { openChats: number; lastActivityAt?: number };
-                const unassigned: Line = { openChats: 0 };
-                const lines = new Map<ProjectId, Line>(projectIds.map((id) => [id, { openChats: 0 }]));
+                type Line = { openChats: number; archivedChats: number; lastActivityAt?: number };
+                const unassigned: Line = { openChats: 0, archivedChats: 0 };
+                const lines = new Map<ProjectId, Line>(projectIds.map((id) => [id, { openChats: 0, archivedChats: 0 }]));
                 await eachLimited(chatIds, SUMMARY_CONCURRENCY, async (chatId) => {
                     const chat = ctx.actor(Chat, actorKey(workspaceId, 'chat', chatId));
                     let projectId: ProjectId | undefined;
                     let at: number | undefined;
+                    let archived = false;
                     try {
                         const [summary, page] = await Promise.all([chat.get(), chat.history(null, 1)]);
                         projectId = summary.projectId;
+                        archived = summary.archived === true;
                         const newest = page.entries.at(-1)?.entry as { at?: unknown } | undefined;
                         if (typeof newest?.at === 'number') at = newest.at;
                     } catch {
                         return;
                     }
                     const line = (projectId !== undefined ? lines.get(projectId) : undefined) ?? unassigned;
+                    // An archived chat is counted, not shown: it adds no activity (#774).
+                    if (archived) {
+                        line.archivedChats += 1;
+                        return;
+                    }
                     line.openChats += 1;
                     if (at !== undefined && (line.lastActivityAt === undefined || at > line.lastActivityAt)) line.lastActivityAt = at;
                 });
                 const out = (line: Line) => ({ openChats: line.openChats, ...(line.lastActivityAt !== undefined ? { lastActivityAt: line.lastActivityAt } : {}) });
                 return {
-                    projects: projectIds.map((projectId) => ({ projectId, ...out(lines.get(projectId)!), archivedChats: 0 })),
+                    projects: projectIds.map((projectId) => ({ projectId, ...out(lines.get(projectId)!), archivedChats: lines.get(projectId)!.archivedChats })),
                     unassigned: out(unassigned)
                 };
             },
