@@ -441,7 +441,7 @@ Install a Rust toolchain (`rustup`, stable). On Linux you also need `libwebkit2g
    - Windows x64: NSIS `.exe` and `.msi`
    - macOS: a universal `.dmg`
    - Linux x64 and arm64: `.AppImage`, `.deb` and `.rpm`
-4. Any installer over 15 MB fails the build.
+4. Any installer over 15 MB fails the build. The exception is the AppImage, capped at 100 MB, because it carries WebKitGTK itself; the `.deb`/`.rpm` use the system's copy and are about 3.4 MB. MSI refuses semver pre-releases, so the MSI gets a numeric version: `0.2.0-rc.3` → `0.2.0.3`, and a stable `0.2.0` → `0.2.0.65535`, so every rc sorts below its release. A pre-release tag must therefore end in a number (`-rc.N`).
 5. A semver with `-` (`desktop-v0.2.0-rc.1`) is a pre-release and never reaches the update channel.
 
 ### 5a.3 Auto-update (one-time setup)

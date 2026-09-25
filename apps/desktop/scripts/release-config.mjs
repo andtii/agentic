@@ -15,13 +15,32 @@ export function versionOf(tag) {
     return m[1];
 }
 
+/**
+ * The MSI's version (`major.minor.patch.build`, numbers only), since MSI refuses a semver pre-release.
+ * A pre-release's trailing number is the build (`1.2.3-rc.4` → `1.2.3.4`), and a stable release is the
+ * highest build (`1.2.3` → `1.2.3.65535`), so every rc sorts below the release it leads to. A pre-release
+ * without a trailing number would collide with its release, so it is refused: tag `-rc.N` / `-beta.N`.
+ */
+export const MSI_STABLE_BUILD = 65535;
+
+export function msiVersionOf(version) {
+    const [core, pre] = version.split('-', 2);
+    if (!pre) return `${core}.${MSI_STABLE_BUILD}`;
+    const m = /(\d+)$/.exec(pre);
+    if (!m) throw new Error(`pre-release "${pre}" must end in a number (-rc.N) to get an MSI version`);
+    const n = Number(m[1]);
+    if (n < 1 || n >= MSI_STABLE_BUILD) throw new Error(`pre-release number ${n} must be 1..${MSI_STABLE_BUILD - 1} for an MSI version`);
+    return `${core}.${n}`;
+}
+
 export function releaseConfig(tag, env = {}) {
-    const config = { version: versionOf(tag) };
+    const version = versionOf(tag);
+    const config = { version, bundle: { windows: { wix: { version: msiVersionOf(version) } } } };
     const pubkey = (env.AGENTIC_UPDATER_PUBKEY ?? '').trim();
     const url = (env.AGENTIC_UPDATER_URL ?? '').trim();
     if (pubkey) {
         if (!url.startsWith('https://')) throw new Error('AGENTIC_UPDATER_URL must be an https URL when AGENTIC_UPDATER_PUBKEY is set');
-        config.bundle = { createUpdaterArtifacts: true };
+        config.bundle.createUpdaterArtifacts = true;
         config.plugins = { updater: { pubkey, endpoints: [url] } };
     }
     return config;
