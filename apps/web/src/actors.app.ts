@@ -220,7 +220,8 @@ export function platformActors(ports: PlatformPorts = defaultPorts): readonly An
     const Registry = defineRegistry({ ...(kek ? { kek } : {}), catalogue: ports.catalogue ?? pluginCatalogue, memoryPlugins: memoryCatalogue });
     const registry = () => Registry;
     // Notification channels (#244): the static ones, then every enabled notification plugin this build implements — one Registry hop per notification.
-    const Inbox = defineInbox({ channels: ports.channels, channelPlugins: ports.channelPlugins ?? channelCatalogue, registry });
+    // The Workspace's notification prefs decide first (#302): push off reaches no channel, inbox off records without counting unread.
+    const Inbox = defineInbox({ channels: ports.channels, channelPlugins: ports.channelPlugins ?? channelCatalogue, registry, workspace: () => Workspace });
     // Memory and learning (#242): the workspace's active plugin of each, from the gate the router recorded on the spec. The
     // tools reach the same store the session retrieves from, on both paths.
     const learning = platformLearningPorts({ plugin: learningCatalogue[learningDefaultPlugin.id]!({}), memoryPlugins: memoryCatalogue, learningPlugins: learningCatalogue });

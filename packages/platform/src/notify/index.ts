@@ -21,6 +21,7 @@ export {
     reduceInbox,
     INBOX_CAP,
     PLUGIN_CHANNELS,
+    PREFS_CHANNEL,
     type InboxEntry,
     type InboxOptions,
     type InboxState,

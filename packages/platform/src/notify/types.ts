@@ -33,6 +33,12 @@ export interface InboxNotification extends NotificationInput {
     readonly id: string;
     readonly at: number;
     readonly read: boolean;
+    /**
+     * Recorded while the workspace's "Every notification to inbox" switch was off
+     * (`notifications.inbox: false`, #302): listed as usual — Needs you and a chat's
+     * open questions read it — but never counted by `unread()`.
+     */
+    readonly muted?: true;
     readonly deliveries: readonly DeliveryAttempt[];
 }
 

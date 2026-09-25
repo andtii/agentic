@@ -297,3 +297,9 @@ The updated design handoff replaces `/plugins`, a three-column card catalogue, w
 - **Decision**: `folders` is keyed by machine. `<machineId>/*` is the machine's folder, which every environment on that machine uses if its roots hold the folder. `<machineId>/<environmentId>` overrides it for one environment. An environment that can't reach the machine's folder isn't an error: it doesn't use that folder, and the router moves on to the next candidate.
 - **Old records**: a bare environment id stays readable as the last fallback and can be removed, but the Workspace refuses to write one. The form moves each one to the machine whose environment of that id holds it inside its roots. If all of a machine's moved folders are the same path, that path becomes the machine's folder. The next save removes the old keys. No stored data is migrated in place.
 
+## 2026-09-25 — what the notification switches mean (#302)
+
+Settings → Notifications has two switches, `WorkspaceSettings.notifications.inbox` and `.push`. The Inbox reads both on every `push` / `append` (architecture §9, "Notification prefs").
+
+1. **`push: false` means no outbound channel at all.** No Web Push, no other notification plugin, no static channel. The Registry is not asked, and no attempt is recorded. This is the user's choice, not a delivery failure. The default is `false`, so a workspace pushes only once its owner turns the switch on. If the prefs cannot be read, nothing is pushed and a failed `settings` attempt is recorded, so an opted-out user is never pushed by accident and the miss is visible.
+2. **`inbox: false` still records every notification.** The Inbox is the one durable record: Needs you, a chat's open questions and every delivery attempt read it, and approvals must stay answerable. The notification is flagged `muted` instead. It is listed as usual, but it is not counted by `Inbox.unread()`. Turning the switch back on affects new notifications only.
