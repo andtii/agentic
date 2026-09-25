@@ -24,7 +24,10 @@ export function versionOf(tag) {
 export const MSI_STABLE_BUILD = 65535;
 
 export function msiVersionOf(version) {
-    const [core, pre] = version.split('-', 2);
+    // Split at the first hyphen only: a pre-release may contain more (`1.2.3-alpha-beta.4`).
+    const cut = version.indexOf('-');
+    const core = cut < 0 ? version : version.slice(0, cut);
+    const pre = cut < 0 ? '' : version.slice(cut + 1);
     if (!pre) return `${core}.${MSI_STABLE_BUILD}`;
     const m = /(\d+)$/.exec(pre);
     if (!m) throw new Error(`pre-release "${pre}" must end in a number (-rc.N) to get an MSI version`);

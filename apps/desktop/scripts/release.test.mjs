@@ -16,6 +16,7 @@ test('the version comes from the tag', () => {
 
 test('the MSI gets a numeric version', () => {
     assert.equal(msiVersionOf('1.2.3-rc.4'), '1.2.3.4');
+    assert.equal(msiVersionOf('1.2.3-alpha-beta.4'), '1.2.3.4');
     // Every rc sorts below the release it leads to.
     assert.equal(msiVersionOf('1.2.3'), '1.2.3.65535');
     assert.throws(() => msiVersionOf('0.1.0-beta'), /must end in a number/);
