@@ -64,7 +64,7 @@ pub enum Navigation {
 }
 
 pub fn navigation(url: &Url, server: Option<&str>) -> Navigation {
-    if is_local(url) || url.scheme() == "about" || url.scheme() == "blob" || url.scheme() == "data" {
+    if is_local(url) || url.as_str() == "about:blank" {
         return Navigation::Stay;
     }
     if server.is_some_and(|origin| same_origin(url, origin)) {
@@ -184,6 +184,8 @@ mod tests {
             Navigation::Stay
         );
         assert_eq!(navigation(&u("about:blank"), server), Navigation::Stay);
+        assert_eq!(navigation(&u("data:text/html,hi"), server), Navigation::Block);
+        assert_eq!(navigation(&u("blob:https://a.example/1"), server), Navigation::Block);
     }
 
     #[test]

@@ -20,11 +20,16 @@ function setServer(origin) {
 
 /** Whether anything answers at the origin. An opaque (no-cors) response is enough. */
 async function reachable(origin) {
+    // AbortController + setTimeout, not AbortSignal.timeout: older system webviews lack the latter.
+    const abort = new AbortController();
+    const timer = setTimeout(() => abort.abort(), PROBE_TIMEOUT_MS);
     try {
-        await fetch(`${origin}/`, { mode: 'no-cors', cache: 'no-store', signal: AbortSignal.timeout(PROBE_TIMEOUT_MS) });
+        await fetch(`${origin}/`, { mode: 'no-cors', cache: 'no-store', signal: abort.signal });
         return true;
     } catch {
         return false;
+    } finally {
+        clearTimeout(timer);
     }
 }
 

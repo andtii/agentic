@@ -9,7 +9,9 @@ use server::Navigation;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use tauri::webview::{NewWindowFeatures, NewWindowResponse};
-use tauri::{AppHandle, Manager, RunEvent, State, WebviewUrl, WebviewWindowBuilder, WindowEvent};
+#[cfg(target_os = "macos")]
+use tauri::RunEvent;
+use tauri::{AppHandle, Manager, State, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 use tauri_plugin_opener::OpenerExt;
 use url::Url;
 
@@ -208,10 +210,11 @@ pub fn run() {
         })
         .build(tauri::generate_context!())
         .expect("error while building the Agentic desktop app")
-        .run(|app, event| {
+        .run(|_app, _event| {
             // macOS: clicking the dock icon brings the hidden window back.
-            if let RunEvent::Reopen { .. } = event {
-                show_main(app);
+            #[cfg(target_os = "macos")]
+            if let RunEvent::Reopen { .. } = _event {
+                show_main(_app);
             }
         });
 }
