@@ -138,6 +138,7 @@ export const LiveTask = component<{ id: string }>(({ props }) => {
         }
         const assignee = directory.lookup(t.assignee);
         const nodes = tree.value ? flattenTree(tree.value) : [{ id: t.id, status: t.status, ...(t.wait ? { wait: t.wait } : {}), owner: t.owner, assignee: t.assignee, objective: t.objective, depth: t.depth, children: [] } satisfies TaskTree];
+        const prs = pulls.all();
         const route = cuts.routes().find((r) => r.taskId === t.id) ?? null;
         const interruption = interruptionOf({ audit: cuts.audit(), taskId: t.id, route, machineName });
         const failure = failureOf({ task: { id: t.id, status: t.status, ...(t.error ? { error: t.error } : {}), ...(t.wait ? { wait: t.wait } : {}) }, interruption, machineName });
@@ -155,7 +156,7 @@ export const LiveTask = component<{ id: string }>(({ props }) => {
                         {nodes.map((n) => {
                             const a = directory.lookup(n.assignee);
                             const detail = waitDetailOf(n.wait, machineName);
-                            const pull = taskPullOf(pulls.all(), n.id);
+                            const pull = taskPullOf(prs, n.id);
                             return (
                                 <TaskNode
                                     id={n.id}
