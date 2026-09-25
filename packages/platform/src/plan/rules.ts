@@ -86,6 +86,11 @@ export interface StoredItem {
     assignee?: PlanActor;
     assignedBy?: PlanActor;
     claim?: StoredClaim;
+    /**
+     * The claim a done item finished under, kept with its task (#906): the claim itself goes, but a merge seen after the
+     * item was marked done still finds the item by its task (`mergedPlanItems`). Cleared when the item is reopened.
+     */
+    finishedClaim?: { agentId: AgentId; taskId: TaskId; at: number };
     after: number[];
     touches: string[];
     refs: Ref[];
@@ -390,6 +395,7 @@ function tell(book: PlanBook, notice: Omit<PlanNotice, 'seq'>): void {
 }
 
 function finish(book: PlanBook, item: StoredItem, call: PlanCall, how: string): PlanChange {
+    if (item.claim?.taskId !== undefined) item.finishedClaim = { agentId: item.claim.agentId, taskId: item.claim.taskId, at: call.now };
     delete item.claim;
     dequeue(book, item.id);
     item.state = 'done';
@@ -766,6 +772,7 @@ export function update(book: PlanBook, call: PlanCall, itemId: number, patch: Pl
         const was = item.state;
         const agent = item.claim?.agentId;
         delete item.claim;
+        delete item.finishedClaim;
         item.state = state;
         if (was === 'done' && item.assignee) enqueue(book, item.assignee, item.id, 0);
         else if (agent !== undefined && item.assignee) enqueue(book, item.assignee, item.id, 0);
@@ -820,7 +827,9 @@ export function viewState(book: PlanBook, item: StoredItem, now: number): PlanIt
 
 export function itemView(book: PlanBook, item: StoredItem, now: number): PlanItem {
     const queueIndex = item.assignee ? (book.queues[actorLabel(item.assignee)]?.indexOf(item.id) ?? -1) : -1;
-    const claim: PlanClaim | undefined = liveClaim(item, now) ? { agentId: item.claim!.agentId, leaseUntil: item.claim!.leaseUntil, ...(item.claim!.taskId !== undefined ? { taskId: item.claim!.taskId } : {}) } : undefined;
+    // A done item shows the claim it finished under, lease spent, so its task still names it (#906).
+    const finished = item.state === 'done' && item.finishedClaim ? { agentId: item.finishedClaim.agentId, leaseUntil: item.finishedClaim.at, taskId: item.finishedClaim.taskId } : undefined;
+    const claim: PlanClaim | undefined = liveClaim(item, now) ? { agentId: item.claim!.agentId, leaseUntil: item.claim!.leaseUntil, ...(item.claim!.taskId !== undefined ? { taskId: item.claim!.taskId } : {}) } : finished;
     return {
         id: item.id,
         title: item.title,

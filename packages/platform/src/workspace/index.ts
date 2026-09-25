@@ -740,6 +740,11 @@ export function defineWorkspace(options: WorkspaceOptions = {}) {
                 ctx.state.projects = projects.filter((p) => p.id !== projectId);
                 if (ctx.state.lastProjectId === projectId) delete ctx.state.lastProjectId;
                 await ctx.save();
+                // Its weekly summary entry is switched off with it (#906): kept indexed, so the export and delete still reach it.
+                if (removed.pm?.policy.weeklySummary) {
+                    const { weeklySummary: _off, ...policy } = removed.pm.policy;
+                    await syncPmSummary(ctx, { ...removed, pm: { ...removed.pm, policy } });
+                }
                 const at = now();
                 await recordAudit(ctx, ownerOfWorkspaceKey(ctx.key) as WorkspaceId, {
                     key: `${ctx.key}:project:${projectId}:${at}`,
@@ -907,6 +912,10 @@ export function defineWorkspace(options: WorkspaceOptions = {}) {
                     ...(updates ? { updates } : {})
                 };
                 await ctx.save();
+                // Every weekly summary entry runs in the workspace's time zone: a new one re-syncs them (#906).
+                if (ctx.state.settings.timeZone !== s.timeZone) {
+                    for (const project of ctx.state.projects ?? []) if (project.pm?.policy.weeklySummary) await syncPmSummary(ctx, project);
+                }
                 return ctx.snapshot(ctx.state.settings);
             },
 
