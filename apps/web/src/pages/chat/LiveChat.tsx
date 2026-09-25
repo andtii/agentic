@@ -61,6 +61,7 @@ import { fileToken, fileTokensIn, mentionOfQuery, viewDiffLinks } from '../sessi
 import { NewChatDialog, type NewChatCreate } from './NewChatDialog';
 import { markSeen } from './read-marks';
 import { useProjects } from '../projects/live';
+import { chatPullLinks } from '../projects/work/pull/links';
 import { useLiveWorkdirEnvironments } from '../workdir/environments';
 import { previewable, readyParts, uploadChatFile, uploaded, type Upload } from './uploads';
 
@@ -483,6 +484,7 @@ export const LiveChat = component<{ id: string }>(({ props }) => {
                                 transcript={transcript}
                                 describe={(m) => authors.value[m.id]}
                                 toolLinks={toolLinks}
+                                pullLinks={chatPullLinks(s?.projectId)}
                                 hasEarlier={older.next !== null && older.next !== undefined}
                                 onEarlier={() => { void loadOlder(); }}
                                 onRespond={respond}

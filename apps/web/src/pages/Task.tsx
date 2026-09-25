@@ -12,6 +12,7 @@ import { agentNamed, formatTime, loadTask, sessionsOf } from '../mock/workspace'
 import { opsMachine } from '../mock/ops';
 import { LiveTask, taskHead } from './task/LiveTask';
 import { LinkButton } from './ops/LinkButton';
+import { mockTaskPull } from './projects/work/pull/links';
 
 /** The stop-chain dialog is opened from the topbar, which lives outside the page. */
 const dialogs = signal({ stop: false });
@@ -91,6 +92,7 @@ export const Task = component(() => {
                                 environment={t.environment}
                                 wait={t.wait}
                                 waitDetail={t.waitDetail}
+                                pull={mockTaskPull(t.id, t.ref)}
                                 depth={t.depth}
                                 selected={t.id === selected.id}
                                 onSelect={(id: TaskId) => { st.selected = id; }}

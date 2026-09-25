@@ -15,6 +15,7 @@ import { dataMode } from '../data-mode';
 import { chatHead, openChatSettings, toggleChatSearch } from './chat/head';
 import { lookupOver } from './chat/live';
 import { LiveChat } from './chat/LiveChat';
+import { chatPullLinks } from './projects/work/pull/links';
 import { mockWorkdirEnvironments } from './workdir/environments';
 import { queryOf } from './session/files';
 import { fileToken, mentionOfQuery, resourceText, viewDiffLinks } from './session/references';
@@ -149,6 +150,7 @@ export const Chat = component(() => {
                                 describe={(m) => v.authors[m.id]}
                                 toolMeta={(p) => v.toolMeta[p.callId]}
                                 toolLinks={toolLinks(v.chat.id, new Map(v.transcript.messages.flatMap((m) => (m.actor ? m.parts.flatMap((p) => (p.type === 'tool' ? [[p.callId, m.actor!] as const] : [])) : []))))}
+                                pullLinks={chatPullLinks(v.chat.projectId)}
                                 describeRequest={(r) => v.approvals[r.requestId]}
                                 logHref={v.logHref}
                                 onRespond={() => undefined}
