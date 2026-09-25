@@ -109,7 +109,7 @@ One slot per sub-issue of [#722](https://github.com/andtii/agentic/issues/722). 
 
 - #737: `featureTools` / `withFeatureTools` (`packages/platform/src/routing/features.ts`) — a named tool-family registry joined to an agent's grants under its policy; generic enough for `@sigx/ai-agent` tool sets.
 
-- #738: —
+- #738: `workItemsOf` (`apps/web/src/pages/projects/work/model.ts`) — pure derivation of work items from tasks, PRs and plan items; a candidate for `@agentic/core` next to `workStagesFor` once a second surface (Home, MCP) needs it.
 
 - #739: `stepsOf` (`apps/web/src/pages/projects/work/item/model.ts`) — a labelled stage stepper beside `StageTrack`; move it into `@agentic/ui` when a second page needs named stages.
 
