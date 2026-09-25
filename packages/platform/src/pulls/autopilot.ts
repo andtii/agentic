@@ -198,6 +198,9 @@ export function stepAutopilot(pilot: Autopilot | undefined, run: AutopilotRun, p
         return turn('fix', fixText(pr, failing, attempt, max), { attempts: attempt }, { checks: failing.map((c) => c.name) });
     }
 
+    // A running check blocks like a failing one: wait for CI before another turn.
+    if (isPending(pr)) return { run: next, actions: [] };
+
     const threads = pilot.answerThreads ? newThreads(pilot, next, pr) : [];
     if (threads.length) {
         const ids = threads.map((t) => t.id);

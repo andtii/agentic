@@ -178,6 +178,13 @@ describe('answerThreads', () => {
         expect(next.run.answered).toEqual(['a', 'd']);
     });
 
+    it('waits for running checks before taking up threads', () => {
+        const threads = { state: 'none' as const, reviewers: [], threads: [thread('a')] };
+        const p = pr({ ...running(), review: threads });
+        expect(stepAutopilot(pilot(), NEW_AUTOPILOT_RUN, p, 0).actions).toEqual([]);
+        expect(stepAutopilot(pilot(), NEW_AUTOPILOT_RUN, pr({ review: threads }), 1).actions[0]).toMatchObject({ turn: 'threads' });
+    });
+
     it('leaves threads to you when answerThreads is off', () => {
         const p = pr({ autopilot: pilot({ answerThreads: false }), review: { state: 'none', reviewers: [], threads: [thread('a')] } });
         expect(stepAutopilot(p.autopilot, NEW_AUTOPILOT_RUN, p, 0).actions).toEqual([]);
