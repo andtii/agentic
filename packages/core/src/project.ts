@@ -102,6 +102,8 @@ export interface ProjectFeatureSessionInput extends ProjectFeatureContext {
     /** The chat the task came from, when it did. */
     readonly chatId?: ChatId;
     readonly environmentId: EnvironmentId;
+    /** The machine the session runs on, when the router bound one: with `environmentId`, `projectFolderFor` finds the project's folder there (#702). */
+    readonly machineId?: MachineId;
     /** The folder the router resolved for this session (the project's for the environment unless overridden). */
     readonly cwd: string;
     readonly fs: ProjectFeatureFs;
