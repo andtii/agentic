@@ -127,7 +127,7 @@ One slot per sub-issue of [#722](https://github.com/andtii/agentic/issues/722). 
 
 - #746: —
 
-- #747: —
+- #747: `pullMove` / `pullNotification` (`packages/platform/src/pulls/notify.ts`) — a provider-neutral "whose move is this PR" rule; candidate for `@agentic/core` next to `pullBlockers` once the UI's owner badge needs it.
 
 - #748: `parseRefs`/`formatRef` in `packages/core/src/refs.ts` — a generic typed-ref tokenizer (items, mentions, file ranges, commits, URLs); a candidate for a sigx text utility once a second consumer appears.
 

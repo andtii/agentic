@@ -716,7 +716,7 @@ _not yet_
 
 #### #747 platform: push only when the next move becomes yours or autopilot gives up
 
-_not yet_
+`packages/platform/src/pulls/notify.ts`: `pullMove(pr)` says whether an open, non-draft PR is the user's move and why, in priority order — `gave-up` (autopilot fixes checks, a check fails, none runs, no activity, `attempt >= maxAttempts`), `conflicts` (`mergeable === false`), `failing` (a failed check and no autopilot `fixChecks`), `review` (changes requested or an open thread and no autopilot `answerThreads`), `ready` (nothing pending or failing, approved or no review asked, `mergeable === true`, autopilot does not `mergeWhenGreen`); anything else is an agent's, CI's or a reviewer's move. `pullNotification(prev, next)` returns one Inbox row (`kind: 'input'`, `{repo}#{n} needs you` / `is ready to merge`, deep-linked to the PR's task, else chat, else session) only when the move becomes the user's for a new reason — never for a passing check, a merge or a close (the task's row covers those). `notifyPull(ctx, inbox, ws, prev, next)` pushes that row one-way to `{ws}:inbox` and never throws. The Pulls actor calls it per upsert in #818.
 
 #### #748 core: Plan, Phase, Item, Ref and the ref parser (contract)
 
