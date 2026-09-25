@@ -59,7 +59,22 @@ function open(response: Response): { ws: WebSocket; next(): Promise<Record<strin
         if (w) w(frame);
         else queue.push(frame);
     });
-    return { ws, next: () => (queue.length ? Promise.resolve(queue.shift()!) : new Promise((resolve) => waiters.push(resolve))) };
+    // A frame that never comes fails with what was awaited, not as the test's own timeout (#817).
+    const next = (timeoutMs = 20_000): Promise<Record<string, unknown>> => {
+        if (queue.length) return Promise.resolve(queue.shift()!);
+        return new Promise((resolve, reject) => {
+            const waiter = (f: Record<string, unknown>): void => {
+                clearTimeout(timer);
+                resolve(f);
+            };
+            const timer = setTimeout(() => {
+                waiters.splice(waiters.indexOf(waiter), 1);
+                reject(new Error(`no frame from the daemon socket within ${timeoutMs} ms`));
+            }, timeoutMs);
+            waiters.push(waiter);
+        });
+    };
+    return { ws, next };
 }
 
 async function connectAndHello(machineId: MachineId, token: string): Promise<ReturnType<typeof open>> {
@@ -69,7 +84,7 @@ async function connectAndHello(machineId: MachineId, token: string): Promise<Ret
     return socket;
 }
 
-async function until(check: () => Promise<boolean>, what: string, timeoutMs = 10_000): Promise<void> {
+async function until(check: () => Promise<boolean>, what: string, timeoutMs = 20_000): Promise<void> {
     const deadline = Date.now() + timeoutMs;
     while (!(await check())) {
         if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
@@ -77,8 +92,12 @@ async function until(check: () => Promise<boolean>, what: string, timeoutMs = 10
     }
 }
 
+// Each test pairs and connects several machines and runs a session turn: a few dozen Durable Object hops, which
+// ran past the suite's 30 s on the windows-latest compat runner (#817). Their waits are bounded on their own.
+const HEAVY = { timeout: 90_000 };
+
 describe('worker: several ActorHost objects in one isolate resolve ambient hops through their own host (#137)', () => {
-    it('two machines say hello one after the other, then a session turn — every object intact', async () => {
+    it('two machines say hello one after the other, then a session turn — every object intact', HEAVY, async () => {
         const a = await pairNew('alpha');
         const b = await pairNew('beta');
 
@@ -129,7 +148,7 @@ describe('worker: several ActorHost objects in one isolate resolve ambient hops 
     // #172: the auth routes run in the Worker, OUTSIDE the actor mount. `POST /auth/pair`
     // hops ambiently to the PairingDirectory and the Machine object (`pairingWiring`);
     // unscoped, that hop resolved through the last-booted object's host — a Machine's.
-    it('POST /auth/pair after two machines said hello lands on the right Machine object', async () => {
+    it('POST /auth/pair after two machines said hello lands on the right Machine object', HEAVY, async () => {
         const a = await pairNew('gamma');
         const b = await pairNew('delta');
         const socketA = await connectAndHello(a.machineId, a.token);

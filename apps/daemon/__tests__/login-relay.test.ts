@@ -130,9 +130,20 @@ describe('spawnLoginRelay over a fake CLI', () => {
             const events = await collect(r.events, (e) => { if (e.phase === 'waiting') r.cancel(); });
             expect(events.map((e) => e.phase)).toEqual(['action', 'waiting', 'failed']);
             expect(events.at(-1)).toMatchObject({ error: { code: 'cancelled' } });
+            // The deadline runs on a fake clock, moved on only once the CLI has printed its prompt (its pid file is
+            // written before that): on a loaded machine a 300 ms wall-clock deadline fired before the child had
+            // even started, and it never wrote its pid (#817). Only the relay's own timer is faked — the child's
+            // I/O runs on Node's internal timers.
             const timedPid = join(dir, 'timed.pid');
-            const slow = relay('claude', ['--hang', '--pid-file', timedPid], 300);
-            const timed = await collect(slow.events);
+            vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+            let timed: LoginRelayEvent[];
+            try {
+                const slow = relay('claude', ['--hang', '--pid-file', timedPid], 300);
+                timed = await collect(slow.events, (e) => { if (e.phase === 'waiting') vi.advanceTimersByTime(300); });
+            } finally {
+                vi.useRealTimers();
+            }
+            expect(timed.map((e) => e.phase)).toEqual(['action', 'waiting', 'failed']);
             expect(timed.at(-1)).toEqual({ phase: 'failed', error: { code: 'timeout', message: 'the sign-in was not completed in time' } });
             // On Windows the CLI runs under `cmd.exe`: killing only the wrapper left it running (#520).
             // Both are probed (and killed if still there) before either is asserted, so a failing run leaks nothing.

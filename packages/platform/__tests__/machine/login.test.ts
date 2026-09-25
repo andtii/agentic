@@ -73,10 +73,22 @@ const hello = (features: string[] = ['login'], capabilities: CapabilityReport[] 
 const status = (requestId: string, environmentId: EnvironmentId, phase: string, extra: Record<string, unknown> = {}) => daemon().socketMessage(JSON.stringify({ v: 1, t: 'login.status', requestId, environmentId, phase, ...extra }));
 const frames = (t: string) => sockets.frames(t) as { requestId: string; environmentId?: string; text?: string }[];
 const audits = async (): Promise<readonly AuditEvent[]> => (await app.as(owner).actor(AuditActor, auditKey(WS)).list({ kinds: ['machine.login'] })).events;
-const tick = async () => {
-    vi.setSystemTime(Date.now() + TICK);
+/** `ms` pass on the clock and the reminder floor fires once. */
+const pass = (ms: number) => {
+    vi.setSystemTime(Date.now() + ms);
     scheduler.advance(TICK);
-    for (let i = 0; i < 20; i++) await new Promise((r) => setTimeout(r, 0));
+};
+/**
+ * Read until `done` holds: the reminder's turn lands a few hops after the scheduler fires it. Waits on the turns, not
+ * the clock — a fixed count of `setTimeout(0)` flushes per tick ran long on a loaded machine (#817).
+ */
+const settled = async <T>(read: () => Promise<T>, done: (v: T) => boolean): Promise<T> => {
+    for (let i = 0; i < 1000; i++) {
+        const v = await read();
+        if (done(v)) return v;
+        await new Promise((r) => setImmediate(r));
+    }
+    return read();
 };
 
 describe('Machine.requestLogin / answerLogin / cancelLogin / loginState (#484)', () => {
@@ -158,12 +170,12 @@ describe('Machine.requestLogin / answerLogin / cancelLogin / loginState (#484)',
         const a = await machine().requestLogin(E1);
         expect(await statusOf(machine().requestLogin(E1))).toBe(409);
         // The deadline: past the daemon's own cap with no end reported.
-        for (let t = 0; t < LOGIN_TIMEOUT_MS; t += TICK) await tick();
-        expect(await machine().loginState(E1)).toMatchObject({ requestId: a.requestId, phase: 'failed', error: { code: 'timeout' } });
+        pass(LOGIN_TIMEOUT_MS);
+        expect(await settled(() => machine().loginState(E1), (r) => r?.phase === 'failed')).toMatchObject({ requestId: a.requestId, phase: 'failed', error: { code: 'timeout' } });
         expect((await audits())[0]).toMatchObject({ data: { environmentId: E1, outcome: 'timeout' } });
         // Pruned after its TTL.
-        for (let t = 0; t <= LOGIN_RESULT_TTL_MS; t += TICK) await tick();
-        expect(await machine().loginState(E1)).toBeNull();
+        pass(LOGIN_RESULT_TTL_MS + TICK);
+        expect(await settled(() => machine().loginState(E1), (r) => r === null)).toBeNull();
 
         await hello();
         await machine().requestLogin(E1);
