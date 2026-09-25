@@ -1,10 +1,12 @@
 /* Projects redesign (#722): Settings › Features — owned by #736 (the ProjectFeatures board). */
+@import '@agentic/ui/css/breakpoints';
 [data-project-features-page] { display: grid; gap: var(--space-lg); }
 [data-features-intro] h2 { margin: 0; }
 [data-features-intro] p { margin: var(--space-xs) 0 0; color: var(--ag-text-muted); }
 
 [data-features-grid] { display: grid; grid-template-columns: minmax(0, 1fr) 400px; gap: var(--space-lg); align-items: start; }
-@media (max-width: 1100px) { [data-features-grid] { grid-template-columns: minmax(0, 1fr); } }
+/* the 400px rail drops under the main column below 1280 (#766) */
+@media (--below-xl) { [data-features-grid] { grid-template-columns: minmax(0, 1fr); } }
 [data-features-main] { display: grid; gap: var(--space-md); min-inline-size: 0; }
 
 [data-features-on-head], [data-features-add-head] { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-md); }
@@ -28,7 +30,9 @@
 [data-features-search] { display: flex; align-items: center; gap: var(--space-sm); inline-size: min(280px, 100%); padding-inline: var(--space-sm); border: var(--border) solid var(--ag-line-strong); border-radius: var(--radius-field, 6px); color: var(--ag-text-dim); }
 [data-features-search] input { flex: 1; min-inline-size: 0; block-size: var(--ag-control-h); border: 0; background: none; color: var(--color-base-content); outline: none; }
 [data-features-catalogue] { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-md); }
-@media (max-width: 760px) { [data-features-catalogue] { grid-template-columns: minmax(0, 1fr); } }
+/* three columns become two below 1280, one below 768 (#766) */
+@media (--below-xl) { [data-features-catalogue] { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (--below-md) { [data-features-catalogue] { grid-template-columns: minmax(0, 1fr); } }
 [data-feature-tile] { display: grid; gap: var(--space-sm); align-content: start; padding: var(--space-md); border: var(--border) solid var(--ag-line); border-radius: var(--radius-box); }
 [data-feature-tile][data-selected] { border-color: var(--ag-line-strong); }
 [data-feature-tile][data-unmet] [data-feature-open], [data-feature-tile][data-unmet] [data-feature-description] { opacity: 0.55; }
