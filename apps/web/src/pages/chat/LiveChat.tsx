@@ -36,20 +36,21 @@ import { Link, useRoute, useRouter } from '@sigx/router';
 import { actor } from '@sigx/actors';
 import { useActorState } from '@sigx/actors/app';
 import { Drawer } from '@sigx/zero';
-import { createId, isChatFilePart, sessionFileUri, type AgentId, type ChatFilePart, type ChatId, type MachineId, type PromptPart, type SessionOptionsPatch, type TaskId, type WorkdirRef } from '@agentic/core';
-import { activeIn, type IndexedEntry } from '@agentic/platform';
+import { createId, isChatFilePart, sessionFileUri, type AgentId, type ChatFilePart, type ChatId, type MachineId, type ProjectId, type ProjectRequest, type PromptPart, type SessionOptionsPatch, type TaskId, type WorkdirRef } from '@agentic/core';
+import { acrossProjects, activeIn, bringInVisitors, visitingManagers, visitorOf, visitorsIn, type IndexedEntry } from '@agentic/platform';
 import type { Decision, ToolPartState } from '@sigx/ai-agent';
 import { Composer, EmptyState, ErrorNote, NOBODY_HINT, Thread, prepareImage, type ComposerInsert, type Mention, type MessageAuthor, type RespondOptions } from '@agentic/ui';
 import { Page } from '../../components/Page';
 import { baseTurnId, capacityWaitText, FailureNotice, interruptionOf, machineOfflineText, useInterruptionReads } from '../../components/status';
 import { useActorDefs, useViewer } from '../../actors/defs';
 import { chatKeyOf, inboxKeyOf, machineKeyOf, routingKeyOf, sessionKeyOf, taskIndexKeyOf, taskKeyOf } from '../../actors/keys';
-import { resolveAddressing, type MockChatSummary } from '../../mock/workspace';
+import { resolveAddressing, type MockChatMember, type MockChatSummary } from '../../mock/workspace';
 import { useWorkspaceZone, zoneFormat } from '../../time';
 import { ChatSearchPanel, SEARCH_LIMIT } from './ChatSearchPanel';
 import { ChatSettingsDialog, type ChatSettingsChange } from './ChatSettingsDialog';
 import { ContextPanel } from './ContextPanel';
 import { DetachedQuestionCard } from './DetachedQuestionCard';
+import { ChatRequestsFrom } from './entries/RequestCard';
 import { closeContextDrawer, contextDrawer } from './context-drawer';
 import { useAgentDirectory } from './directory';
 import { openFeed, type FeedHandle } from './feeds';
@@ -115,6 +116,13 @@ export const LiveChat = component<{ id: string }>(({ props }) => {
     const transcript = signal(chatTranscript('chat'));
     const authors = signal<{ value: Record<string, MessageAuthor> }>({ value: {} });
     const feeds = signal<{ list: FeedHandle[] }>({ list: [] });
+    // This chat's requests to each visiting manager's project (#762), as the request cards read them live.
+    const sentFrom = signal<{ value: Readonly<Record<string, readonly ProjectRequest[]>> }>({ value: {} });
+    const reportRequests = (projectId: ProjectId, list: readonly ProjectRequest[]): void => {
+        const prev = sentFrom.value[projectId] ?? [];
+        const same = prev.length === list.length && prev.every((r, i) => r.id === list[i]!.id && r.updatedAt === list[i]!.updatedAt && r.state === list[i]!.state);
+        if (!same) sentFrom.value = { ...sentFrom.value, [projectId]: list };
+    };
     // The composer's chips (#207): one per file taken, until it is sent or removed.
     const uploads = signal<{ list: Upload[] }>({ list: [] });
     let uploadSeq = 0;
@@ -272,10 +280,18 @@ export const LiveChat = component<{ id: string }>(({ props }) => {
         const attachments: readonly PromptPart[] = reshare ?? [...readyParts(sent), ...fileReferences(text)];
         if (!text && !attachments.length) return;
         const k = chatKeyOf(ws, props.id);
-        const members = membersOf(s);
         st.sending = true;
         st.error = '';
         try {
+            // `@` another project's manager (#762): it joins as a visitor first, so the message activates it.
+            let current = s;
+            const visiting = visitingManagers(projects.list(), s.projectId);
+            if (visiting.length) {
+                const guests = visiting.map((v): MockChatMember => ({ agentId: v.agentId, status: 'idle', history: { access: 'all' } }));
+                const brought = await bringInVisitors(actor(defs.Chat, k), mentionsIn(text, [...membersOf(s), ...guests], directory.lookup), Object.keys(s.members), projects.list(), s.projectId);
+                if (brought.length) current = await actor(defs.Chat, k).get();
+            }
+            const members = membersOf(current);
             await runActivation(
                 {
                     post: (parts, mentions) => actor(defs.Chat, k).post(parts, mentions),
@@ -286,7 +302,7 @@ export const LiveChat = component<{ id: string }>(({ props }) => {
                     run: (taskId) => actor(defs.Routing, routingKeyOf(ws)).with({ oneWay: true }).run(taskId),
                     newTaskId: () => createId('task') as TaskId
                 },
-                { chatId: props.id as ChatId, text, attachments, mentions: mentionsIn(text, members, directory.lookup), summary: s, entries: kept.list, lookup: directory.lookup, hosted: workdirs.hosted }
+                { chatId: props.id as ChatId, text, attachments, mentions: mentionsIn(text, members, directory.lookup), summary: current, entries: kept.list, lookup: directory.lookup, hosted: workdirs.hosted }
             );
             st.draft = '';
             dropUploads(new Set(sent.map((c) => c.id)));
@@ -459,6 +475,16 @@ export const LiveChat = component<{ id: string }>(({ props }) => {
             return { id: a.name, label: a.name, description: a.role };
         });
         const memberIds = new Set(members.map((m) => m.agentId));
+        // Other projects' managers (#762): `@` one to bring it in; the members among them read as visitors.
+        const managers = visitingManagers(projects.list(), s?.projectId);
+        for (const v of managers) {
+            if (memberIds.has(v.agentId)) continue;
+            const a = directory.lookup(v.agentId);
+            mentions.push({ id: a.name, label: a.name, description: `${v.projectName} · project manager` });
+        }
+        const visitors = visitorsIn([...memberIds], projects.list(), s?.projectId);
+        const across = acrossProjects(visitors.flatMap((v) => sentFrom.value[v.projectId] ?? []), projects.list(), s?.projectId);
+        const visitorOfMember = (agentId: string) => visitorOf(agentId, projects.list(), s?.projectId);
         const candidates = directory.all().filter((a) => !memberIds.has(a.id));
         const tasks = chatTasks(index.value ?? [], props.id);
         const failure = chatFailure(entries, feeds.list, interruptionOfTurn, machineNameOf);
@@ -496,6 +522,9 @@ export const LiveChat = component<{ id: string }>(({ props }) => {
                                 }}
                             />
                         )}
+                    {viewer.workspaceId && s?.projectId ? visitors.map((v) => (
+                        <ChatRequestsFrom key={v.projectId} workspaceId={viewer.workspaceId!} chatId={props.id} chatProjectId={s.projectId!} {...(project ? { homeProjectName: project.name } : {})} projectId={v.projectId} projectName={v.projectName} managerName={directory.lookup(v.agentId).name} time={time} onRequests={reportRequests} />
+                    )) : null}
                     {detachedQuestions(entries, inbox.value ?? [], feeds.list, s?.sessions).map((q) => (
                         <div key={`${q.sessionId}:${q.requestId}`} data-chat-question>
                             <DetachedQuestionCard question={q} lookup={directory.lookup} onError={fail} />
@@ -540,11 +569,11 @@ export const LiveChat = component<{ id: string }>(({ props }) => {
                         />
                     </div>
                 </section>
-                <ContextPanel chat={chat} tasks={tasks} lookup={directory.lookup} candidates={candidates} time={time} onAddAgent={(e) => addAgent(e.agentId, e.access)} onStopChain={() => { void stopChain(); }} environments={workdirs.list()} machineOf={workdirs.machineOf} project={project} {...(machineName ? { machineName } : {})} hosted={workdirs.hosted} machines={workdirs.machines()} accountEnvironment={workdirs.accountEnvironment} onSetWorkdir={(e) => setWorkdir(e.agentId, e.ref)} onResetSession={(e) => { void resetSession(e.agentId); }} onSetOptions={(e) => setOptions(e.agentId, e.patch)} />
+                <ContextPanel chat={chat} tasks={tasks} lookup={directory.lookup} candidates={candidates} time={time} onAddAgent={(e) => addAgent(e.agentId, e.access)} onStopChain={() => { void stopChain(); }} environments={workdirs.list()} machineOf={workdirs.machineOf} project={project} {...(machineName ? { machineName } : {})} hosted={workdirs.hosted} machines={workdirs.machines()} accountEnvironment={workdirs.accountEnvironment} onSetWorkdir={(e) => setWorkdir(e.agentId, e.ref)} onResetSession={(e) => { void resetSession(e.agentId); }} onSetOptions={(e) => setOptions(e.agentId, e.patch)} visitorOf={visitorOfMember} across={across} />
                 <Drawer.Root model={() => contextDrawer.open} placement="end" label="Members and tasks" onOpenChange={(open: boolean) => { if (!open) closeContextDrawer(); }}>
                     <Drawer.Panel>
                         <div data-context-drawer>
-                            <ContextPanel chat={chat} tasks={tasks} lookup={directory.lookup} candidates={candidates} time={time} onAddAgent={(e) => addAgent(e.agentId, e.access)} onStopChain={() => { void stopChain(); }} environments={workdirs.list()} machineOf={workdirs.machineOf} project={project} {...(machineName ? { machineName } : {})} hosted={workdirs.hosted} machines={workdirs.machines()} accountEnvironment={workdirs.accountEnvironment} onSetWorkdir={(e) => setWorkdir(e.agentId, e.ref)} onResetSession={(e) => { void resetSession(e.agentId); }} onSetOptions={(e) => setOptions(e.agentId, e.patch)} />
+                            <ContextPanel chat={chat} tasks={tasks} lookup={directory.lookup} candidates={candidates} time={time} onAddAgent={(e) => addAgent(e.agentId, e.access)} onStopChain={() => { void stopChain(); }} environments={workdirs.list()} machineOf={workdirs.machineOf} project={project} {...(machineName ? { machineName } : {})} hosted={workdirs.hosted} machines={workdirs.machines()} accountEnvironment={workdirs.accountEnvironment} onSetWorkdir={(e) => setWorkdir(e.agentId, e.ref)} onResetSession={(e) => { void resetSession(e.agentId); }} onSetOptions={(e) => setOptions(e.agentId, e.patch)} visitorOf={visitorOfMember} across={across} />
                         </div>
                     </Drawer.Panel>
                 </Drawer.Root>

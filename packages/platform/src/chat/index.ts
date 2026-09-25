@@ -3,3 +3,4 @@ export { Chat, defineChatActor, MAX_TITLE_LENGTH, sessionEvents, type ChatOption
 export { ChatPage, pageKey, type ChatPageState } from './page.js';
 export { MAX_PENDING_UPLOADS, PAGE, PENDING_TTL_MS, WINDOW, applyChatEntry, initialChatState, principalKey, visibleFrom, type ChatFileRow, type ChatSessionRow, type ChatState, type IndexRow, type IndexedEntry, type PendingUpload } from './state.js';
 export { HEURISTIC_TITLE_LENGTH, TITLE_AT_AGENT_MESSAGES, TITLE_INPUT_MESSAGES, acceptsAutoTitle, agentMessageCount, createChatTitler, heuristicTitle, titleInputOf, type ChatTitler, type ChatTitlerOptions } from './titles.js';
+export { VISITING_ROLE, acrossProjects, bringInVisitors, chatRequests, projectItemRef, projectManagerOf, requestCardState, visitingManagers, visitorOf, visitorsIn, visitorsToBringIn, type AcrossItem, type AcrossState, type Visitor, type VisitingChat, type VisitingProject } from './participants-visiting.js';
