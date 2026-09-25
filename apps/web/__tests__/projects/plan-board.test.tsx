@@ -12,6 +12,8 @@ const agent = (id: string): PlanActor => ({ kind: 'agent', agentId: id as AgentI
 const YOU: PlanActor = { kind: 'user', userId: 'me' };
 const item = (id: number, over: Partial<PlanItem> = {}): PlanItem => ({ id, title: `Item ${id}`, state: 'ready', after: [], touches: [], refs: [], doneWhen: [], activity: [], ...over });
 const members: ProjectMembers = { agentIds: ['forge', 'lint', 'atlas'] as AgentId[], coordinator: 'atlas' as AgentId, limits: { ['lint' as AgentId]: 2 } };
+/** The board's clock in these rules tests: item 4's lease (10 minutes) is live at 0. */
+const NOW = 0;
 const ids = (xs: readonly PlanItem[]): number[] => xs.map((i) => i.id);
 
 const sample = (): PlanItem[] => [
@@ -27,7 +29,7 @@ const sample = (): PlanItem[] => [
 
 describe('the Plan board rules (#755)', () => {
     it('columns are Not assigned, each member but an idle coordinator, other assignees, then You; done left out', () => {
-        const cols = boardColumns(sample(), members);
+        const cols = boardColumns(sample(), members, NOW);
         expect(cols.map((c) => c.key)).toEqual(['open', 'agent:forge', 'agent:lint', 'agent:scout', 'you']);
         const forge = cols[1]!;
         expect(ids(forge.working)).toEqual([4]);
@@ -38,13 +40,13 @@ describe('the Plan board rules (#755)', () => {
         expect(cols[0]!.limit).toBeNull();
         expect(ids(cols[4]!.queue)).toEqual([8]);
         expect(doneCount(sample())).toBe(1);
-        const busyAtlas = boardColumns([...sample(), item(9, { assignee: agent('atlas'), queueIndex: 0 })], members);
+        const busyAtlas = boardColumns([...sample(), item(9, { assignee: agent('atlas'), queueIndex: 0 })], members, NOW);
         expect(busyAtlas.map((c) => c.key)).toContain('agent:atlas');
     });
 
     it('a drop reorders within a queue and renumbers it', () => {
         const next = moveItem(sample(), 6, { column: 'agent:forge', index: 0 }, { you: YOU, at: 1 });
-        expect(ids(boardColumns(next, members)[1]!.queue)).toEqual([6, 5]);
+        expect(ids(boardColumns(next, members, NOW)[1]!.queue)).toEqual([6, 5]);
         expect(next.find((i) => i.id === 5)!.queueIndex).toBe(1);
     });
 
@@ -57,35 +59,61 @@ describe('the Plan board rules (#755)', () => {
         const back = moveItem(next, 3, { column: 'open', index: 5 }, { you: YOU, at: 2 });
         expect(back.find((i) => i.id === 3)!.assignee).toBeUndefined();
         expect(back.find((i) => i.id === 3)!.assignedBy).toBeUndefined();
-        expect(ids(boardColumns(back, members)[0]!.queue)).toEqual([2, 3]);
+        expect(ids(boardColumns(back, members, NOW)[0]!.queue)).toEqual([2, 3]);
     });
 
     it('taking a worked item off its agent needs a handoff: the claim goes, it is ready, the note is in its history', () => {
         const items = sample();
         const worked = items.find((i) => i.id === 4)!;
-        expect(needsHandoff(worked, { column: 'agent:scout', index: 0 })).toBe(true);
-        expect(needsHandoff(items.find((i) => i.id === 5)!, { column: 'agent:scout', index: 0 })).toBe(false);
+        expect(needsHandoff(worked, { column: 'agent:scout', index: 0 }, NOW)).toBe(true);
+        expect(needsHandoff(items.find((i) => i.id === 5)!, { column: 'agent:scout', index: 0 }, NOW)).toBe(false);
         const next = moveItem(items, 4, { column: 'agent:scout', index: 0 }, { you: YOU, at: 7, note: ' half done, see branch ' });
         const moved = next.find((i) => i.id === 4)!;
         expect(moved.claim).toBeUndefined();
         expect(moved.state).toBe('ready');
         expect(moved.activity).toEqual([{ at: 7, actor: YOU, text: 'Handoff: half done, see branch' }]);
-        expect(ids(boardColumns(next, members)[3]!.queue)).toEqual([4, 7]);
+        expect(ids(boardColumns(next, members, NOW)[3]!.queue)).toEqual([4, 7]);
     });
 
     it('a drop on the card’s own place, or a worked card in its own column, changes nothing', () => {
         const items = sample();
-        const cols = boardColumns(items, members);
+        const cols = boardColumns(items, members, NOW);
         const five = items.find((i) => i.id === 5)!;
-        expect(isNoop(five, { column: 'agent:forge', index: 0 }, cols)).toBe(true);
-        expect(isNoop(five, { column: 'agent:forge', index: 1 }, cols)).toBe(true);
-        expect(isNoop(five, { column: 'agent:forge', index: 2 }, cols)).toBe(false);
-        expect(isNoop(items.find((i) => i.id === 4)!, { column: 'agent:forge', index: 2 }, cols)).toBe(true);
+        expect(isNoop(five, { column: 'agent:forge', index: 0 }, cols, NOW)).toBe(true);
+        expect(isNoop(five, { column: 'agent:forge', index: 1 }, cols, NOW)).toBe(true);
+        expect(isNoop(five, { column: 'agent:forge', index: 2 }, cols, NOW)).toBe(false);
+        expect(isNoop(items.find((i) => i.id === 4)!, { column: 'agent:forge', index: 2 }, cols, NOW)).toBe(true);
+    });
+
+    it('an item whose lease ran out is in QUEUE, not WORKING, and moving it asks for no handoff (#813)', () => {
+        const items = sample();
+        const expired = 10 * 60_000;
+        const forge = boardColumns(items, members, expired)[1]!;
+        expect(ids(forge.working)).toEqual([]);
+        expect(ids(forge.queue)).toContain(4);
+        const four = items.find((i) => i.id === 4)!;
+        expect(needsHandoff(four, { column: 'agent:scout', index: 0 }, expired)).toBe(false);
+        expect(needsHandoff(four, { column: 'agent:scout', index: 0 }, expired - 1)).toBe(true);
+        const cols = boardColumns(items, members, expired);
+        expect(isNoop(four, { column: 'agent:forge', index: 0 }, cols, expired)).toBe(false);
+        const next = moveItem(items, 4, { column: 'agent:scout', index: 0 }, { you: YOU, at: expired });
+        const moved = next.find((i) => i.id === 4)!;
+        expect(columnOf(moved)).toBe('agent:scout');
+        expect(moved.claim).toBeUndefined();
+        expect(moved.state).toBe('ready');
+        expect(moved.activity).toEqual([]);
+        expect(ids(boardColumns(next, members, expired)[3]!.queue)).toEqual([4, 7]);
+        // A note written while the lease was live and sent after it ran out still hands off consistently.
+        const late = moveItem(items, 4, { column: 'agent:scout', index: 0 }, { you: YOU, at: expired, note: 'see branch' }).find((i) => i.id === 4)!;
+        expect(late.claim).toBeUndefined();
+        expect(late.state).toBe('ready');
+        expect(late.activity).toEqual([{ at: expired, actor: YOU, text: 'Handoff: see branch' }]);
+        expect(cardMeta(four, items, expired, () => '')).toEqual([]);
     });
 
     it('arrow keys step the slot: the card’s own place counts once; sideways keeps the position where it fits', () => {
         const items = sample();
-        const cols = boardColumns(items, members);
+        const cols = boardColumns(items, members, NOW);
         const five = items.find((i) => i.id === 5)!;
         const start = startSlot(five, cols);
         expect(start).toEqual({ column: 'agent:forge', index: 0 });
