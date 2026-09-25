@@ -4,7 +4,7 @@
  *
  * - **Branch** is the pull requests' base (the default branch), `main` when there are none.
  * - **Checks** is what the last merge into it ran: `pass` when every check passed, `fail` when one failed, `running`
- *   while some still run, `none` when nothing merged yet or it ran no checks.
+ *   while some still run, `none` when nothing merged yet or it ran no checks (skipped ones do not count).
  * - **Your move** counts the open pull requests the Work view puts in its Your move group (`workItemsOf`).
  * - **Branches without a PR** are the branches a task works on that no open or merged pull request heads.
  */
@@ -46,9 +46,10 @@ const NO_FEATURES = { enabled: [], uiOf: () => undefined };
 
 /** A merged pull request's checks as the base branch's checks pill. */
 export function checksOf(pr: Pick<PullRequest, 'checks'> | undefined): GitChecks {
-    if (!pr || pr.checks.length === 0) return 'none';
-    if (pr.checks.some((c) => c.state === 'failed')) return 'fail';
-    if (pr.checks.some((c) => c.state === 'queued' || c.state === 'running')) return 'running';
+    const ran = (pr?.checks ?? []).filter((c) => c.state !== 'skipped');
+    if (ran.length === 0) return 'none';
+    if (ran.some((c) => c.state === 'failed')) return 'fail';
+    if (ran.some((c) => c.state === 'queued' || c.state === 'running')) return 'running';
     return 'pass';
 }
 

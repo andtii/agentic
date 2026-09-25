@@ -66,7 +66,7 @@ export const GitOverviewCard = component<ProjectPageProps>(({ props }) => () => 
 const pullRow = (projectId: string, o: GitOpenPull) => {
     const pr = o.pr;
     return (
-        <li data-git-pull={String(pr.number)} data-your-move={o.yourMove ? '' : undefined}>
+        <li key={pr.number} data-git-pull={String(pr.number)} data-your-move={o.yourMove ? '' : undefined}>
             <span data-git-pull-number="">{`#${pr.number}`}</span>
             <span data-git-row-main="">
                 <Link to={pullHref(projectId, pr.number)}>
@@ -106,7 +106,7 @@ export const GitSection = component<ProjectPageProps>(({ props }) => () => {
                     ? (
                         <ul data-git-rows="">
                             {s.branchesWithoutPr.map((b) => (
-                                <li data-git-branch-row={b.name}>
+                                <li key={b.name} data-git-branch-row={b.name}>
                                     <Icon name="branch" size={14} />
                                     <span data-git-head="">{b.name}</span>
                                     <span data-git-row-main=""><Link to={taskItemHref(id, b.taskId)}><span data-git-row-title="">{b.title}</span></Link></span>

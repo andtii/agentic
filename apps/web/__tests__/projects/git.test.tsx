@@ -37,6 +37,8 @@ describe('the git model (#746)', () => {
         expect(checksOf(pr(['passed', 'failed', 'running']))).toBe('fail');
         expect(checksOf(pr(['passed', 'queued']))).toBe('running');
         expect(checksOf(pr(['passed']))).toBe('pass');
+        expect(checksOf(pr(['skipped']))).toBe('none');
+        expect(checksOf(pr(['passed', 'skipped']))).toBe('pass');
         const empty = gitSummaryOf([], []);
         expect(empty).toMatchObject({ branch: 'main', checks: 'none', yourMove: 0, failing: 0, branchesWithoutPr: [] });
         expect(empty.lastMerge).toBeUndefined();
