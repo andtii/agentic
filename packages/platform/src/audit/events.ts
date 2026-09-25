@@ -406,6 +406,8 @@ export interface ProjectChangedData {
     readonly projectId: ProjectId;
     readonly name: string;
     readonly op: 'created' | 'updated' | 'removed';
+    /** The project keys that changed (`name`, `description`, `members`, `folders`, `connectors`, `features`, `color`, `pm`, `pm.policy`); absent on `removed` (#775). */
+    readonly changed?: readonly string[];
 }
 
 /**

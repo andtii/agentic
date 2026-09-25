@@ -584,8 +584,7 @@ export function defineWorkspace(options: WorkspaceOptions = {}) {
                 await ctx.save();
                 // Through the Agent create path: its first (or next) config version, audited as `config.versioned`.
                 if (pmConfig) await ctx.actor(AgentActor, agentKey(ownerOfWorkspaceKey(ctx.key) as WorkspaceId, saved.pm!.agentId!)).update(pmConfig, `project manager of ${saved.name}`);
-                // `changed` rides beside the declared fields until `ProjectChangedData` names it (#775).
-                const data: ProjectChangedData & { readonly changed: readonly string[] } = { projectId: record.id, name: record.name, op: base ? 'updated' : 'created', changed: changedKeys(base, record) };
+                const data: ProjectChangedData = { projectId: record.id, name: record.name, op: base ? 'updated' : 'created', changed: changedKeys(base, record) };
                 await recordAudit(ctx, ownerOfWorkspaceKey(ctx.key) as WorkspaceId, {
                     key: `${ctx.key}:project:${record.id}:${at}`,
                     kind: 'project.changed',
@@ -617,7 +616,7 @@ export function defineWorkspace(options: WorkspaceOptions = {}) {
                 const workspaceId = ownerOfWorkspaceKey(ctx.key) as WorkspaceId;
                 await ctx.actor(AgentActor, agentKey(workspaceId, agentId)).update(config, `project manager of ${record.name}`);
                 const at = record.updatedAt;
-                const data: ProjectChangedData & { readonly changed: readonly string[] } = { projectId, name: record.name, op: 'updated', changed: ['members', 'pm'] };
+                const data: ProjectChangedData = { projectId, name: record.name, op: 'updated', changed: ['members', 'pm'] };
                 await recordAudit(ctx, workspaceId, {
                     key: `${ctx.key}:project:${projectId}:pm:${at}`,
                     kind: 'project.changed',
@@ -656,7 +655,7 @@ export function defineWorkspace(options: WorkspaceOptions = {}) {
                 ctx.state.projects = (ctx.state.projects ?? []).map((p) => (p.id === projectId ? record : p));
                 await ctx.save();
                 const at = record.updatedAt;
-                const data: ProjectChangedData & { readonly changed: readonly string[] } = { projectId, name: record.name, op: 'updated', changed: ['pm.policy'] };
+                const data: ProjectChangedData = { projectId, name: record.name, op: 'updated', changed: ['pm.policy'] };
                 await recordAudit(ctx, ownerOfWorkspaceKey(ctx.key) as WorkspaceId, {
                     key: `${ctx.key}:project:${projectId}:pm-policy:${at}`,
                     kind: 'project.changed',
