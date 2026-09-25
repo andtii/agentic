@@ -7,6 +7,8 @@ import { dataMode } from '../data-mode';
 import { AgentCardLink } from './agent/AgentCardLink';
 import { openNewAgent } from './agent/head';
 import { LiveAgents } from './agent/LiveAgents';
+import { mockPmProjects } from './agent/pm';
+import { PmChip } from './agent/PmChip';
 
 /** The roster's status pill: the agent's presence in the handoff's vocabulary. */
 export function presencePill(presence: AgentProfile['presence']): { status: string; label?: string; hollow?: boolean } {
@@ -28,6 +30,7 @@ export const Agents = component(() => {
     return () => {
         if (dataMode() === 'live') return <LiveAgents />;
         const rows = agentProfiles();
+        const pms = mockPmProjects();
         return (
                 <div data-page="agents">
                     <div data-page-head="">
@@ -36,6 +39,7 @@ export const Agents = component(() => {
                     <ul data-agent-grid="" aria-label="Agents">
                         {rows.map((p) => {
                             const pill = presencePill(p.presence);
+                            const pm = pms.get(p.id);
                             return (
                                 <li data-agent-card={p.id}>
                                     <AgentCardLink to={`/agents/${p.id}`}>
@@ -49,6 +53,7 @@ export const Agents = component(() => {
                                             </Stack.Item>
                                             <StatusPill status={pill.status} label={pill.label} hollow={pill.hollow} />
                                         </Row>
+                                        {pm ? <PmChip project={pm} /> : null}
                                         <p data-agent-card-description="">{p.config.description}</p>
                                         <Col gap="xs">
                                             <Label>Default environment</Label>

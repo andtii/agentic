@@ -40,6 +40,9 @@ import { accountOptions, configPatch, learningPatch, profileOf, sessionRowsOf } 
 import { MemoryTab, type MemoryTabStore } from './MemoryTab';
 import { OverviewTab } from './OverviewTab';
 import { SessionsTab } from './SessionsTab';
+import { useProjects } from '../projects/live';
+import { pmProjectsOf } from './pm';
+import { PmChip } from './PmChip';
 
 export const LiveAgent = component<{ id: string }>(({ props }) => {
     const defs = useActorDefs();
@@ -47,6 +50,7 @@ export const LiveAgent = component<{ id: string }>(({ props }) => {
     const route = useRoute();
     const router = useRouter();
     const directory = useAgentDirectory(defs, viewer);
+    const projects = useProjects(defs, viewer);
     // The paired machines' environments, for the Config tab's default-environment picker (#144).
     const environments = useEnvironmentOptions(defs, viewer);
     const workdirs = useLiveWorkdirEnvironments(defs, viewer);
@@ -144,6 +148,7 @@ export const LiveAgent = component<{ id: string }>(({ props }) => {
         const index = Math.max(0, directory.all().findIndex((a) => a.id === id));
         const profile = profileOf(v, log.versions, index, activity.activity());
         const pill = presencePill(profile.presence);
+        const pm = pmProjectsOf(projects.list()).get(id);
         const sessions = sessionRowsOf(activity.activity().tasks ?? [], profile.environment!);
         const agent: MockAgent = { id, name: v.config.name || id, description: v.config.description, runtime: v.config.execution.runtime, status: profile.presence === 'idle' ? 'idle' : 'busy', configVersion: v.configVersion };
         const collaborators = directory.all().filter((a) => a.id !== id).map((a) => ({ value: a.id, label: a.name }));
@@ -156,6 +161,7 @@ export const LiveAgent = component<{ id: string }>(({ props }) => {
                             <h1 data-page-title data-agent-name="">{agent.name}</h1>
                             <div data-agent-sub="">
                                 <span data-agent-role="">{profile.role}</span>
+                                {pm ? <PmChip project={pm} link /> : null}
                                 {profile.environment
                                     ? <EnvironmentLine machine={profile.environment.machine} runtime={profile.environment.runtime} account={profile.environment.account} fit="drop-machine" />
                                     : <span data-agent-noenv="" data-tone="needs-you">No environment</span>}

@@ -11,6 +11,8 @@ import { dataMode } from '../data-mode';
 import { presencePill } from './Agents';
 import { agentHead } from './agent/head';
 import { LiveAgent } from './agent/LiveAgent';
+import { mockPmProjects } from './agent/pm';
+import { PmChip } from './agent/PmChip';
 import { OverviewTab } from './agent/OverviewTab';
 import { ConfigTab } from './agent/ConfigTab';
 import { MemoryTab } from './agent/MemoryTab';
@@ -61,6 +63,7 @@ export const Agent = component(() => {
             );
         }
         const pill = presencePill(profile.presence);
+        const pm = mockPmProjects().get(id);
         return (
                 <div data-page="agent" data-agent={id}>
                     <header data-agent-header="">
@@ -70,6 +73,7 @@ export const Agent = component(() => {
                                 <h1 data-page-title data-agent-name="">{agent.name}</h1>
                                 <div data-agent-sub="">
                                     <span data-agent-role="">{profile.role}</span>
+                                    {pm ? <PmChip project={pm} link /> : null}
                                     {profile.environment
                                         ? <EnvironmentLine machine={profile.environment.machine} runtime={profile.environment.runtime} account={profile.environment.account} fit="drop-machine" />
                                         : <span data-agent-noenv="" data-tone="needs-you">No environment</span>}
