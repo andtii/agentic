@@ -99,7 +99,7 @@ One slot per sub-issue of [#722](https://github.com/andtii/agentic/issues/722). 
 
 - #732: `groupChatsByProject` (`apps/web/src/pages/chat/chat-groups.ts`) — a generic group-by-key-ordered-by-recency; stays in web until a second list needs it.
 
-- #733: —
+- #733: `apps/web/src/pages/projects/settings/general/TabFrame.tsx` — a settings section with its own Save, inline refusal and a "Saved" that clears when the form moves on; a candidate for `@agentic/ui` once another settings page wants it.
 
 - #734: `eachLimited` (bounded-concurrency fan-out) in `packages/platform/src/workspace/index.ts` is generic: a candidate for `@sigx/actors` next to hop fan-out helpers.
 

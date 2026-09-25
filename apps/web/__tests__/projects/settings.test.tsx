@@ -1,17 +1,22 @@
 /**
- * The project form on mock data (#333; split out of `pages/projects.test.tsx` by the scaffold #725, the edit page now
- * at Settings › General): one folder row per machine with an override per environment on it (#702), Browse keeping
- * the folder's git badge on the row, Find through the mock `locate`, the different-origin warning, a feature's
- * settings from its manifest schema with the origin prefilled, `detect` suggesting a feature, and the patch a save
- * produces; `/projects/new` prefilled from a folder (#336). #733 owns this file.
+ * Settings › General, Members, Folders and Connectors and the New project dialog (#733) on mock data: each tab shows
+ * its part of the record and saves only that part (`mockSettingsSaves`); the folder rows keep Browse, the git badge,
+ * the overrides per environment and the acme note (#702); `/projects/new` is the dialog over the index, prefilled
+ * from a folder (#336), with its Project manager step and the `pm` spec on the create. The old project form (#333) is
+ * still covered below until X2 removes it. #733 owns this file.
  */
 import { describe, it, expect } from 'vitest';
-import type { ProjectFeaturePlugin, ProjectPatch } from '@agentic/core';
+import { MEMBER_LIMIT_MAX, PM_PERSONALITIES, type ProjectFeaturePlugin, type ProjectPatch } from '@agentic/core';
 import { AGENTS, PROJECTS } from '../../src/mock/workspace';
 import { AGENTIC_ORIGIN, mockFsLocate } from '../../src/mock/fs';
 import { opsPlugins } from '../../src/mock/ops';
+import { mockSettingsSaves } from '../../src/mock/projects/settings';
 import { mockLocate } from '../../src/pages/projects/locate';
-import { connectorOptionsOf, featureManifestsOf } from '../../src/pages/projects/model';
+import { blankNewProject, newProjectPatchOf, PERSONALITY_SAMPLES, suggestedPmName } from '../../src/pages/projects/new/model';
+import { NewProjectDialog } from '../../src/pages/projects/new/NewProjectDialog';
+import { tabPatchOf } from '../../src/pages/projects/settings/general/TabFrame';
+import { membersPatchOf } from '../../src/pages/projects/settings/members/Members';
+import { connectorOptionsOf, featureManifestsOf, projectDraftOf } from '../../src/pages/projects/model';
 import { ProjectForm } from '../../src/pages/projects/ProjectForm';
 import { mockWorkdirEnvironments } from '../../src/pages/workdir/environments';
 import { mountAt, setText, text } from '../pages/helpers';
@@ -53,50 +58,195 @@ async function browse(at: HTMLElement, root: string, ...names: string[]): Promis
     await settle();
 }
 
-describe('/projects/:id/settings/general (mock)', () => {
-    it('the edit page renders the enabled feature\u2019s settings from the manifest schema, filled from the record', async () => {
+/** The last patch a settings tab saved on mock data. */
+const lastSave = (): ProjectPatch | undefined => mockSettingsSaves[mockSettingsSaves.length - 1];
+const save = async (dom: ParentNode): Promise<void> => {
+    buttonIn(dom, 'Save').click();
+    await settle();
+};
+const dialog = (): HTMLElement => document.querySelector<HTMLElement>('[data-new-project]')!;
+const dialogForm = (): HTMLElement => dialog().closest('form')!;
+
+describe('Settings › General (mock)', () => {
+    it('shows the name, description and colour; a save sends only them; no name keeps it here; Delete asks first', async () => {
+        mockSettingsSaves.length = 0;
         const dom = await mountRoute('/projects/p_agentic/settings/general');
-        expect(dom.querySelector<HTMLInputElement>('input[name="project-name"]')!.value).toBe('agentic');
-        const feature = dom.querySelector<HTMLElement>('[data-project-feature="agentic.feature.git"]')!;
-        expect(feature.hasAttribute('data-on')).toBe(true);
-        expect(feature.querySelector('[data-form="schema"]')).not.toBeNull();
-        expect(feature.querySelector<HTMLInputElement>('input[name="feature-agentic.feature.git.origin"]')!.value).toBe(AGENTIC_ORIGIN);
-        // A plain text field: an origin is whatever git wrote (`git@host:path` is no URL), so the schema declares no `format` (#335).
-        expect(feature.querySelector('input[name="feature-agentic.feature.git.origin"]')!.getAttribute('type')).toBe('text');
-        expect(feature.querySelector<HTMLInputElement>('input[role="switch"]')!.checked).toBe(true);
-        // One folder row per machine (#702), the stored ones filled; an environment with its own folder shows it, the others the machine's.
+        const tab = dom.querySelector<HTMLElement>('[data-settings-tab="general"]')!;
+        expect(tab.querySelector<HTMLInputElement>('input[name="project-name"]')!.value).toBe('agentic');
+        expect(tab.querySelector<HTMLTextAreaElement>('textarea[name="project-description"]')!.value).toBe('The Unified Agent Platform monorepo.');
+        expect(tab.querySelector('[data-project-folder]')).toBeNull();
+        setText(tab.querySelector<HTMLInputElement>('input[name="project-name"]')!, '  ');
+        await save(tab);
+        expect(mockSettingsSaves).toEqual([]);
+        expect(text(tab.querySelector('[data-scope="field"][data-part="error"]'))).toBe('A name is required.');
+        setText(tab.querySelector<HTMLInputElement>('input[name="project-name"]')!, ' agentic 2 ');
+        setText(tab.querySelector<HTMLTextAreaElement>('textarea[name="project-description"]')!, '');
+        await save(tab);
+        expect(lastSave()).toEqual({ id: 'p_agentic', name: 'agentic 2', description: null });
+        expect(text(tab.querySelector('[data-project-saved]'))).toBe('Saved.');
+        buttonIn(tab, 'Delete project').click();
+        await settle();
+        expect(text(document.body)).toContain('Delete agentic?');
+    });
+});
+
+describe('Settings › Members (mock)', () => {
+    it('the member cards with the coordinator as project manager, a role and a limit per member; a save sends the members', async () => {
+        mockSettingsSaves.length = 0;
+        const dom = await mountRoute('/projects/p_agentic/settings/members');
+        const tab = dom.querySelector<HTMLElement>('[data-settings-tab="members"]')!;
+        expect([...tab.querySelectorAll('[data-project-member]')].map((r) => r.getAttribute('data-project-member'))).toEqual(['forge', 'lint', 'atlas']);
+        expect(text(tab.querySelector('[data-project-coordinator]'))).toContain('Atlas is the project manager');
+        expect(tab.querySelector('input[name="member-limit-forge"]')).not.toBeNull();
+        setText(tab.querySelector<HTMLInputElement>('input[name="member-role-forge"]')!, ' Developer ');
+        await settle();
+        await save(tab);
+        expect(lastSave()).toEqual({ id: 'p_agentic', members: { agentIds: ['forge', 'lint', 'atlas'], coordinator: 'atlas', roles: { forge: 'Developer' }, limits: {} } });
+        // Dropping the coordinator from the roster drops it as project manager.
+        const box = tab.querySelector<HTMLInputElement>('[data-new-chat-agent="atlas"] input[name="member"]')!;
+        box.checked = false;
+        box.dispatchEvent(new Event('change', { bubbles: true }));
+        await settle();
+        expect(tab.querySelector('[data-project-coordinator]')).toBeNull();
+        expect(tab.querySelector('[data-project-member="atlas"]')).toBeNull();
+    });
+
+    it('membersPatchOf keeps roles and limits of members only, limits whole and at most the max', () => {
+        expect(membersPatchOf({ picked: ['forge', 'lint', 'forge'], coordinator: 'scout', roles: { forge: ' Dev ', scout: 'PM', lint: '  ' }, limits: { forge: 3, lint: 40, scout: 2 } })).toEqual({
+            agentIds: ['forge', 'lint'], coordinator: null, roles: { forge: 'Dev' }, limits: { forge: 3, lint: MEMBER_LIMIT_MAX }
+        });
+        expect(membersPatchOf({ picked: ['forge'], coordinator: 'forge', roles: {}, limits: { forge: 1.5 } }).limits).toEqual({});
+    });
+});
+
+describe('Settings › Folders (mock)', () => {
+    it('one row per machine with its overrides (#702); Browse keeps the badge, Find opens on an override, a save sends the folders', async () => {
+        mockSettingsSaves.length = 0;
+        const dom = await mountRoute('/projects/p_agentic/settings/folders');
         expect([...dom.querySelectorAll('[data-project-folder]')].map((r) => r.getAttribute('data-project-folder'))).toEqual(['alien01', 'nuc-lab']);
         expect(chip(row(dom, 'alien01'))).toContain('agentic');
         expect(chip(override(dom, 'alien01', 'env_alien01_personal'))).toContain('agentic');
         expect(chip(override(dom, 'alien01', 'env_alien01_codex'))).toContain("The machine's folder");
-        // The acme environment's roots do not hold the machine's folder: it says so.
         expect(text(override(dom, 'alien01', 'env_alien01_client_acme'))).toContain("outside this environment's folders");
         expect(chip(row(dom, 'nuc-lab'))).toContain('No folder on this machine');
+        // A stored folder has no badge, so no origin and no Find yet; Browse brings the badge back.
+        expect([...dom.querySelectorAll<HTMLButtonElement>('button')].some((b) => b.textContent?.trim() === 'Find')).toBe(false);
+        await browse(row(dom, 'alien01'), 'C:\\Dev', 'agentic', 'main');
+        expect(texts([...row(dom, 'alien01').querySelectorAll('[data-project-folder-meta] [data-scope="badge"][data-part="root"]')])).toEqual(['repo · main']);
+        buttonIn(override(dom, 'alien01', 'env_alien01_codex'), 'Find').click();
+        await settle();
+        expect(openPopup().querySelector('[data-project-locate="error"]')).not.toBeNull();
+        buttonIn(openPopup(), 'Cancel').click();
+        await settle();
+        await save(dom);
+        expect(lastSave()).toEqual({ id: 'p_agentic', folders: { 'alien01/*': 'C:\\Dev\\agentic\\main', 'alien01/env_alien01_personal': 'C:\\Users\\andy\\src\\agentic' } });
     });
 });
 
-describe('/projects/new from a folder (#336)', () => {
-    it('opens on the name, the folder row with the origin as its badge, and Find on the other rows', async () => {
-        const path = 'C:\\Dev\\agentic\\branches\\x';
-        const dom = await mountRoute(`/projects/new?name=agentic&env=env_alien01_work&path=${encodeURIComponent(path)}&origin=${encodeURIComponent(AGENTIC_ORIGIN)}`);
-        expect(page(dom, 'project')).not.toBeNull();
-        expect(dom.querySelector<HTMLInputElement>('input[name="project-name"]')!.value).toBe('agentic');
-        // The folder of `env` lands on the machine reporting it (#702).
-        expect(chip(row(dom, 'alien01'))).toContain('x');
-        expect(texts([...row(dom, 'alien01').querySelectorAll('[data-project-folder-meta] [data-scope="badge"][data-part="root"]')])).toContain('repo');
-        await openOverrides(dom, 'alien01');
-        expect(buttonIn(override(dom, 'alien01', 'env_alien01_personal'), 'Find')).toBeTruthy();
-        expect(chip(row(dom, 'nuc-lab'))).toContain('No folder on this machine');
+describe('Settings › Connectors (mock)', () => {
+    it('the connectors as chips over the enabled connector plugins; a save sends only them', async () => {
+        mockSettingsSaves.length = 0;
+        const dom = await mountRoute('/projects/p_agentic/settings/connectors');
+        const tab = dom.querySelector<HTMLElement>('[data-settings-tab="connectors"]')!;
+        expect(text(tab)).toContain('GitHub (MCP)');
+        await save(tab);
+        expect(lastSave()).toEqual({ id: 'p_agentic', connectors: [{ id: 'github-mcp' }] });
     });
 
-    it('a name alone, or a folder without an origin, prefill just that', async () => {
-        const named = await mountRoute('/projects/new?name=blog');
-        expect(named.querySelector<HTMLInputElement>('input[name="project-name"]')!.value).toBe('blog');
-        expect([...named.querySelectorAll<HTMLButtonElement>('button')].some((b) => b.textContent?.trim() === 'Find')).toBe(false);
-        const plain = await mountRoute(`/projects/new?env=env_alien01_work&path=${encodeURIComponent('C:\\Dev\\notes')}`);
-        expect(plain.querySelector<HTMLInputElement>('input[name="project-name"]')!.value).toBe('');
-        expect(chip(row(plain, 'alien01'))).toContain('notes');
-        expect([...plain.querySelectorAll<HTMLButtonElement>('button')].some((b) => b.textContent?.trim() === 'Find')).toBe(false);
+    it('tabPatchOf picks the tab\u2019s keys of the whole-form patch, with the id', () => {
+        const project = PROJECTS[0]!;
+        expect(tabPatchOf({ ...projectDraftOf(project), name: 'x' }, project, ['name'])).toEqual({ id: 'p_agentic', name: 'x' });
+    });
+});
+
+describe('/projects/new: the New project dialog (#733)', () => {
+    it('opens over the index on a blank project', async () => {
+        const dom = await mountRoute('/projects/new');
+        expect(page(dom, 'projects')).not.toBeNull();
+        expect(dialog().getAttribute('data-step')).toBe('project');
+        expect(dialog().querySelector<HTMLInputElement>('input[name="project-name"]')!.value).toBe('');
+        expect(dialog().querySelector('[data-project-folder]')!.getAttribute('data-project-folder')).toBe('');
+    });
+
+    it('prefilled from a folder (#336): the name, the folder on the machine reporting the environment, the origin as its badge', async () => {
+        const path = 'C:\\Dev\\agentic\\branches\\x';
+        await mountRoute(`/projects/new?name=agentic&env=env_alien01_work&path=${encodeURIComponent(path)}&origin=${encodeURIComponent(AGENTIC_ORIGIN)}`);
+        expect(dialog().querySelector<HTMLInputElement>('input[name="project-name"]')!.value).toBe('agentic');
+        const folder = dialog().querySelector<HTMLElement>('[data-project-folder="alien01"]')!;
+        expect(chip(folder)).toContain('x');
+        expect(texts([...folder.querySelectorAll('[data-project-folder-meta] [data-scope="badge"][data-part="root"]')])).toEqual(['repo']);
+    });
+
+    it('a name alone prefills just the name', async () => {
+        await mountRoute('/projects/new?name=blog');
+        expect(dialog().querySelector<HTMLInputElement>('input[name="project-name"]')!.value).toBe('blog');
+        expect(dialog().querySelector('[data-project-folder]')!.getAttribute('data-project-folder')).toBe('');
+    });
+
+    async function mountDialog(): Promise<ProjectPatch[]> {
+        const created: ProjectPatch[] = [];
+        await mountAt('/projects/new', (
+            <NewProjectDialog model={() => true} machines={mockWorkdirEnvironments.projectMachines()} locate={mockLocate()} skills={[]} onCreate={(p) => created.push(p)} />
+        ));
+        await settle();
+        return created;
+    }
+
+    it('the project step, then the Project manager step: a suggested name, preset cards with a sample line, custom text; Create sends pm', async () => {
+        const created = await mountDialog();
+        buttonIn(dialogForm(), 'Next: project manager').click();
+        await settle();
+        // The name is required: the step stays.
+        expect(dialog().getAttribute('data-step')).toBe('project');
+        setText(dialog().querySelector<HTMLInputElement>('input[name="project-name"]')!, 'launch');
+        setText(dialog().querySelector<HTMLTextAreaElement>('textarea[name="project-description"]')!, 'The spring launch.');
+        buttonIn(dialogForm(), 'Next: project manager').click();
+        await settle();
+        expect(dialog().getAttribute('data-step')).toBe('manager');
+        expect(dialog().querySelector<HTMLInputElement>('input[name="pm-name"]')!.value).toBe('launch PM');
+        const cards = (): HTMLElement[] => [...dialog().querySelectorAll<HTMLElement>('[data-pm-personality]')];
+        expect(cards().map((c) => c.getAttribute('data-pm-personality'))).toEqual([...PM_PERSONALITIES.map((p) => p.id), 'custom']);
+        expect(text(cards()[0]!.querySelector('[data-pm-personality-sample]'))).toBe(PERSONALITY_SAMPLES['calm-organiser']);
+        // The default preset goes as is.
+        buttonIn(dialogForm(), 'Create project').click();
+        await settle();
+        expect(created).toEqual([{ name: 'launch', description: 'The spring launch.', pm: { name: 'launch PM', personality: { preset: 'calm-organiser' }, skills: [] } }]);
+        // Custom needs its text; Back keeps what was typed.
+        cards()[cards().length - 1]!.click();
+        await settle();
+        buttonIn(dialogForm(), 'Create project').click();
+        await settle();
+        expect(created.length).toBe(1);
+        expect(text(dialog())).toContain('Describe how the project manager works');
+        setText(dialog().querySelector<HTMLTextAreaElement>('textarea[name="pm-custom"]')!, 'Short and blunt.');
+        await settle();
+        buttonIn(dialogForm(), 'Create project').click();
+        await settle();
+        expect(created[1]?.pm).toEqual({ name: 'launch PM', personality: { custom: 'Short and blunt.' }, skills: [] });
+        buttonIn(dialog(), 'Back').click();
+        await settle();
+        expect(dialog().querySelector<HTMLInputElement>('input[name="project-name"]')!.value).toBe('launch');
+    });
+
+    it('Find by repo lists the checkouts and Use takes one as the folder', async () => {
+        await mountDialog();
+        setText(dialog().querySelector<HTMLInputElement>('input[name="project-origin"]')!, AGENTIC_ORIGIN);
+        await settle();
+        buttonIn(dialog(), 'Find').click();
+        await settle();
+        const matches = [...dialog().querySelectorAll('[data-project-match-path]')];
+        expect(matches.length).toBeGreaterThan(0);
+        const first = matches[0]!.textContent!;
+        buttonIn(dialog(), 'Use').click();
+        await settle();
+        expect(chip(dialog().querySelector('[data-project-folder]')!)).toContain(first.split('\\').pop()!);
+        expect(dialog().querySelector('[data-new-project-find]')).toBeNull();
+    });
+
+    it('newProjectPatchOf: the folder when picked, a custom personality trimmed, the skills de-duplicated', () => {
+        const d = { ...blankNewProject(), name: ' x ', folder: { key: 'alien01/*', row: { path: 'C:\\Dev\\x' } }, personality: 'custom', pmCustom: '  Calm.  ', skills: ['a', ' a ', 'b', ''] };
+        expect(newProjectPatchOf(d)).toEqual({ name: 'x', folders: { 'alien01/*': 'C:\\Dev\\x' }, pm: { name: 'x PM', personality: { custom: 'Calm.' }, skills: [{ id: 'a' }, { id: 'b' }] } });
+        expect(suggestedPmName('')).toBe('Project manager');
     });
 });
 

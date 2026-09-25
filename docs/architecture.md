@@ -638,7 +638,9 @@ The shell draws `NavItem.children` as the project menu (`packages/ui/src/shell/`
 
 #### #733 web: Settings General / Members / Folders / Connectors tabs + New project dialog
 
-_not yet_
+The old project form's sections are settings tabs, each saving only its part of the project through `Workspace.upsertProject` (`settings/general/sources.ts`: `useTabSave`, `tabPatchOf` picks the tab's keys of `projectPatchOf` with the id; on mock data a save lands in `mockSettingsSaves`). **General**: name, description, `color`, Delete project. **Members**: the New chat member cards, the coordinator shown as the project manager, and per member a role and a working limit (`membersPatchOf`: members only, limits whole and at most `MEMBER_LIMIT_MAX`). **Folders**: the per-machine rows with overrides, Browse and Find (#702). **Connectors**: chips over the enabled connector plugins. Features stay #736's tab.
+
+`/projects/new` (`new/NewProject.tsx`) is `NewProjectDialog` over the projects index, prefilled by `projectPrefillOf` (#336). Step one: name, description, an optional folder (browsed, or found by repo through `locate`). Step two, **Project manager**: a suggested name (`<project> PM`), a personality card per `PM_PERSONALITIES` preset with a sample line, or custom text, and skills as chips. Create sends one patch with `pm: ProjectManagerSpec` (`newProjectPatchOf`); live it opens the new project, on mock data (read-only) it goes back to the index.
 
 #### #734 platform: member roles/limits, project colour, project summaries
 
