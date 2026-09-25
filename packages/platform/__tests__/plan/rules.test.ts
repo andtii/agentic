@@ -117,7 +117,8 @@ describe('claim', () => {
         ['within a limit of 2', (b) => claim(b, call(agent(LINT)), 2), LINT, 1, undefined],
         ['over a limit of 2', (b) => (claim(b, call(agent(LINT)), 2), claim(b, call(agent(LINT)), 3)), LINT, 1, 'over-limit'],
         ['re-claiming its own item (renews, no limit)', (b) => claim(b, call(agent(FORGE)), 1), FORGE, 1, undefined],
-        ['an unknown item', () => {}, FORGE, 99, 'not-found']
+        ['an unknown item', () => {}, FORGE, 99, 'not-found'],
+        ['by an agent that is not a project member', () => {}, OUTSIDER, 1, 'forbidden']
     ];
     it.each(cases)('%s', (_name, setup, agentId, itemId, expected) => {
         const b = book();

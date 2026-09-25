@@ -613,6 +613,7 @@ export interface ClaimOptions {
 
 /** Why `agentId` may not claim `item` now, or `null`. The same checks `claim` refuses with, for `next`. */
 export function claimRefusal(book: PlanBook, call: PlanCall, agentId: AgentId, item: StoredItem): PlanRuleError | null {
+    if (!call.members.includes(agentId)) return new PlanRuleError('forbidden', `@${agentId} is not a member of this project`);
     if (item.state === 'done') return new PlanRuleError('done', `#${item.id} is done`);
     const waits = waitsOn(book, item);
     if (waits.length) return new PlanRuleError('blocked', `#${item.id} waits on ${waits.map((n) => `#${n}`).join(', ')}`);
