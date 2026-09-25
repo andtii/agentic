@@ -16,7 +16,7 @@ import { clientDefs } from '../../src/actors/client';
 import { chatKeyOf } from '../../src/actors/keys';
 import { topbarFor } from '../../src/components/topbar';
 import { chatHead } from '../../src/pages/chat/head';
-import { createChatWith } from '../../src/pages/chat/LiveChats';
+import { createChatWith, folderMachineFor } from '../../src/pages/chat/LiveChats';
 import { projectHead } from '../../src/pages/projects/head';
 import { saveProjectWith } from '../../src/pages/projects/LiveProjects';
 import { USER, WS, mountLive, owner, startLive, texts, tick, until, type LiveHarness } from './live-harness';
@@ -121,5 +121,14 @@ describe('projects on the live pages (#333)', () => {
         // A refused save (a folder outside the roots) shows the actor's 400 inline and keeps the page.
         await expect(saveProjectWith(defs, USER, { id: id as never, folders: { [projectFolderKey(win.machineId)]: 'D:\\elsewhere' } })).rejects.toThrow(/outside the roots/);
         await tick();
+    });
+
+    it('a prefilled folder is saved on the chat\u2019s machine only when it reports the environment, else on the one that does (#702)', () => {
+        const hosted = (machineId: string, environmentId: string) => machineId === 'win' && environmentId === 'env_claude';
+        const machineOf = () => 'win';
+        expect(folderMachineFor('env_claude', 'win', machineOf, hosted)).toBe('win');
+        expect(folderMachineFor('env_claude', 'mac', machineOf, hosted)).toBe('win');
+        expect(folderMachineFor('env_claude', null, machineOf, hosted)).toBe('win');
+        expect(folderMachineFor('env_claude', null)).toBeUndefined();
     });
 });

@@ -81,6 +81,9 @@ describe('folders and origins', () => {
         ]);
         // A machine no longer listed keeps its id; a pre-#702 key is labelled by an environment of that id.
         expect(projectPlaces({ folders: { 'gone/*': '/x', env_alien01_personal: 'C:\\Users\\andy\\x' } }, machines).map((p) => p.label)).toEqual(['gone', 'alien01 / personal']);
+        // The same environment id on two machines: the one whose roots hold the folder names it.
+        const both: ProjectMachine[] = [{ id: 'mac', name: 'mac', environments: [environment('env_claude', 'mac / claude', 'darwin', ['/Users/me'])] }, { id: 'win', name: 'win', environments: [environment('env_claude', 'win / claude', 'windows', ['C:\\Dev'])] }];
+        expect(projectPlaces({ folders: { env_claude: 'C:\\Dev\\agentic' } }, both).map((p) => p.label)).toEqual(['win / claude']);
     });
 });
 

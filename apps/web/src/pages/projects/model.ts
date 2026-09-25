@@ -180,7 +180,9 @@ export function projectPlaces(project: Pick<ProjectRecord, 'folders'>, machines:
     for (const [key, path] of Object.entries(project.folders)) {
         const parsed = typeof path === 'string' ? parseProjectFolderKey(key) : null;
         if (!parsed) continue;
-        const machine = parsed.machineId !== undefined ? machines.find((m) => m.id === parsed.machineId) : machines.find((m) => m.environments.some((e) => e.id === parsed.environmentId));
+        // A pre-#702 key names only an environment: the machine whose environment of that id holds the folder, else the first reporting it.
+        const reporting = (m: ProjectMachine) => m.environments.find((e) => e.id === parsed.environmentId);
+        const machine = parsed.machineId !== undefined ? machines.find((m) => m.id === parsed.machineId) : (machines.find((m) => { const e = reporting(m); return !!e && reaches(e, path!); }) ?? machines.find((m) => !!reporting(m)));
         const env = parsed.environmentId !== undefined ? machine?.environments.find((e) => e.id === parsed.environmentId) : undefined;
         const label = parsed.environmentId !== undefined ? (env?.label ?? parsed.environmentId) : (machine?.name ?? parsed.machineId!);
         out.push({ key, label, path: path! });
