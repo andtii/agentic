@@ -110,7 +110,7 @@ import {
 
     definePlanActor,
 
-    // slot #758 Requests actor import — replace this line
+    defineRequestsActor,
 } from '@agentic/platform';
 import { learningDefaultPlugin } from '@agentic/learning';
 import { actor, type AnyActorDefinition, type Host } from '@sigx/actors';
@@ -301,7 +301,7 @@ export function platformActors(ports: PlatformPorts = defaultPorts): readonly An
 
         definePlanActor(),
 
-        // slot #758 Requests actor registration — replace this line
+        defineRequestsActor(),
     ];
 }
 
@@ -365,7 +365,7 @@ export function platformDefs(actors: readonly AnyActorDefinition[] = defaultActo
 
         Plan: byType('plan') as ActorDefs['Plan'],
 
-        // slot #758 Requests actor SSR def — replace this line
+        Requests: byType('requests') as ActorDefs['Requests'],
     };
 }
 

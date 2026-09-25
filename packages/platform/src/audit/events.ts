@@ -10,7 +10,7 @@
  * contract the history page and other emitters (delegation, #39) build on.
  */
 
-import type { AccountKey, AgentId, ChatId, EnvErrorCode, EnvironmentId, Limits, MachineId, OfflinePolicy, PermissionScope, PlanActor, ProjectFeatureReleaseReason, ProjectId, ReleaseChannel, RuntimeId, SessionClosedCode, SessionId, TaskId, TaskStatus, ToolMode, UpdatePolicy, WaitReason } from '@agentic/core';
+import type { AccountKey, AgentId, ChatId, EnvErrorCode, EnvironmentId, Limits, MachineId, OfflinePolicy, PermissionScope, PlanActor, ProjectFeatureReleaseReason, ProjectId, ReleaseChannel, RequestState, RuntimeId, SessionClosedCode, SessionId, TaskId, TaskStatus, ToolMode, UpdatePolicy, WaitReason } from '@agentic/core';
 
 export const AUDIT_KINDS = [
     'approval.requested',
@@ -62,7 +62,7 @@ export const AUDIT_KINDS = [
     'plan.changed',
     'plan.lease-expired',
 
-    // slot #758 requests audit kinds — replace this line
+    'request.changed',
 ] as const;
 
 export type AuditKind = (typeof AUDIT_KINDS)[number];
@@ -476,7 +476,19 @@ export interface PlanChangedData {
     readonly actor?: PlanActor;
 }
 
-// slot #758 requests audit data shapes — replace this line
+/**
+ * `request.changed` (#758): one transition of a request sent to `projectId` — `op` names it (`received`, `triaged`,
+ * `accepted`, …), `state` is where it landed and `actor` is who moved it; an accept names the plan item it became.
+ */
+export interface RequestChangedData {
+    readonly projectId: ProjectId;
+    readonly requestId: string;
+    readonly fromProject: ProjectId;
+    readonly op: string;
+    readonly state: RequestState;
+    readonly actor: PlanActor;
+    readonly resultItem?: number;
+}
 
 /** The per-kind payload. */
 export interface AuditDataByKind {
@@ -529,7 +541,7 @@ export interface AuditDataByKind {
     readonly 'plan.changed': PlanChangedData;
     readonly 'plan.lease-expired': PlanChangedData;
 
-    // slot #758 requests audit data by kind — replace this line
+    readonly 'request.changed': RequestChangedData;
 }
 
 /** What an emitter hands `record` / `recordAudit`: one kind, its data, the common fields. */

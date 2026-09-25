@@ -40,6 +40,6 @@ export function clientDefs(): ActorDefs {
 
         Plan: ref('plan'),
 
-        // slot #758 Requests actor stub — replace this line
+        Requests: ref('requests'),
     };
 }

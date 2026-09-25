@@ -20,7 +20,7 @@ import type { PullsActor } from '@agentic/platform';
 
 import type { PlanStoreActor } from '@agentic/platform';
 
-// slot #758 Requests actor type import — replace this line
+import type { RequestsActor } from '@agentic/platform';
 
 export interface ActorDefs {
     readonly Workspace: typeof Workspace;
@@ -56,7 +56,8 @@ export interface ActorDefs {
     /** One per project — its plans, queues, claims and leases (#750). */
     readonly Plan: PlanStoreActor;
 
-    // slot #758 Requests actor def — replace this line
+    /** One per project — the requests sent to it, triaged by its manager (#758). */
+    readonly Requests: RequestsActor;
 }
 
 export const useActorDefs = defineInjectable<ActorDefs>('ActorDefs', { hint: 'app.defineProvide(useActorDefs, () => clientDefs()) in the entry (see src/actors/defs.ts).' });
