@@ -4,7 +4,7 @@ import { test, expect, type Page } from '@playwright/test';
  * The projects redesign at the three widths (#766, PRJ-19; `docs/design/HANDOFF.md` → "Responsive behaviour"): no
  * project page scrolls sideways, the fixed right rails drop under the main column below 1280, three-column grids
  * become two and then one, and the main flows work end to end on mock data — open a project, its sub-menu to Work,
- * a pull request; the Plan list to the board and a drag; accepting a request; the phone's drawer and back link.
+ * a pull request; the Plan list to the board and a drag; accepting a request; the phone's drawer, back link and project sub-menu.
  * Board and link-graph canvases scroll inside their own box by design; only the page itself must not.
  */
 const shell = (part: string) => `[data-scope="ai-shell"][data-part="${part}"]`;
@@ -65,7 +65,7 @@ test('open a project, go to Work, open a pull request', async ({ page }) => {
         await expect(nav.locator('[data-scope="nav-list"][data-part="link"][href="/projects/p_agentic"]')).toHaveAttribute('aria-current', 'page');
         await nav.locator('[data-scope="nav-list"][data-part="link"][href="/projects/p_agentic/work"]').click();
     } else {
-        // The phone has no sidebar on a project page (a back link instead of Menu): Overview links to Work.
+        // On the phone the Overview's own card links to Work too (the sheet's sub-menu is the other way, below).
         await page.locator('[data-overview-main]').getByRole('link', { name: 'All work →' }).click();
     }
     await expect(page).toHaveURL(/\/projects\/p_agentic\/work$/);
@@ -112,6 +112,22 @@ test('accept an incoming request as proposed', async ({ page }) => {
 test.describe('phone', () => {
     test.skip(({ viewport }) => (viewport?.width ?? 0) >= 768, 'the phone regime');
 
+    test('a project page keeps Menu beside Back, and its sub-menu reaches Requests in two taps (#923)', async ({ page }) => {
+        await page.goto('/projects/p_agentic/work');
+        await expect(page.locator(shell('back')).getByRole('link', { name: 'Back' })).toBeVisible();
+        await page.getByRole('button', { name: 'Menu' }).click();
+        const panel = page.locator(drawerPanel);
+        await expect(panel).toBeVisible();
+        const sub = panel.locator('[data-nav-children]');
+        for (const href of ['/projects/p_agentic', '/projects/p_agentic/chats', '/projects/p_agentic/requests', '/projects/p_agentic/plan', '/projects/p_agentic/code', '/projects/p_agentic/settings/general']) {
+            await expect(sub.locator(`a[href="${href}"]`)).toBeVisible();
+        }
+        await sub.locator('a[href="/projects/p_agentic/requests"]').click();
+        await expect(page).toHaveURL(/\/projects\/p_agentic\/requests$/);
+        await expect(panel).toBeHidden();
+        await expect(page.locator('[data-requests-row="req_7c2a"]')).toBeVisible();
+    });
+
     test('the drawer opens from /projects, a project page gets a back link, and grids are one column', async ({ page }) => {
         await page.goto('/projects');
         const menu = page.getByRole('button', { name: 'Menu' });
@@ -125,7 +141,6 @@ test.describe('phone', () => {
         expect(await columns(page, '[data-projects-grid]')).toBe(1);
 
         await page.goto('/projects/p_agentic/work');
-        await expect(page.getByRole('button', { name: 'Menu' })).toBeHidden();
         await page.locator(shell('back')).getByRole('link', { name: 'Back' }).click();
         await expect(page).toHaveURL(/\/projects\/p_agentic$/);
 

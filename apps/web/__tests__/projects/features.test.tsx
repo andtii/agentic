@@ -23,6 +23,8 @@ import { USER, mountLive, startLive, until, type LiveHarness } from '../pages/li
 const settle = async (): Promise<void> => { for (let i = 0; i < 3; i++) await new Promise((r) => setTimeout(r, 0)); };
 const GIT = 'agentic.feature.git';
 const PLAN = 'mock.feature.plan';
+// The real Plan feature the sample project has on (#923), beside the catalogue's mock Plan.
+const PLAN_ON = 'agentic.feature.plan';
 const byId = (id: string) => MOCK_FEATURE_CATALOGUE.find((e) => e.id === id)!;
 const agentic = PROJECTS.find((p) => p.id === 'p_agentic')!;
 const bare: ProjectRecord = { ...agentic, folders: {}, features: { [PLAN]: {} } };
@@ -53,7 +55,7 @@ describe('features view model (#736)', () => {
     it('enable, save and remove are one feature key of a patch; the mock merge follows upsertProject', () => {
         expect(featurePatch(agentic, PLAN, { template: 'sprint' })).toEqual({ id: 'p_agentic', features: { [PLAN]: { template: 'sprint' } } });
         expect(removePatch(agentic, GIT)).toEqual({ id: 'p_agentic', features: { [GIT]: null } });
-        expect(Object.keys(applyFeaturesPatch(agentic.features, { features: { [GIT]: null, [PLAN]: {} } }))).toEqual([PLAN]);
+        expect(Object.keys(applyFeaturesPatch(agentic.features, { features: { [GIT]: null, [PLAN]: {} } }))).toEqual([PLAN_ON, PLAN]);
     });
 
     it('a feature the catalogue does not know is still listed by its id', () => {
@@ -73,7 +75,7 @@ describe('features view model (#736)', () => {
 describe('/projects/:id/settings/features (mock)', () => {
     it('lists what is on with slot marks, the catalogue of the rest and the first feature’s detail', async () => {
         const dom = await mountRoute('/projects/p_agentic/settings/features');
-        expect(rows(dom)).toEqual([GIT]);
+        expect(rows(dom)).toEqual([GIT, PLAN_ON]);
         const marks = dom.querySelector(`[data-feature-row="${GIT}"] [data-ag-project="slot-marks"]`)!;
         expect(marks.getAttribute('data-used')).toContain('section');
         expect(tiles(dom)).not.toContain(GIT);
@@ -98,7 +100,7 @@ describe('/projects/:id/settings/features (mock)', () => {
         const dom = await mountRoute('/projects/p_agentic/settings/features');
         tile(dom, PLAN).querySelector<HTMLButtonElement>('button[aria-label="Add Plan"]')!.click();
         await settle();
-        expect(rows(dom)).toEqual([GIT, PLAN]);
+        expect(rows(dom)).toEqual([GIT, PLAN_ON, PLAN]);
         const detail = dom.querySelector<HTMLElement>(`[data-feature-detail="${PLAN}"]`)!;
         expect([...detail.querySelectorAll('[data-feature-slot] strong')].map((s) => s.textContent)).toEqual(['Section', 'Overview card', 'Work stages', 'Chat context', 'Agent instructions and tools']);
         const preset = detail.querySelector<HTMLSelectElement>(`select[name="feature-${PLAN}-preset"]`)!;
@@ -108,7 +110,7 @@ describe('/projects/:id/settings/features (mock)', () => {
         expect(detail.querySelector<HTMLSelectElement>(`[name="feature-${PLAN}.template"]`)!.value).toBe('sprint');
         [...detail.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Remove from project')!.click();
         await settle();
-        expect(rows(dom)).toEqual([GIT]);
+        expect(rows(dom)).toEqual([GIT, PLAN_ON]);
         expect(tiles(dom)).toContain(PLAN);
     });
 });

@@ -86,7 +86,11 @@ export type AppShellProps =
     & Define.Prop<'flush', boolean>
     /** The app bar's title below 768 px (16 / 600) — the breadcrumb's current page. */
     & Define.Prop<'title', string>
-    /** Below 768 px a back link replaces the menu button — the breadcrumb's parent. */
+    /**
+     * Below 768 px a back link replaces the menu button — the breadcrumb's parent. While the navigation carries a
+     * sub-menu for the current route (a project's own menu, #923) the menu stays beside it, so the sub-menu is one tap
+     * away on the phone too.
+     */
     & Define.Prop<'back', string>
     /** The sub-menu's switcher was pressed (#727): the entry carrying it — the app opens its picker. */
     & Define.Event<'switch', NavItem>
@@ -243,6 +247,10 @@ export const AppShell = component<AppShellProps>(({ props, slots, emit }) => {
         </>
     );
 
+    // The current route opens an entry's sub-menu: the phone keeps its menu beside the back link (#923).
+    const hasSubMenu = (): boolean => groups().some((group) => group.items.some((item) =>
+        isActive(item, props.currentPath) && !!item.children?.some((child) => child.items.length)));
+
     // The app bar's leading control on a detail route: back to the breadcrumb's parent.
     const backLink = (href: string) => {
         const icon = <Icon name="back" size={20} />;
@@ -269,13 +277,14 @@ export const AppShell = component<AppShellProps>(({ props, slots, emit }) => {
                     {foot()}
                 </Drawer.Panel>
                 <div data-scope={SHELL_SCOPE} data-part="body">
-                    <div data-scope={SHELL_SCOPE} data-part="bar" data-regime={props.back ? 'detail' : 'root'}>
+                    <div data-scope={SHELL_SCOPE} data-part="bar" data-regime={props.back ? 'detail' : 'root'} data-sub-menu={hasSubMenu() ? '' : undefined}>
                         <Navbar.Root>
                             <Navbar.Start>
+                                {/* Back leads, so with a sub-menu (#923) the focus order matches the phone's Back, Menu. */}
+                                {props.back ? backLink(props.back) : null}
                                 <Drawer.Trigger asChild>
                                     {(p: PartProps) => <button type="button" aria-label="Menu" {...p}><Icon name="menu" size={20} /></button>}
                                 </Drawer.Trigger>
-                                {props.back ? backLink(props.back) : null}
                                 <div data-scope={SHELL_SCOPE} data-part="breadcrumb">{slots.breadcrumb?.()}</div>
                                 {props.title ? (
                                     <div data-scope={SHELL_SCOPE} data-part="title">
