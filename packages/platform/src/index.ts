@@ -22,6 +22,6 @@ export * from './policy/index.js';
 
 export * from './pulls/index.js';
 
-// slot #750 Plan actor exports — replace this line
+export * from './plan/index.js';
 
 // slot #758 Requests actor exports — replace this line

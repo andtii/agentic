@@ -10,7 +10,7 @@
  * contract the history page and other emitters (delegation, #39) build on.
  */
 
-import type { AccountKey, AgentId, ChatId, EnvErrorCode, EnvironmentId, Limits, MachineId, OfflinePolicy, PermissionScope, ProjectFeatureReleaseReason, ProjectId, ReleaseChannel, RuntimeId, SessionClosedCode, SessionId, TaskId, TaskStatus, ToolMode, UpdatePolicy, WaitReason } from '@agentic/core';
+import type { AccountKey, AgentId, ChatId, EnvErrorCode, EnvironmentId, Limits, MachineId, OfflinePolicy, PermissionScope, PlanActor, ProjectFeatureReleaseReason, ProjectId, ReleaseChannel, RuntimeId, SessionClosedCode, SessionId, TaskId, TaskStatus, ToolMode, UpdatePolicy, WaitReason } from '@agentic/core';
 
 export const AUDIT_KINDS = [
     'approval.requested',
@@ -59,7 +59,8 @@ export const AUDIT_KINDS = [
     'pull.merged',
     'pull.closed',
 
-    // slot #750 plan audit kinds — replace this line
+    'plan.changed',
+    'plan.lease-expired',
 
     // slot #758 requests audit kinds — replace this line
 ] as const;
@@ -463,7 +464,17 @@ export interface PullSettledData {
     readonly chatId?: ChatId;
 }
 
-// slot #750 plan audit data shapes — replace this line
+/**
+ * `plan.changed` / `plan.lease-expired` (#750): one change to a project's plans — `op` names it (`claimed`,
+ * `assigned`, `done`, …) and `actor` is who made it; a lease that ran out is by `system:plan`, with no actor.
+ */
+export interface PlanChangedData {
+    readonly projectId: ProjectId;
+    readonly op: string;
+    readonly planId?: string;
+    readonly itemId?: number;
+    readonly actor?: PlanActor;
+}
 
 // slot #758 requests audit data shapes — replace this line
 
@@ -515,7 +526,8 @@ export interface AuditDataByKind {
     readonly 'pull.merged': PullSettledData;
     readonly 'pull.closed': PullSettledData;
 
-    // slot #750 plan audit data by kind — replace this line
+    readonly 'plan.changed': PlanChangedData;
+    readonly 'plan.lease-expired': PlanChangedData;
 
     // slot #758 requests audit data by kind — replace this line
 }
