@@ -63,12 +63,14 @@ const chat = () => app.as(user).actor(Chat, `${ws}:chat:${chatId}`);
 describe('startTurn', () => {
     it('posts in the chat addressed to the agent and routes a task from that message', async () => {
         await chat().addAgent(forge);
-        await port().startTurn({ agentId: forge, chatId, text: 'Autopilot: fix it', pr });
+        const started = await port().startTurn({ agentId: forge, chatId, text: 'Autopilot: fix it', pr });
         const { entries } = await chat().history(null, 10);
         const msg = entries.map((e) => e.entry).find((e) => e.t === 'msg');
         expect(msg).toMatchObject({ mentions: [forge], parts: [{ type: 'text', text: 'Autopilot: fix it' }] });
         for (let i = 0; i < 20 && ran.length === 0; i++) await new Promise((r) => setTimeout(r, 5));
         expect(ran).toHaveLength(1);
+        // The turn's task comes back, so the Pulls actor ends the turn when it ends (#858).
+        expect(started).toEqual({ taskId: ran[0] });
         const task = await app.as(user).actor(TaskActor, taskKey(ws, ran[0]!)).get();
         expect(task).toMatchObject({ owner: forge, objective: 'Autopilot: fix it', assignee: forge, origin: { kind: 'user', chatId } });
     });

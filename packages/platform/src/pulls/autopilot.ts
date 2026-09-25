@@ -30,6 +30,8 @@ export interface AutopilotTurn {
     readonly startedAt: number;
     /** When the chat said the turn ended (`autopilotTurnEnded`). */
     readonly endedAt?: number;
+    /** The task the turn runs as, when the port said (#858): its end is the turn's end. */
+    readonly taskId?: TaskId;
     /** fix: the checks that were failing. */
     readonly checks?: readonly string[];
     /** threads: the thread ids it took up. */
@@ -287,8 +289,11 @@ export function withAutopilotRun(pr: PullRequest, run: AutopilotRun): PullReques
 
 /** What the autopilot acts through; the app wires it to the Chat/Router and the git feature's merge. */
 export interface AutopilotPort {
-    /** Start a turn for `agentId` in `chatId` with `text` (on `taskId`, when the PR has one). */
-    startTurn(turn: { readonly agentId: AgentId; readonly chatId: ChatId; readonly taskId?: TaskId; readonly text: string; readonly pr: PullRequest }): Promise<void>;
+    /**
+     * Start a turn for `agentId` in `chatId` with `text` (on `taskId`, when the PR has one). May return the task the
+     * turn runs as, kept on the run's turn so its end ends the turn (#858).
+     */
+    startTurn(turn: { readonly agentId: AgentId; readonly chatId: ChatId; readonly taskId?: TaskId; readonly text: string; readonly pr: PullRequest }): Promise<void | { readonly taskId?: TaskId }>;
     /** Merge through `rule` (the approval rule `ask on merge`): `merged`, or not with why. */
     merge(request: { readonly agentId: AgentId; readonly rule: ApprovalRule; readonly pr: PullRequest }): Promise<{ readonly merged: boolean; readonly reason?: string }>;
     /** It stopped: the next move is yours (#747 notifies). */
@@ -305,7 +310,9 @@ export async function driveAutopilot(port: AutopilotPort, run: AutopilotRun, pr:
     for (const action of step.actions) {
         if (action.kind === 'turn') {
             try {
-                await port.startTurn({ agentId: action.agentId, chatId: action.chatId, ...(action.taskId !== undefined ? { taskId: action.taskId } : {}), text: action.text, pr });
+                const started = await port.startTurn({ agentId: action.agentId, chatId: action.chatId, ...(action.taskId !== undefined ? { taskId: action.taskId } : {}), text: action.text, pr });
+                const taskId = started ? started.taskId : undefined;
+                if (taskId !== undefined && out.turn) out = { ...out, turn: { ...out.turn, taskId } };
             } catch (error) {
                 const stop: AutopilotStop = { reason: 'gave-up', detail: `Autopilot could not start a turn for #${pr.number}: ${messageOf(error)}`, at: now };
                 // The turn never started: nothing it would have taken up counts as done.

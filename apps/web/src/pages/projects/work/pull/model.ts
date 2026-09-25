@@ -165,5 +165,35 @@ export const autopilotOff = (a: Autopilot): Autopilot => {
     return { ...rest, fixChecks: false, answerThreads: false, rebase: false, mergeWhenGreen: false };
 };
 
+/** The switches `Pulls.setAutopilot` takes: the autopilot without what the run fills. */
+export type PullSwitches = Omit<Autopilot, 'attempt' | 'activity'>;
+
+export const switchesOf = (a: Autopilot): PullSwitches => {
+    const { activity: _activity, attempt: _attempt, ...rest } = a;
+    return rest;
+};
+
+/** Where the PR's autopilot run stands, live (`PullsView.runs`, #858): paused (off or stopped) and asking to merge. */
+export interface PullRunState {
+    readonly paused?: string;
+    readonly askingMerge?: true;
+}
+
+/** The autopilot's activity while a merge waits on your answer. */
+export const ASKING_TO_MERGE = 'Asking to merge';
+
+/** Whether the PR's autopilot waits on your Approve / Decline of its merge: the run says so, else its activity. */
+export const asksToMerge = (pr: PullRequest, run: PullRunState | undefined): boolean =>
+    pr.state === 'open' && !!pr.autopilot && (run ? run.askingMerge === true : pr.autopilot.activity === ASKING_TO_MERGE);
+
+/** The page's writes, live (#858): the Pulls actor's autopilot methods for this PR. */
+export interface PullActions {
+    setAutopilot(switches: PullSwitches | null): Promise<unknown>;
+    takeOver(): Promise<unknown>;
+    stopAutopilot(): Promise<unknown>;
+    resumeAutopilot(): Promise<unknown>;
+    answerMerge(approve: boolean): Promise<unknown>;
+}
+
 /** The PR a route's number names. */
 export const findPull = <T extends { readonly pr: Pick<PullRequest, 'number'> }>(list: readonly T[], n: number): T | undefined => list.find((d) => d.pr.number === n);

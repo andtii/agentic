@@ -165,7 +165,7 @@ describe('the pull request page on the live wire (#744)', () => {
         await h.stop();
     });
 
-    it('reads the PR from Pulls.get, with the actions shown but disabled', { timeout: 20_000 }, async () => {
+    it('reads the PR from Pulls.get, with the autopilot controls live (#858)', { timeout: 20_000 }, async () => {
         const forge = await h.agent('Forge', 'Builds things');
         const { id } = await saveProjectWith(clientDefs(), USER, { name: 'agentic', members: { agentIds: [forge], coordinator: forge }, folders: {}, connectors: [], features: {} });
         await h.app.as(owner).actor(definePullsActor({ sources: { open: () => source } }), pullsKey(WS, id)).watch({ provider: 'github', repo: 'andtii/agentic' });
@@ -173,8 +173,8 @@ describe('the pull request page on the live wire (#744)', () => {
         await until(() => dom.querySelector('[data-pull-title]') !== null, 'the PR');
         expect(dom.querySelector('[data-pull-title]')?.textContent).toBe('ui: member card usage rings');
         expect(dom.querySelector('[data-pull-blockers]')?.textContent).toBe('Blocked: 1 failing check, 1 check running, 2 open threads, Lint has not approved.');
-        expect(dom.querySelector<HTMLButtonElement>('button[name="stop-autopilot"]')?.disabled).toBe(true);
-        expect([...dom.querySelectorAll<HTMLInputElement>('[data-pull-autopilot] input[role="switch"]')].every((s) => s.disabled)).toBe(true);
+        expect(dom.querySelector<HTMLButtonElement>('button[name="stop-autopilot"]')?.disabled).toBe(false);
+        expect([...dom.querySelectorAll<HTMLInputElement>('[data-pull-autopilot] input[role="switch"]')].some((s) => s.disabled)).toBe(false);
 
         const gone = await mountLive(`/projects/${id}/work/pr:9999`, h);
         await until(() => gone.textContent?.includes('No pull request #9999') ?? false, 'the not-found state');
