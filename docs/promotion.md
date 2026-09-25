@@ -137,6 +137,8 @@ One slot per sub-issue of [#722](https://github.com/andtii/agentic/issues/722). 
 
 - #751: `planNext` / `planClaimRefusal` / `planTouchWarnings` in `packages/runtimes/src/tools/plan.ts` are pure plan rules over core types; if the Plan actor (#750) or the web needs the same next-item pick, promote them to `packages/core/src/plan.ts`.
 
+- #816: `planHandle` / `resolvePlanMember` in `packages/platform/src/plan/port.ts` name members by a slug of their display name; if chat mentions or refs (`@lint`) need the same resolution, promote them to `packages/core/src/refs.ts`.
+
 - #752: — (daemon-only git read; nothing generic)
 
 - #753: — (plan feature manifest, presets and instructions; nothing generic)

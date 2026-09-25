@@ -41,10 +41,18 @@
  * `chat.project-set` under the agent. Matching a project to the message is
  * the model's job; the tool's own guard (a chat already in a project) runs
  * in `@agentic/runtimes`.
+ *
+ * Plan (#816, PRJ-11/12): `plan` is the Plan actor of the session's project
+ * (the current task's, else the chat's) under the agent's principal, mapped
+ * by `createPlanPort`. The project record is read as the workspace's user
+ * (like `projects.list`); the actor's refusals come back as tool errors with
+ * its words unchanged. A file ref is pinned through the session's machine
+ * (`fs` `pin`, #752) when its daemon has the `pin` feature, else stored
+ * unpinned. After each call the agent's notices go to the session's chat.
  */
 
-import { actorKey, chatFileUri, createId, isTerminal, MODEL_IMAGE_TYPES, parseChatFileUri, projectFolderPlaces, type AgentId, type ChatFile, type ChatFileStore, type ChatId, type EnvironmentId, type MachineId, type MemoryEntry, type MemoryStore, type MessageId, type Principal, type PromptPart, type SessionId, type TaskId, type TaskStatus, type WorkspaceId } from '@agentic/core';
-import { describeEnvironments, type ChatPost, type ChatPostResult, type DelegateCall, type DelegateEnvironment, type DelegateOutcome, type DelegateSpec, type PlatformPorts, type ProjectSummary, type TaskReport } from '@agentic/runtimes';
+import { actorKey, chatFileUri, createId, isTerminal, MODEL_IMAGE_TYPES, parseChatFileUri, projectFolderPlaces, type AgentId, type ChatFile, type ChatFileStore, type ChatId, type EnvironmentId, type FileRef, type FsResult, type MachineId, type MemoryEntry, type MemoryStore, type MessageId, type Principal, type ProjectId, type PromptPart, type SessionId, type TaskId, type TaskStatus, type WorkspaceAnswer, type WorkspaceId } from '@agentic/core';
+import { describeEnvironments, type ChatPost, type ChatPostResult, type DelegateCall, type DelegateEnvironment, type DelegateOutcome, type DelegateSpec, type PlatformPorts, type PlanPort, type ProjectSummary, type TaskReport, type ToolCall } from '@agentic/runtimes';
 import { actor, type ActorClientWith, type AnyActorDefinition } from '@sigx/actors';
 import { isServerFnError } from '@sigx/server';
 
@@ -56,6 +64,10 @@ import { ToolCallError } from '../machine/ports.js';
 import { machineKey } from '../machine/state.js';
 import { usageLimitsOf } from '../machine/usage.js';
 import { Memory, memoryActorKey } from '../memory/index.js';
+import { definePlanActor } from '../plan/actor.js';
+import { planKey } from '../plan/key.js';
+import { createPlanPort, type PlanActorClient } from '../plan/port.js';
+import type { PlanNotice } from '../plan/rules.js';
 import { answerText, type RequestResolvedEvent } from '../policy/requests.js';
 import type { DetachedInput, PlatformInputRequest, PlatformRequestRef } from '../session/actor.js';
 import { checkDepth, TaskActor, taskKey, type TaskOutcome, type TaskView } from '../task/index.js';
@@ -79,6 +91,27 @@ interface SessionAskClient {
     raiseInput(input: PlatformInputRequest): Promise<PlatformRequestRef>;
     resolution(requestId: string): AsyncIterable<RequestResolvedEvent>;
     detachInput(requestId: string): Promise<DetachedInput>;
+}
+
+/**
+ * The Plan actor as a client handle (#816): only its `type` addresses the object; the host runs its own definition.
+ * Made on first use — `plan/actor` reaches this module back through the Workspace, so it is not ready at import.
+ */
+let planStore: ReturnType<typeof definePlanActor> | undefined;
+const PlanStore = () => (planStore ??= definePlanActor());
+
+/** The slice of the Machine actor `plan_ref` pins a file ref through (#752). */
+interface PinMachineClient {
+    get(): Promise<Pick<MachineView, 'online' | 'features'>>;
+    fsRequest(environmentId: EnvironmentId, op: { readonly kind: 'pin'; readonly root: string; readonly path: string; readonly from: number; readonly to: number }): Promise<{ readonly requestId: string }>;
+    fsAnswer(requestId: string): AsyncIterable<WorkspaceAnswer<FsResult>>;
+}
+
+/** A Plan refusal as the code a daemon (and the model) sees — the rule's own (`blocked`, `taken`, …) — with the actor's words unchanged. */
+function asPlanToolError(e: unknown): unknown {
+    if (e instanceof ToolCallError || !isServerFnError(e)) return e;
+    const code = (e.data as { code?: unknown } | null | undefined)?.code;
+    return new ToolCallError(typeof code === 'string' ? code : e.status === 403 ? 'forbidden' : e.status === 404 ? 'not-found' : 'invalid', e.message);
 }
 
 /**
@@ -440,10 +473,100 @@ export function createActorToolPorts(options: ActorToolPortsOptions): PlatformPo
         }
     };
 
+    const plan = planPort();
+
+    /**
+     * The `plan_*` port (#816): the Plan actor of the session's project under the agent. The project is the current
+     * task's, else the chat's, looked up on every call — a chat can be moved into a project mid-session.
+     */
+    function planPort(): PlanPort {
+        const workspaceUser = () => asPrincipal(userPrincipal(workspaceId, workspaceId));
+        async function projectOf(): Promise<ProjectId | undefined> {
+            const { taskId } = principalNow();
+            if (taskId) {
+                const view = await task(taskId)
+                    .get()
+                    .catch(() => undefined);
+                if (view?.projectId !== undefined) return view.projectId;
+            }
+            if (!chatId) return undefined;
+            const summary = await as(Chat, agentChatKey(workspaceId, chatId))
+                .get()
+                .catch(() => undefined);
+            return summary?.projectId;
+        }
+        const port = createPlanPort({
+            me: agentId,
+            taskId: () => principalNow().taskId,
+            async scope() {
+                const projectId = await projectOf();
+                if (projectId === undefined) throw new ToolCallError('unsupported', 'plan: this session is in no project, and a plan belongs to a project');
+                const project = (await actor(Workspace, workspaceKey(workspaceId)).with({ context: workspaceUser() }).projects()).find((p) => p.id === projectId);
+                if (!project) throw new ToolCallError('unsupported', `plan: project ${projectId} no longer exists`);
+                const names = new Map<AgentId, string>();
+                await Promise.all(
+                    project.members.agentIds.map(async (id) => {
+                        const name = await as(AgentActor, agentKey(workspaceId, id))
+                            .get()
+                            .then((a) => a.config.name, () => undefined);
+                        if (name) names.set(id, name);
+                    })
+                );
+                return { plan: as(PlanStore(), planKey(workspaceId, projectId)) as unknown as PlanActorClient, project, names, users: [workspaceId] };
+            },
+            pin: pinFileRef,
+            ...(chatId ? { deliver: (notices: readonly PlanNotice[]) => deliverNotices(chatId, notices) } : {})
+        });
+        // The actor's refusals keep their words; the daemon sees the rule's code (`blocked`, `taken`, …).
+        const wrap =
+            <A extends unknown[], R>(fn: (...args: A) => Promise<R>) =>
+            async (...args: A): Promise<R> => {
+                try {
+                    return await fn(...args);
+                } catch (e) {
+                    throw asPlanToolError(e);
+                }
+            };
+        return { board: wrap(port.board), claim: wrap(port.claim), assign: wrap(port.assign), update: wrap(port.update), ref: wrap(port.ref), add: wrap(port.add), handoff: wrap(port.handoff) };
+    }
+
+    /**
+     * `plan_ref` on a file (#752): the lines pinned to the HEAD commit of the session's folder, through its machine —
+     * only when the session runs in a folder on a machine whose daemon has the `pin` feature. `undefined`: unpinned.
+     */
+    async function pinFileRef(ref: FileRef, call: ToolCall): Promise<FileRef | undefined> {
+        const sessionDef = options.sessions?.();
+        const machineDef = options.machines?.();
+        if (!sessionDef || !machineDef || !sessionId) return undefined;
+        const info = (await as(sessionDef, actorKey(workspaceId, 'session', sessionId as SessionId)).get()) as { readonly spec?: { readonly machineId?: MachineId; readonly environmentId?: EnvironmentId; readonly cwd?: string } };
+        const spec = info.spec;
+        if (!spec?.machineId || !spec.environmentId || !spec.cwd) return undefined;
+        const machine = as(machineDef, machineKey(workspaceId, spec.machineId)) as unknown as PinMachineClient;
+        const view = await machine.get();
+        if (!view.online || !view.features?.includes('pin')) return undefined;
+        const { requestId } = await machine.fsRequest(spec.environmentId, { kind: 'pin', root: spec.cwd, path: ref.path, from: ref.from, to: ref.to });
+        const answers = machine.fsAnswer(requestId)[Symbol.asyncIterator]();
+        try {
+            const next = await answers.next();
+            if (call.signal.aborted || next.done || next.value.error) return undefined;
+            const result = next.value.result;
+            return result.kind === 'pin' ? { kind: 'file', path: ref.path, from: result.from, to: result.to, sha: result.sha } : undefined;
+        } finally {
+            await answers.return?.().catch(() => undefined);
+        }
+    }
+
+    /** The agent's plan notices, as one post in the session's chat — best effort, and waking nobody. */
+    async function deliverNotices(chatId: ChatId, notices: readonly PlanNotice[]): Promise<void> {
+        const text = ['Plan notices:', ...notices.map((n) => `- #${n.itemId}: ${n.text}`)].join('\n');
+        await as(Chat, agentChatKey(workspaceId, chatId)).post(text, []);
+    }
+
     return {
         ...(files ? { files } : {}),
         ...(usage ? { usage } : {}),
         projects,
+        plan,
         memory: {
             search: async (query) => memory().query(query),
             remember: async (entry): Promise<MemoryEntry> => {
