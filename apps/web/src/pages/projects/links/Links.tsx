@@ -12,7 +12,7 @@ import { Link } from '@sigx/router';
 import { AgentTile, EmptyState, Icon, ItemGlyph } from '@agentic/ui';
 import { dataMode } from '../../../data-mode';
 import { MOCK_PROJECT_LINKS } from '../../../mock/projects/links';
-import { chainOf, linkChains, linkCount, linksLayout, LINKS_NODE_W, milestonesOf, toggleLabel, type LinkActor, type LinkItem, type LinksData, type LinksView } from './model';
+import { chainOf, itemsOf, linkChains, linkCount, linksLayout, LINKS_NODE_W, milestonesOf, toggleLabel, type LinkActor, type LinkItem, type LinksData, type LinksView } from './model';
 
 const EMPTY: LinksData = { open: { lanes: [], items: [] }, done: { lanes: [], items: [] } };
 
@@ -58,7 +58,7 @@ export type LinksGraphProps =
 export const LinksGraph = component<LinksGraphProps>(({ props, emit }) => () => {
     const chain = new Set(props.selected ? chainOf(props.view, props.selected).map((i) => i.ref) : []);
     const g = linksLayout(props.view, chain);
-    const item = new Map(props.view.items.map((i) => [i.ref, i]));
+    const item = itemsOf(props.view);
     return (
         <div data-links-scroll="">
             <div data-links-canvas="" style={{ width: `${g.width}px`, height: `${g.height}px` }}>

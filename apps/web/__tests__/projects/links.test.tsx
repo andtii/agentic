@@ -8,6 +8,7 @@ import { setDataMode } from '../../src/data-mode';
 import { MOCK_PROJECT_LINKS } from '../../src/mock/projects/links';
 import {
     chainOf,
+    itemsOf,
     linkChains,
     linkCount,
     linksLayout,
@@ -77,6 +78,12 @@ describe('linksLayout (#765)', () => {
         const e = g.edges[0]!;
         expect(e.d.startsWith(`M${LINKS_COL_X + STEP + LINKS_NODE_W} ${LINKS_NODE_TOP + LINKS_ANCHOR_Y} `)).toBe(true);
         expect(e.d.endsWith(` ${LINKS_COL_X + 2 * STEP - LINKS_HEAD + 2} ${LINKS_LANE_H + LINKS_NODE_TOP + LINKS_ANCHOR_Y}`)).toBe(true);
+    });
+
+    it('itemsOf keeps the first of a repeated ref and drops items without a lane, as the layout does', () => {
+        const items = itemsOf(view([item('a#1', 'a', [], { title: 'first' }), item('a#1', 'a', [], { title: 'second' }), item('x#1', 'x')]));
+        expect([...items.keys()]).toEqual(['a#1']);
+        expect(items.get('a#1')!.title).toBe('first');
     });
 
     it('draws an empty view as nothing', () => {

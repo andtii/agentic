@@ -108,7 +108,7 @@ export interface LinksLayout {
 }
 
 /** The view's items that have a lane, keyed by ref (a repeated ref keeps its first item). */
-function itemsOf(view: LinksView): Map<string, LinkItem> {
+export function itemsOf(view: LinksView): Map<string, LinkItem> {
     const lanes = new Set(view.lanes.map((l) => l.projectId));
     const items = new Map<string, LinkItem>();
     for (const i of view.items) if (lanes.has(i.projectId) && !items.has(i.ref)) items.set(i.ref, i);
