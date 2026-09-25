@@ -8,7 +8,7 @@
  * to, and nothing else reaches it.
  */
 
-import type { AgentId, PermissionScope, PluginKind, PluginManifest, PluginState, ScheduleId, ToolMode } from '@agentic/core';
+import type { AgentId, PermissionScope, PluginKind, PluginManifest, PluginState, ProjectFeatureCategory, ProjectFeatureNeed, ProjectFeaturePreset, ProjectFeatureUi, ProjectRecord, ScheduleId, ToolMode } from '@agentic/core';
 
 export const REGISTRY_STATE_VERSION = 1;
 
@@ -201,6 +201,35 @@ export interface RegistryOverview {
     readonly secretNames: readonly string[];
     /** Whether the deployment can seal secrets at all (a `pluginReadiness` fact). */
     readonly hasKek: boolean;
+}
+
+/**
+ * One project feature as `projectFeatures()` lists it (#735, PRJ-06/07): what the Features page and its
+ * catalogue need in one read — the manifest's identity, its `ui` slots, its category, what it cannot work
+ * without, the presets its settings form offers, and how many projects have it on.
+ */
+export interface ProjectFeatureView {
+    readonly id: string;
+    readonly name: string;
+    readonly description: string;
+    readonly version: string;
+    /** Turned on in the workspace (the Plugins page switch); a project can only enable an enabled one. */
+    readonly enabled: boolean;
+    readonly builtin: boolean;
+    /** The manifest's `ui` block, `{}` when it declares none. */
+    readonly ui: ProjectFeatureUi;
+    readonly category?: ProjectFeatureCategory;
+    /** `ui.needs`, `[]` when it needs nothing. */
+    readonly needs: readonly ProjectFeatureNeed[];
+    /** The named starting points its settings form offers, `[]` when the build has none for it. */
+    readonly presets: readonly ProjectFeaturePreset[];
+    /** How many of the workspace's projects have it enabled. */
+    readonly usedBy: number;
+}
+
+/** What `checkProjectSettings` knows of the project a feature is being enabled on: its folders decide `needs` (#735). */
+export interface ProjectFeatureTarget {
+    readonly folders?: ProjectRecord['folders'];
 }
 
 export interface RegisterOptions {

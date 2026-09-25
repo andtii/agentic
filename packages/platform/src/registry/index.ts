@@ -20,6 +20,8 @@ export type {
     GateEntry,
     PluginRecord,
     PluginView,
+    ProjectFeatureTarget,
+    ProjectFeatureView,
     RegisterOptions,
     RegistryExportRow,
     RegistryGate,

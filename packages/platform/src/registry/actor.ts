@@ -39,7 +39,7 @@
  * Every mutation ends in `ctx.save()` inside the turn (Workers eviction rule).
  */
 
-import { configDefaults, isProjectFeatureManifest, isSingleSlot, validateConfig, type AgentId, type PermissionScope, type PluginKind, type PluginManifest, type Principal, type ScheduleId, type ToolMode, type WorkspaceId } from '@agentic/core';
+import { configDefaults, enabledProjectFeatures, isProjectFeatureManifest, isSingleSlot, validateConfig, type AgentId, type PermissionScope, type PluginKind, type PluginManifest, type Principal, type ProjectFeatureManifest, type ProjectFeatureNeed, type ProjectFeaturePlugin, type ScheduleId, type ToolMode, type WorkspaceId } from '@agentic/core';
 import { defineActor, type ActorContext, type ActorPolicy } from '@sigx/actors';
 import { ServerFnError } from '@sigx/server';
 import { AgentActor, agentKey, principalLabel } from '../agent/index.js';
@@ -65,6 +65,8 @@ import {
     type GateEntry,
     type PluginRecord,
     type PluginView,
+    type ProjectFeatureTarget,
+    type ProjectFeatureView,
     type RegisterOptions,
     type RegistryExportRow,
     type RegistryGate,
@@ -91,6 +93,11 @@ export interface RegistryOptions {
      * migrating switch refuses with `no-migration`.
      */
     readonly memoryPlugins?: Readonly<Record<string, MemoryPluginImpl>>;
+    /**
+     * The project feature plugins this build implements, by id — the same map Routing takes. `projectFeatures()`
+     * lists each one's `presets` from it (#735); without it every feature lists none.
+     */
+    readonly projectFeatures?: Readonly<Record<string, Pick<ProjectFeaturePlugin, 'presets'>>>;
     readonly now?: () => number;
     /** Override the policy chain. Default: the package's `sameWorkspace`. */
     readonly authorize?: ActorPolicy | readonly ActorPolicy[];
@@ -119,6 +126,12 @@ const secretAad = (workspaceId: WorkspaceId, name: string): string => `${workspa
 export function initialRegistryState(): RegistryState {
     return { v: REGISTRY_STATE_VERSION, plugins: {}, connectors: {}, secrets: {} };
 }
+
+/** Whether a project has a folder set — what every `ProjectFeatureNeed` comes down to, a folder being on a machine. */
+const hasFolder = (target: ProjectFeatureTarget): boolean =>
+    Object.values(target.folders ?? {}).some((path) => typeof path === 'string' && path.trim() !== '');
+
+const NEED_LABEL: Record<ProjectFeatureNeed, string> = { folder: 'a folder', machine: 'a machine' };
 
 const union = <T>(a: readonly T[], b: readonly T[]): T[] => [...new Set([...a, ...b])];
 
@@ -432,7 +445,7 @@ export function defineRegistry(options: RegistryOptions = {}) {
         },
         persistence: 'explicit',
         reads: { list: { maxAge: 0 }, overview: { maxAge: 0 }, connectors: { maxAge: 0 }, secrets: { maxAge: 0 }, toolPolicy: { maxAge: 0 } },
-        methodReentrancy: { get: 'always', isEnabled: 'always', requireEnabled: 'always', gate: 'always', getConnector: 'always', exportRows: 'always', checkProjectSettings: 'always' },
+        methodReentrancy: { get: 'always', isEnabled: 'always', requireEnabled: 'always', gate: 'always', getConnector: 'always', exportRows: 'always', checkProjectSettings: 'always', projectFeatures: 'always' },
         state: (): RegistryState => initialRegistryState(),
         methods: (ctx) => ({
             // -- plugins ------------------------------------------------------
@@ -470,8 +483,10 @@ export function defineRegistry(options: RegistryOptions = {}) {
              * Whether a project may store `settings` under `features[pluginId]` (#332): the plugin must exist, be
              * enabled and be a project feature, and the settings — defaults filled in — must pass its
              * `projectSettings` schema. A 400 says which; `Workspace.upsertProject` asks over a hop.
+             * With `target` (the project's folders), a feature whose `ui.needs` the project lacks is refused too,
+             * in one line: Git needs a folder (#735, PRJ-07).
              */
-            async checkProjectSettings(pluginId: string, settings: Readonly<Record<string, unknown>>): Promise<void> {
+            async checkProjectSettings(pluginId: string, settings: Readonly<Record<string, unknown>>, target?: ProjectFeatureTarget): Promise<void> {
                 const p = current(ctx, pluginId);
                 if (!p) throw new ServerFnError(400, `[registry] no plugin "${pluginId}" is installed in this workspace`);
                 if (!p.enabled) throw new ServerFnError(400, `[registry] plugin "${pluginId}" is turned off; turn it on at /plugins/${pluginId}`);
@@ -480,6 +495,42 @@ export function defineRegistry(options: RegistryOptions = {}) {
                 const own = Object.fromEntries(Object.entries(settings).filter(([, value]) => value !== undefined));
                 const checked = validateConfig(p.manifest.projectSettings, { ...configDefaults(p.manifest.projectSettings), ...own });
                 if (!checked.ok) throw new ServerFnError(400, `[registry] the settings of "${pluginId}" are invalid: ${checked.errors.map((e) => `${e.path || '.'}: ${e.message}`).join('; ')}`);
+                if (target !== undefined) {
+                    const missing = hasFolder(target) ? undefined : p.manifest.ui?.needs?.[0];
+                    if (missing !== undefined) throw new ServerFnError(400, `[registry] ${p.manifest.name} needs ${NEED_LABEL[missing]}: add one to the project first`);
+                }
+            },
+
+            /**
+             * Every project feature plugin the workspace has, id order, in one read for the Features page and its
+             * catalogue (#735, PRJ-06/07): identity, `ui` slots, category, `needs`, presets, and how many projects
+             * have it on (the Workspace's projects, read over a hop).
+             */
+            async projectFeatures(): Promise<ProjectFeatureView[]> {
+                const features = pluginIds(ctx)
+                    .map((id) => current(ctx, id)!)
+                    .filter((p) => isProjectFeatureManifest(p.manifest));
+                if (features.length === 0) return [];
+                const projects = await ctx.actor(Workspace, workspaceKey(workspaceOf(ctx))).projects();
+                const usedBy = new Map<string, number>();
+                for (const project of projects) for (const id of enabledProjectFeatures(project)) usedBy.set(id, (usedBy.get(id) ?? 0) + 1);
+                return features.map((p) => {
+                    const m = p.manifest as ProjectFeatureManifest;
+                    const impl = options.projectFeatures && Object.hasOwn(options.projectFeatures, m.id) ? options.projectFeatures[m.id] : undefined;
+                    return {
+                        id: m.id,
+                        name: m.name,
+                        description: m.description,
+                        version: m.version,
+                        enabled: p.enabled,
+                        builtin: catalogue.has(m.id),
+                        ui: m.ui ?? {},
+                        ...(m.category !== undefined ? { category: m.category } : {}),
+                        needs: m.ui?.needs ?? [],
+                        presets: impl?.presets ?? [],
+                        usedBy: usedBy.get(m.id) ?? 0
+                    };
+                });
             },
 
             /**
