@@ -59,7 +59,7 @@ import { decodePlatformFrame, encodeFrame } from '../framing/codec.js';
 import { drainingReply } from '../lifecycle.js';
 import { LIMITS } from '../schema/limits.js';
 import type { ConformanceDaemon, ConformanceFiles, ConformanceScript, DaemonConformanceHarness, PlatformSeat } from './harness.js';
-import { answerFilesOp, IN_MEMORY_CONFORMANCE_FILES, IN_MEMORY_SESSION_FOLDERS, type InMemoryFolder } from './in-memory-files.js';
+import { answerFilesOp, answerPinOp, IN_MEMORY_CONFORMANCE_FILES, IN_MEMORY_SESSION_FOLDERS, type InMemoryFolder } from './in-memory-files.js';
 
 export interface InMemoryFaults {
     /** `'duplicate'`: replay from a few frames before `wanted`; `'skip'`: from one after it; `'ignore'`: from the start of the log. */
@@ -317,7 +317,7 @@ export class InMemoryDaemon implements ConformanceDaemon {
             resume,
             policy: this.reportedPolicy(),
             build: IN_MEMORY_BUILD,
-            features: ['update', 'harness', 'policy', 'log', 'login', 'files'],
+            features: ['update', 'harness', 'policy', 'log', 'login', 'files', 'pin'],
             harnesses: this.harnesses
         });
         return {
@@ -473,6 +473,7 @@ export class InMemoryDaemon implements ConformanceDaemon {
                 if (frame.op.kind === 'tree' || frame.op.kind === 'read' || frame.op.kind === 'changes') {
                     return answer(answerFilesOp(this.options.folders ?? IN_MEMORY_SESSION_FOLDERS, env, frame.op, this.options.faults?.filesAnywhere));
                 }
+                if (frame.op.kind === 'pin' || frame.op.kind === 'read-at') return answer(answerPinOp(this.options.folders ?? IN_MEMORY_SESSION_FOLDERS, env, frame.op));
                 if (frame.op.kind !== 'list') return answer({ error: { code: 'unsupported', message: `the in-memory daemon does not answer ${frame.op.kind}` } });
                 const path = normalizePath(frame.op.path, 'linux');
                 if (!path || (!this.options.faults?.browseAnywhere && !pathWithin(path, env.cwdRoots, 'linux'))) return answer({ error: { code: 'outside-roots', message: `${frame.op.path} is outside the working roots` } });
@@ -854,7 +855,7 @@ export function inMemoryHarness(options: InMemoryHarnessOptions = {}): DaemonCon
     const knownOrigin = options.repos?.find((r) => r.git.origin !== undefined)?.git.origin;
     const files = options.folders ? options.conformanceFiles : IN_MEMORY_CONFORMANCE_FILES;
     return {
-        features: ['env', 'gap', 'raw', 'fs', ...(files ? (['files'] as const) : []), 'env-manage', 'session-ref', 'history', 'build', 'resume', 'update', 'harness', 'policy', ...(options.log ? (['log'] as const) : []), 'login', 'restart'],
+        features: ['env', 'gap', 'raw', 'fs', ...(files ? (['files', 'pin'] as const) : []), 'env-manage', 'session-ref', 'history', 'build', 'resume', 'update', 'harness', 'policy', ...(options.log ? (['log'] as const) : []), 'login', 'restart'],
         ...(knownOrigin !== undefined ? { knownOrigin } : {}),
         ...(files ? { files } : {}),
         updateTarget: IN_MEMORY_RELEASE,

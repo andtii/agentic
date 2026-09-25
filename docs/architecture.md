@@ -724,7 +724,15 @@ _not yet_
 
 #### #752 daemon: pin file refs to a commit (resolve sha, read range)
 
-_not yet_
+Two `fs.request` kinds behind the `pin` daemon feature (contract #786). `pin { root, path, from, to }` answers
+`FsPinnedLines { sha, from, to, lines }`: the full HEAD sha of the repository `root` is in and lines `from`–`to`
+(1-based, inclusive, at most `FS_PIN_MAX_LINES`; a `to` past the end stops at the last line) as committed there — never
+the working copy. `read-at { root, path, sha, from, to }` reads the same range back at `sha`, so a file ref shows the
+exact lines it was pinned to however the file changed since (PRJ-11). `root` is confined to the environment's
+`cwdRoots` (lexically, then after `realpath`) and `path` to `root`; the text comes from git's object store
+(`git cat-file blob <sha>:./<path>`, no shell), `sha` must be hex so it can never be an option or a revision expression. Binary
+files are `unsupported`, a missing file, range or commit `not-found`. `daemonConformance` covers it as `files-pin`; the
+in-memory daemon answers it from its fake HEAD.
 
 #### #753 plugins-plan: plan feature manifest, presets, instructions
 

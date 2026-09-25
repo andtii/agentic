@@ -1,6 +1,6 @@
 /** Building blocks shared by both directions: ids, cursors, environments, capability reports. */
 
-import { CHANGES_MAX_COMMITS, CHANGES_MAX_FILES, FS_LIST_MAX_ENTRIES, FS_LOCATE_MAX_MATCHES, FS_RUN_MAX_ARGS, FS_RUN_MAX_TIMEOUT_MS, FS_RUN_OUTPUT_TAIL, FS_WORKTREES_MAX } from '@agentic/core';
+import { CHANGES_MAX_COMMITS, CHANGES_MAX_FILES, FS_LIST_MAX_ENTRIES, FS_LOCATE_MAX_MATCHES, FS_PIN_MAX_LINES, FS_RUN_MAX_ARGS, FS_RUN_MAX_TIMEOUT_MS, FS_RUN_OUTPUT_TAIL, FS_WORKTREES_MAX } from '@agentic/core';
 import type { ApprovalRule, CapabilityReport, Cursor, DaemonLogError, DaemonLogResult, EnvError, EnvironmentDescriptor, EnvironmentId, EnvironmentInput, EnvResult, FsError, FsOp, FsResult, HarnessReport, LoginAction, LoginError, MachineId, MachineListing, MachinePolicy, MachinePolicyError, MachinePolicyInput, MachinePolicyResult, MachineTelemetry, ModelOption, OpenSpec, OpenSpecConnector, OpenSpecPolicy, QuotaSnapshot, QuotaWindow, ReleaseAsset, ResourceSample, SessionId, ToolGrant } from '@agentic/core';
 import { z } from 'zod';
 import { isHttpsUrl, SHA256_HEX } from '../release.js';
@@ -13,6 +13,8 @@ export const id = <T extends string>(): z.ZodType<T> => z.string().min(1).max(LI
 export const name = z.string().min(1).max(LIMITS.id);
 export const text = z.string().max(LIMITS.text);
 export const nonNegativeInt = z.number().int().min(0);
+/** A 1-based line number (#752). */
+const positiveInt = z.number().int().min(1);
 
 export const machineId = id<MachineId>();
 export const sessionId = id<SessionId>();
@@ -200,7 +202,7 @@ const fileChangeStatus = z.enum(['modified', 'added', 'deleted', 'renamed', 'unt
 
 /**
  * What `fs.request` asks (#185, #331): list one folder, add a git worktree, or locate every checkout of an origin under
- * the roots — and, with the `files` feature (#559), one level of a session's folder, one file in it, or what changed in
+ * the roots — with the `pin` feature (#752), file lines pinned to a commit — and, with the `files` feature (#559), one level of a session's folder, one file in it, or what changed in
  * it, each under `root` (the session's cwd) with `path` relative to it — and, with the `run` feature (#617), a project
  * command as `argv` in `cwd` — and, with the `worktrees` feature (#622), the worktrees of the repository `root` is in.
  * Paths are bounded text; the daemon decides what they mean.
@@ -214,7 +216,9 @@ export const fsOp: z.ZodType<FsOp> = z.discriminatedUnion('kind', [
     z.object({ kind: z.literal('changes'), root: text.min(1), scope: changeScope, base: name.optional() }),
     z.object({ kind: z.literal('worktree-remove'), repo: text.min(1), path: text.min(1), branch: name.optional(), deleteBranch: z.boolean().optional() }),
     z.object({ kind: z.literal('run'), cwd: text.min(1), argv: z.array(text).min(1).max(FS_RUN_MAX_ARGS).refine((a) => a[0] !== '', { message: 'argv[0] names a program' }), timeoutMs: z.number().int().positive().max(FS_RUN_MAX_TIMEOUT_MS).optional() }),
-    z.object({ kind: z.literal('worktrees'), root: text.min(1) })
+    z.object({ kind: z.literal('worktrees'), root: text.min(1) }),
+    z.object({ kind: z.literal('pin'), root: text.min(1), path: text.min(1), from: positiveInt, to: positiveInt }),
+    z.object({ kind: z.literal('read-at'), root: text.min(1), path: text.min(1), sha: name, from: positiveInt, to: positiveInt })
 ]);
 
 /** A folder's git badge; `origin` is a remote URL, so bounded text rather than a name — absent rather than empty. */
@@ -256,6 +260,10 @@ export const fsResult: z.ZodType<FsResult> = z.discriminatedUnion('kind', [
         truncated: z.boolean()
     }),
     z.object({ kind: z.literal('worktree-remove'), path: text.min(1), removed: z.boolean(), branchDeleted: z.boolean().optional() }),
+    // Pinned lines (#752): at most `FS_PIN_MAX_LINES`, together at most `LIMITS.fileText` characters.
+    ...(['pin', 'read-at'] as const).map((kind) =>
+        z.object({ kind: z.literal(kind), path: text.min(1), sha: name, from: positiveInt, to: positiveInt, lines: z.array(z.string()).min(1).max(FS_PIN_MAX_LINES) })
+    ),
     z.object({ kind: z.literal('run'), exitCode: z.number().int(), stdoutTail: z.string().max(FS_RUN_OUTPUT_TAIL), stderrTail: z.string().max(FS_RUN_OUTPUT_TAIL) }),
     z.object({
         kind: z.literal('worktrees'),
@@ -279,7 +287,9 @@ export const fsResult: z.ZodType<FsResult> = z.discriminatedUnion('kind', [
 ])
     .refine((r) => r.kind !== 'worktree' || !(r.reused === true && r.recreated === true), { message: 'a worktree is reused or recreated, not both' })
     .refine((r) => r.kind !== 'read' || (r.text !== undefined) !== (r.binary === true), { message: 'a read result carries exactly one of text or binary' })
-    .refine((r) => r.kind !== 'read' || !(r.binary === true && r.lines !== undefined), { message: 'a binary read result carries metadata only, no lines' });
+    .refine((r) => r.kind !== 'read' || !(r.binary === true && r.lines !== undefined), { message: 'a binary read result carries metadata only, no lines' })
+    .refine((r) => (r.kind !== 'pin' && r.kind !== 'read-at') || r.lines.length === r.to - r.from + 1, { message: 'pinned lines are exactly the lines from–to' })
+    .refine((r) => (r.kind !== 'pin' && r.kind !== 'read-at') || r.lines.reduce((n, l) => n + l.length, 0) <= LIMITS.fileText, { message: 'pinned lines are at most LIMITS.fileText characters' });
 
 export const fsError: z.ZodType<FsError> = z.object({
     code: z.enum(['outside-roots', 'not-found', 'not-a-repo', 'branch-exists', 'invalid-branch', 'exists', 'timeout', 'unknown-environment', 'unsupported', 'too-large', 'worktree-mismatch', 'dirty', 'internal']),

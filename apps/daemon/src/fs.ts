@@ -10,20 +10,22 @@
  * junction can reach outside a root. All reads then go through the resolved
  * path. Git badges are read from files (`.git`, `HEAD`, `config`); only a
  * worktree creation runs `git`, through `runGit` with no shell. A `run`
- * (#618) is `run.ts`'s.
+ * (#618) is `run.ts`'s. A `pin` / `read-at` (#752) reads file lines from
+ * git's object store at a commit, never from disk.
  */
 
-import { FS_LIST_MAX_ENTRIES, FS_LOCATE_MAX_DEPTH, FS_LOCATE_MAX_MATCHES, FS_WORKTREES_MAX, sameOrigin, type FsEntry, type FsError, type FsErrorCode, type FsGitInfo, type FsLocateResult, type FsOp, type FsResult, type LocalEnvironment } from '@agentic/core';
+import { FS_LIST_MAX_ENTRIES, FS_LOCATE_MAX_DEPTH, FS_PIN_MAX_LINES, FS_READ_MAX_BYTES, FS_LOCATE_MAX_MATCHES, FS_WORKTREES_MAX, sameOrigin, type FsEntry, type FsError, type FsErrorCode, type FsGitInfo, type FsLocateResult, type FsOp, type FsResult, type LocalEnvironment } from '@agentic/core';
 import { LIMITS } from '@agentic/daemon-protocol';
 import type { Dirent } from 'node:fs';
 import { lstat, readdir, readFile, realpath, stat } from 'node:fs/promises';
-import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { silentLogger, type Logger } from './logger.js';
 
 import { answerFilesOp } from './files.js';
 import { checkWithinRoots, isMissing, withinRoots, type RootCheck } from './roots.js';
 import type { VcsProvider } from './vcs/provider.js';
-import { runGit } from './vcs/run.js';
+import { runGit, type GitRun } from './vcs/run.js';
+import { textOf } from './text.js';
 import { runCommand } from './run.js';
 
 export { checkWithinRoots, withinRoots, type RootCheck };
@@ -451,6 +453,66 @@ async function worktreeRemove(op: Extract<FsOp, { kind: 'worktree-remove' }>, ro
     return { result: { kind: 'worktree-remove', path, removed, branchDeleted: deleted.code === 0 } };
 }
 
+// --------------------------------------------------------------------- pin
+
+/** A commit named by hex digits only, so it can never be read as an option or a revision expression. */
+const COMMIT_ID = /^[0-9a-fA-F]{4,64}$/;
+/** A pinned file is read whole from git before its lines are cut; past this it is `too-large`. */
+const PIN_MAX_FILE_BYTES = 8 * 1024 * 1024;
+const PIN_TIMEOUT_MS = 15_000;
+
+/**
+ * `pin` / `read-at` (#752, PRJ-11): lines `from`–`to` of `path` (relative to `root`) as committed at HEAD, or at `sha`.
+ * `root` is confined to the roots (lexically, then after `realpath`) and `path` to `root` lexically; the text is read
+ * from git's object store (`git cat-file blob <sha>:./<path>`), never from disk, so nothing outside the repository is reached.
+ */
+async function pinLines(op: Extract<FsOp, { kind: 'pin' | 'read-at' }>, roots: readonly string[], options: { readonly platform: NodeJS.Platform; readonly git: string }): Promise<FsOutcome> {
+    if (!Number.isInteger(op.from) || !Number.isInteger(op.to) || op.from < 1 || op.to < op.from) return fail('not-found', `lines ${op.from}-${op.to} are not a range`);
+    if (op.to - op.from + 1 > FS_PIN_MAX_LINES) return fail('too-large', `a pin covers at most ${FS_PIN_MAX_LINES} lines`);
+    const checked = await checkWithinRoots(op.root, roots, options.platform);
+    if (!checked.ok) return fail(checked.code, checked.message);
+    if (!(await stat(checked.real)).isDirectory()) return fail('not-found', `${op.root} is not a folder`);
+    const outside = () => fail('outside-roots', `${op.path} is outside ${op.root}`);
+    if (isAbsolute(op.path) || /^[a-zA-Z]:/.test(op.path) || /^[\\/]/.test(op.path)) return outside();
+    const segments = op.path.split(/[\\/]/).filter((p) => p !== '' && p !== '.');
+    if (segments.length === 0) return fail('not-found', `${op.path || op.root} is not a file`);
+    if (!withinRoots(resolve(checked.path, ...segments), [checked.path], options.platform)) return outside();
+    const rel = relative(checked.path, resolve(checked.path, ...segments)).split(sep).join('/');
+
+    const git = (args: readonly string[], maxBytes?: number) => runGit(options.git, ['-C', checked.real, ...args], { timeoutMs: PIN_TIMEOUT_MS, ...(maxBytes ? { maxBytes } : {}) });
+    const gitFailed = (r: GitRun, what: string): { error: FsError } | undefined => {
+        if (r.code === 'missing') return fail('unsupported', 'git is not installed on this machine');
+        if (r.code === 'timeout') return fail('timeout', `git ${what} did not finish within ${PIN_TIMEOUT_MS} ms`);
+        if (r.code !== 0 && /not a git repository/i.test(r.stderr)) return fail('not-a-repo', `${op.root} is not in a git repository`);
+        return undefined;
+    };
+
+    let wanted: string;
+    if (op.kind === 'pin') wanted = 'HEAD';
+    else if (COMMIT_ID.test(op.sha)) wanted = op.sha.toLowerCase();
+    else return fail('not-found', `${op.sha} is not a commit id`);
+    const resolved = await git(['rev-parse', '--verify', '--quiet', `${wanted}^{commit}`], 64 * 1024);
+    const refused = gitFailed(resolved, 'rev-parse');
+    if (refused) return refused;
+    const sha = resolved.stdout.toString('utf8').trim();
+    if (resolved.code !== 0 || !/^[0-9a-f]{40,64}$/.test(sha)) return fail('not-found', op.kind === 'pin' ? `${op.root} has no commit yet` : `no commit ${op.sha} in ${op.root}`);
+
+    // `cat-file blob`: the raw bytes of a file, never a folder's listing or a filtered view.
+    const shown = await git(['cat-file', 'blob', `${sha}:./${rel}`], PIN_MAX_FILE_BYTES);
+    const unreadable = gitFailed(shown, 'cat-file');
+    if (unreadable) return unreadable;
+    if (shown.overflow) return fail('too-large', `${op.path} is larger than ${PIN_MAX_FILE_BYTES} bytes at ${sha.slice(0, 7)}`);
+    if (shown.code !== 0) return fail('not-found', `${op.path} is not a file at ${sha.slice(0, 7)}`);
+    const text = textOf(shown.stdout);
+    if (text === undefined) return fail('unsupported', `${op.path} is binary at ${sha.slice(0, 7)}`);
+    const all = text === '' ? [] : text.replace(/\r?\n$/, '').split('\n').map((l) => l.replace(/\r$/, ''));
+    if (op.from > all.length) return fail('not-found', `${op.path} has ${all.length} lines at ${sha.slice(0, 7)}`);
+    const to = Math.min(op.to, all.length);
+    const lines = all.slice(op.from - 1, to);
+    if (lines.reduce((n, l) => n + l.length, 0) > FS_READ_MAX_BYTES) return fail('too-large', `lines ${op.from}-${to} of ${op.path} are too long to answer`);
+    return { result: { kind: op.kind, path: rel, sha, from: op.from, to, lines } };
+}
+
 // ------------------------------------------------------------------- entry
 
 export type FsOutcome = { readonly result: FsResult } | { readonly error: FsError };
@@ -486,7 +548,7 @@ export async function answerFsRequest(environments: readonly LocalEnvironment[],
         if (op.kind === 'locate') return { result: await locate(op, env.cwdRoots, platform) };
         if (op.kind === 'worktrees') return await worktrees(op, env.cwdRoots, { platform, git: options.git ?? 'git' });
         if (op.kind === 'run') return await runCommand(op, env.cwdRoots, { platform, ...(options.runEnv ? { env: options.runEnv } : {}) });
-        if (op.kind === 'pin' || op.kind === 'read-at') return fail('unsupported', `this daemon does not answer ${op.kind} yet`);
+        if (op.kind === 'pin' || op.kind === 'read-at') return await pinLines(op, env.cwdRoots, { platform, git: options.git ?? 'git' });
         return await answerFilesOp(op, env.cwdRoots, { platform, ...(options.git ? { git: options.git } : {}), ...(options.vcs ? { providers: options.vcs } : {}) });
     } catch (e) {
         logger.warn('fs: request failed', { environment: environmentId, op: op.kind, error: e });

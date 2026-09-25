@@ -67,6 +67,7 @@ const NEEDS: Record<string, ConformanceFeature> = {
     'files-tree': 'files',
     'files-read': 'files',
     'files-changes': 'files',
+    'files-pin': 'pin',
     'env-put': 'env-manage',
     'env-remove': 'env-manage',
     'env-policy': 'env-manage',
@@ -704,6 +705,31 @@ export function daemonConformance(harness: DaemonConformanceHarness, options: Da
                         const plain = await ask('files_changes_plain', env.id, { kind: 'changes', root: files.plain, scope: 'uncommitted' });
                         assertEqual(plain.error?.code, 'not-a-repo', 'a folder under no version control has no changes to report');
                     }
+                })
+        },
+        {
+            name: 'files-pin',
+            run: () =>
+                withDaemon(script, async (daemon) => {
+                    const { hello, env, files, ask } = await filesSeat(daemon);
+                    assert(hello.features?.includes('pin') === true, 'a daemon that answers pin / read-at lists `pin` in hello.features');
+                    const pin = await ask('files_pin', env.id, { kind: 'pin', root: files.root, path: files.file.path, from: 1, to: 1 });
+                    assert(pin.result?.kind === 'pin', `pinning a committed file's first line yields it (${pin.error?.code ?? ''} ${pin.error?.message ?? ''})`);
+                    assert(/^[0-9a-f]{40,64}$/.test(pin.result.sha), `a pin names the full commit id (${pin.result.sha})`);
+                    assertEqual(pin.result.path, files.file.path, 'a pin names the file relative to root');
+                    assertEqual(pin.result.from, 1, 'a pin starts where it was asked');
+                    assertEqual(pin.result.lines.length, pin.result.to - pin.result.from + 1, 'a pin carries exactly the lines from-to');
+                    if (files.changed) assert(pin.result.lines[0] !== files.file.text.split(/\r?\n/)[0], 'a pin reads the committed text, not the changed working copy');
+
+                    const back = await ask('files_read_at', env.id, { kind: 'read-at', root: files.root, path: files.file.path, sha: pin.result.sha, from: 1, to: 1 });
+                    assert(back.result?.kind === 'read-at', `reading pinned lines back yields them (${back.error?.code ?? ''} ${back.error?.message ?? ''})`);
+                    assertEqual(back.result.sha, pin.result.sha, 'read-at answers the commit it was asked for');
+                    assertEqual(back.result.lines.join('\n'), pin.result.lines.join('\n'), 'read-at returns the lines the pin returned');
+
+                    const escaped = await ask('files_pin_escape', env.id, { kind: 'pin', root: files.root, path: '../../__agentic_conformance_outside__.txt', from: 1, to: 1 });
+                    assertEqual(escaped.error?.code, 'outside-roots', 'a file outside root is refused, not pinned (OPS-01)');
+                    const unknown = await ask('files_read_at_unknown', env.id, { kind: 'read-at', root: files.root, path: files.file.path, sha: '0123456789abcdef0123456789abcdef01234567', from: 1, to: 1 });
+                    assertEqual(unknown.error?.code, 'not-found', 'a commit the repository lacks is not-found');
                 })
         },
         {

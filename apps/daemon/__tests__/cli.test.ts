@@ -611,7 +611,7 @@ describe('cli', () => {
                 const seat = await relay.nextSeat();
                 const hello = await expectFrame(seat, 'hello');
                 expect(hello.build).toEqual({ version: DAEMON_VERSION, commit: DAEMON_COMMIT, protocol: DAEMON_PROTOCOL_VERSION, channel: DAEMON_CHANNEL, platform: `${process.platform}-${process.arch}` });
-                expect(hello.features).toEqual(['files', 'run', 'worktrees', 'update', 'policy', 'log', 'login']);
+                expect(hello.features).toEqual(['files', 'run', 'worktrees', 'pin', 'update', 'policy', 'log', 'login']);
                 expect(hello).toMatchObject({ restarts: 2, lastExit: { at: 5, reason: 'update', code: 75 }, lastUpdate: { from: '0.1.0', to: '0.2.0', outcome: 'rolled-back', at: 6, error: 'not-ready' } });
                 seat.send({ v: DAEMON_PROTOCOL_VERSION, t: 'welcome', serverTime: Date.now(), wanted: {} });
                 await vi.waitFor(() => expect(existsSync(install().updateFailedFile)).toBe(false));
@@ -631,7 +631,7 @@ describe('cli', () => {
                 await pairedWith(relay);
                 const running = main(['run'], { paths: paths(), install: install(), drivers: [scripted()], ...io(), until, backoff: { initialMs: 5, maxMs: 20 } });
                 const seat = await relay.nextSeat();
-                expect((await expectFrame(seat, 'hello')).features).toEqual(['files', 'run', 'worktrees', 'policy', 'log', 'login']);
+                expect((await expectFrame(seat, 'hello')).features).toEqual(['files', 'run', 'worktrees', 'pin', 'policy', 'log', 'login']);
                 seat.send({ v: DAEMON_PROTOCOL_VERSION, t: 'welcome', serverTime: Date.now(), wanted: {} });
                 seat.send({ v: DAEMON_PROTOCOL_VERSION, t: 'update.request', requestId: 'upd_x', target: 'previous', mode: 'now', drainTimeoutMs: 1_000 });
                 expect(await expectFrame(seat, 'update.status')).toMatchObject({ requestId: 'upd_x', phase: 'failed', error: { code: 'unsupported' } });
