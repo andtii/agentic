@@ -704,7 +704,7 @@ The web registers it with `PlatformPorts.pulls`, default `NO_PULL_SOURCES` (the 
 
 #### #744 web: pull request page
 
-_not yet_
+`pages/projects/work/pull/`: `Pull` renders `/projects/:id/work/pr:<n>` — on mock data from `mock/projects/pull.ts` (`PullPageData`: the `PullRequest` plus the task title, issue, chat title and environment the Linked box names), live from the project's `Pulls.get` view (`{ws}:pulls:{project}`, the PR by number, names and environment from the agent directory). `PullView` is one view for both: header, the Opened → Checks → Review → Approved → Merge stepper (`pullSteps`: the first unmet step is current, toned `failed` / `needs-you` / `working`), what is happening now (`pullNow`, from the autopilot's `activity` and `attempt`), checks, review threads, and a 380px rail — the four autopilot switches, Merge with every blocker in one sentence (`blockerSentence` over core `pullBlockers`) and the approval note, Linked (task, issue, chat, session, `EnvironmentLine`, stack). Take over, Stop autopilot, the switches and Squash and merge edit local state on mock data and are disabled live until the git feature's autopilot writes exist (G3).
 
 #### #745 ui+web: one PR card on chat, Home needs-you and task node
 
