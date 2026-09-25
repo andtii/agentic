@@ -651,7 +651,7 @@ _not yet_
 
 #### #739 web: work item page for non-Git work
 
-_not yet_
+`pages/projects/work/item/`: `WorkItemRoute` sends `pr:<n>` to the pull request page and anything else here. `findWorkItem` resolves the `:item` param — a work item id (`task:<ref>`, `item:<n>`), a bare task ref (`t_52a1`) or plan ref (`#12`), never a pull request — against `WorkItemDetail`s: the `WorkItem` plus its task, chat, session and, when it comes from Plan, the plan title, phase and `PlanItem`. The header draws `StageTrack` and a labelled stepper (`stepsOf`: passed / current in the item's `stageState` / later, over the item's stages or `WORK_STAGES_FALLBACK`) and the owner (YOU or the agent tile) with the next step; the body holds the done-when checklist (plan-backed items only) and the linked task, chat and session. Mock data lives beside the page (`item/fixtures.ts`); live, the page shows an empty state until the Work view (#738) derives work items.
 
 #### #740 plugins-git: ui block — Code section, overview card, Git stages, pr: refs, needs a folder
 
