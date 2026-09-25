@@ -59,16 +59,19 @@ export function usePlanStore(projectId: string | (() => string)): PlanStore {
     const defs = useActorDefs();
     const viewer = useViewer()();
     const read = usePlans(id, { defs, viewer });
-    const st = signal({ note: '' });
+    // The note belongs to the project the write went to: a page that moves to another project does not show it.
+    const st = signal({ note: '', projectId: '' });
     const run = async <T>(what: string, call: (client: PlanClient) => Promise<T>): Promise<T | undefined> => {
         const ws = viewer.workspaceId;
+        const projectId = id();
         if (!ws) return undefined;
         try {
-            const out = await call(actor(defs.Plan, planKeyOf(ws, id())));
+            const out = await call(actor(defs.Plan, planKeyOf(ws, projectId)));
             st.note = '';
             return out;
         } catch (error) {
             st.note = planFailureNote(what, error);
+            st.projectId = projectId;
             return undefined;
         }
     };
@@ -90,7 +93,7 @@ export function usePlanStore(projectId: string | (() => string)): PlanStore {
             return read.loading;
         },
         writes,
-        note: () => st.note
+        note: () => (st.projectId === id() ? st.note : '')
     };
 }
 
