@@ -1,8 +1,8 @@
 /**
  * Where a `PullCard` outside the Work view leads, and what feeds it (#826, PRJ-10): Home's "Needs you" rows, the task
  * tree's node line and the chat card all open the in-app PR page (`/projects/:id/work/pr:<n>`) and the provider's diff,
- * not the provider's PR page. On mock data the pull requests are the Work fixtures (`MOCK_WORK`); live they stay empty
- * until the Pulls actor's state is read by the web app.
+ * not the provider's PR page. On mock data the pull requests are the Work fixtures (`MOCK_WORK`); live they are every
+ * Git project's Pulls actor (`LivePulls.tsx`, #865).
  */
 import type { PullRequest } from '@agentic/core';
 import type { PullLinksFn } from '@agentic/ui';

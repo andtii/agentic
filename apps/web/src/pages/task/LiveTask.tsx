@@ -12,6 +12,9 @@
  * row) and where the resume stands (the router's route: re-opening, or
  * resuming automatically), a resumed task says so, and a task waiting on its
  * machine reads as a wait with the machine, since when and the deadline.
+ *
+ * #865: a node whose task a pull request resolved to (`PullRequest.taskId`, any Git project's Pulls actor) shows
+ * the PR's one-line state.
  */
 import { component, effect, onUnmounted, signal, type JSXElement } from 'sigx';
 import { Link } from '@sigx/router';
@@ -28,6 +31,7 @@ import { useActorDefs, useViewer } from '../../actors/defs';
 import { routingKeyOf, taskKeyOf } from '../../actors/keys';
 import { formatTime } from '../../mock/workspace';
 import { useAgentDirectory } from '../chat/directory';
+import { PullsFeed, createWorkspacePulls, taskPullOf } from '../projects/work/pull/LivePulls';
 
 /** What the live page tells the topbar: the record for the crumb and the two actions. */
 export const taskHead = signal<{ value: { id: string; task: TaskView; stop: () => void } | null }>({ value: null });
@@ -89,6 +93,7 @@ export const LiveTask = component<{ id: string }>(({ props }) => {
     const tree = useActorState(defs.TaskActor, () => { const k = key(); return k && ([k, 'tree'] as const); }, { live: true });
     const cuts = useInterruptionReads(defs, viewer, () => props.id);
     const machineName = useMachineNames(defs, viewer);
+    const pulls = createWorkspacePulls();
     const st = signal({ error: '', recovering: false });
     const fail = (e: unknown): void => { st.error = e instanceof Error ? e.message : String(e); };
 
@@ -145,10 +150,12 @@ export const LiveTask = component<{ id: string }>(({ props }) => {
                     <header data-tree-head>
                         <Label>Delegation tree · depth {Math.max(...nodes.map((n) => n.depth)) + 1}</Label>
                     </header>
+                    <PullsFeed feed={pulls} />
                     <div data-tree-nodes>
                         {nodes.map((n) => {
                             const a = directory.lookup(n.assignee);
                             const detail = waitDetailOf(n.wait, machineName);
+                            const pull = taskPullOf(pulls.all(), n.id);
                             return (
                                 <TaskNode
                                     id={n.id}
@@ -159,6 +166,7 @@ export const LiveTask = component<{ id: string }>(({ props }) => {
                                     environment={a.environment}
                                     {...(n.wait ? { wait: n.wait } : {})}
                                     {...(detail ? { waitDetail: detail } : {})}
+                                    {...(pull ? { pull } : {})}
                                     depth={n.depth}
                                     selected={n.id === t.id}
                                 />
