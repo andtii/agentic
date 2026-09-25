@@ -74,3 +74,97 @@ Work that starts in this repo but is generic. Each row gets a `promote` label on
 | Dropping a pack's breakpoint-keyed `at` entries before publishing: `withoutBreakpoints(recipes)` walks every `at`, `composes` included, and keeps raw `@` preludes and built-ins (`packages/ui/src/_zero-gaps/pack-breakpoints.ts`) | the `sigx zero:fragment` probe's fit (declare `breakpoints: {}`) | delete once signalxjs/zero#225 ships (#595) |
 | Recovering tool parameters a model wrote into a string argument as its own call markup (`…</text>\n<parameter name="mentions">[…]`), only when the tail is nothing but known array parameters holding JSON (`recoverLeakedParameters` in `packages/runtimes/src/tools/chat.ts`) | `@sigx/ai` `defineTool` (an opt-in input repair before validation) | once a second tool loses a parameter this way (#599) |
 | `liveOverSockets` — `live()` subscriptions routed to one `socketTransport` per actor on the object-terminated `/_sigx/socket/{type}/{key}` upgrade, ref-counted and closed with the last subscriber; calls stay on `fetchTransport` (`apps/web/src/actors/live-socket.ts`) | `@sigx/actors-ws/client` (signalxjs/actors#490) | delete once signalxjs/actors#490 ships (#712) |
+
+## Projects redesign
+
+One slot per sub-issue of [#722](https://github.com/andtii/agentic/issues/722). Each issue replaces its own line with what it wrote that is generic (piece, where it lands, when), or leaves the dash.
+
+- #723: —
+
+- #724: —
+
+- #725: —
+
+- #726: —
+
+- #727: —
+
+- #728: —
+
+- #729: —
+
+- #730: —
+
+- #731: —
+
+- #732: —
+
+- #733: —
+
+- #734: —
+
+- #735: —
+
+- #736: —
+
+- #737: —
+
+- #738: —
+
+- #739: —
+
+- #740: —
+
+- #741: —
+
+- #742: —
+
+- #743: —
+
+- #744: —
+
+- #745: —
+
+- #746: —
+
+- #747: —
+
+- #748: —
+
+- #749: —
+
+- #750: —
+
+- #751: —
+
+- #752: —
+
+- #753: —
+
+- #754: —
+
+- #755: —
+
+- #756: —
+
+- #757: —
+
+- #758: —
+
+- #759: —
+
+- #760: —
+
+- #761: —
+
+- #762: —
+
+- #763: —
+
+- #764: —
+
+- #765: —
+
+- #766: —
+
+- #767: —
