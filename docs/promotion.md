@@ -157,7 +157,7 @@ One slot per sub-issue of [#722](https://github.com/andtii/agentic/issues/722). 
 
 - #760: —
 
-- #761: —
+- #761: none — the Requests inbox is agentic product UI.
 
 - #762: —
 

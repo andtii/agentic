@@ -825,7 +825,7 @@ _not yet_
 
 #### #761 web: Requests inbox — incoming, sent, linked, triage card, actions
 
-_not yet_
+`apps/web/src/pages/projects/requests/`: `RequestsView` draws the board over `RequestEntry` rows — a core `ProjectRequest` plus the names it holds as ids (`fromProjectName`, `fromChatTitle`, `byYou`, the triage's `area`) and its `box` (`incoming` / `sent` / `linked`). Tabs count open incoming requests and every sent or linked one; the list puts what needs you first, then newest. The detail shows the origin path, what they sent (refs as chips via the plan's `refLabel`), the manager's triage card with the `why you:` line and the GitHub-issue switch (when the project's git origin is on GitHub), the reply, and the actions. Pure `model.ts` resolves: `accept` (as proposed, or with an Edit-first draft via `itemOfDraft`), `askForMore`, `decline` — each only from `needs-you`. The page keeps the mock batch (`mock/projects/requests.ts`) in memory; live it shows an empty inbox with a note until the Requests store (#758) is readable from the web — a follow-up wires it.
 
 #### #762 platform+web: visiting project manager in chat — @ another PM, request card, across-projects panel
 
