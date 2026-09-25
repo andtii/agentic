@@ -83,6 +83,7 @@ export function useLiveWorkItems(project: () => ProjectRecord): LiveWorkItems {
     const index = useTaskIndexRows(defs, viewer);
     const uiOf = useFeatureUi(defs, viewer);
     const plans = usePlans(() => project().id, { defs, viewer });
+    const pulls = usePulls(() => project().id);
     return {
         details: () => {
             // The project read on every call: the route may move to another one while the page stays mounted.
@@ -91,7 +92,7 @@ export function useLiveWorkItems(project: () => ProjectRecord): LiveWorkItems {
             const ids = new Set(inProject.map((c) => c.id));
             const rows = index.rows().filter((r) => r.chatId !== undefined && ids.has(r.chatId));
             const planList = plans.plans();
-            const items = workItemsOf(projectTasks(rows, ids), usePulls(p.id)(), planItemsOf(planList), featuresOf(p, uiOf), Date.now());
+            const items = workItemsOf(projectTasks(rows, ids), pulls(), planItemsOf(planList), featuresOf(p, uiOf), Date.now());
             return detailsOf(items, rows, inProject, planList);
         },
         agentOf: (id) => {

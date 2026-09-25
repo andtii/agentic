@@ -1,7 +1,7 @@
 /**
  * The Work view on the platform (#738): the project's tasks — TaskIndex rows whose chat is in the project — the
- * Registry's feature `ui` blocks for the stages, and the agent directory for names and hues. Pull requests and plan
- * items stay `[]` until their stores exist (`live.ts`). Called in the page's setup; `WorkView` renders the board.
+ * Registry's feature `ui` blocks for the stages, the agent directory for names and hues, and the Pulls actor's pull
+ * requests (#865); plan items stay `[]` until their store exists (`live.ts`). Called in the page's setup; `WorkView` renders the board.
  */
 import type { PlanItem, ProjectRecord, PullRequest } from '@agentic/core';
 import { useActorDefs, useViewer } from '../../../actors/defs';
@@ -27,7 +27,7 @@ export function useLiveWork(project: () => ProjectRecord): LiveWorkInputs {
     const chats = useChatRows(defs, viewer, directory);
     const index = useTaskIndexRows(defs, viewer);
     const uiOf = useFeatureUi(defs, viewer);
-    const pulls = usePulls(project().id);
+    const pulls = usePulls(() => project().id);
     const planItems = usePlanItems(project().id);
     return {
         tasks: () => {

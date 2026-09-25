@@ -1,21 +1,31 @@
 /**
  * Where the Work view's inputs come from (#738): on mock data the fixtures in `mock/projects/work.ts`; live, the
  * workspace's TaskIndex (a task is the project's when its chat is), the Registry's project features for the stages,
- * the project's Plan actor for the plan items (#882), and — until the git feature's pull request store (G2) exists —
- * no pull requests. Hooks only; the derivation is `model.ts`.
+ * the project's Plan actor for the plan items (#882) and its Pulls actor for the pull requests (#865). Hooks only;
+ * the derivation is `model.ts`.
  */
 import { useActorState } from '@sigx/actors/app';
 import type { AgentId, Plan, PlanItem, ProjectFeatureUi, ProjectRecord, PullRequest, TaskId } from '@agentic/core';
 import type { TaskIndexRow } from '@agentic/platform';
 import { useActorDefs, useViewer, type ActorDefs, type ViewerState } from '../../../actors/defs';
-import { planKeyOf, registryKeyOf, taskIndexKeyOf } from '../../../actors/keys';
+import { planKeyOf, pullsKeyOf, registryKeyOf, taskIndexKeyOf } from '../../../actors/keys';
 import { dataMode } from '../../../data-mode';
 import { MOCK_WORK, mockFeatureUi } from '../../../mock/projects/work';
 import type { WorkFeatures, WorkTask } from './model';
 
-/** The project's pull requests: `[]` live until the git feature stores them (G2). */
-export function usePulls(projectId: string): () => readonly PullRequest[] {
-    return () => (dataMode() === 'live' ? [] : (MOCK_WORK[projectId]?.pulls ?? []));
+const projectIdOf = (projectId: string | (() => string)): (() => string) => (typeof projectId === 'function' ? projectId : () => projectId);
+
+/**
+ * The project's pull requests: live the Pulls actor's `get` view (#865), on mock data the Work fixtures. Call it in
+ * setup; given a getter, the read follows the project it names.
+ */
+export function usePulls(projectId: string | (() => string)): () => readonly PullRequest[] {
+    const id = projectIdOf(projectId);
+    if (dataMode() !== 'live') return () => MOCK_WORK[id()]?.pulls ?? [];
+    const defs = useActorDefs();
+    const viewer = useViewer()();
+    const view = useActorState(defs.Pulls, () => viewer.workspaceId && ([pullsKeyOf(viewer.workspaceId, id()), 'get'] as const), { live: true });
+    return () => view.value?.pulls ?? [];
 }
 
 /** Where a live plan read goes: the actor defs and the viewer (injected when not given). */
@@ -23,8 +33,6 @@ export interface PlanReadDeps {
     readonly defs: Pick<ActorDefs, 'Plan'>;
     readonly viewer: Pick<ViewerState, 'workspaceId'>;
 }
-
-const projectIdOf = (projectId: string | (() => string)): (() => string) => (typeof projectId === 'function' ? projectId : () => projectId);
 
 /**
  * The project's plans, live: one `useActorState` read of its Plan actor's `list()` (#750), opened here in setup.

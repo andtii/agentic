@@ -15,6 +15,7 @@ import { opsLimitAccounts } from '../mock/ops';
 import { SetupChecklist } from './home/SetupChecklist';
 import { NeedsYou, useNeedsSource } from './inbox';
 import { mockPullNeeds } from './projects/work/pull/links';
+import { PullsFeed, createWorkspacePulls, livePullNeeds } from './projects/work/pull/LivePulls';
 import { TASK_TABLE_COLS, TASK_TABLE_COLUMNS } from './task/live';
 import { LiveActiveTasks } from './task/LiveTasks';
 import { costPartsOf, costText, monthLabel } from './usage/live';
@@ -63,7 +64,8 @@ defineTopbar('home', () => ({ actions: () => <Button intent="primary" icon="plus
  * apart, `n/a` when nothing was priced — and the active tasks from the
  * TaskIndex (`LiveActiveTasks`). Today's schedule is not read here yet: the
  * Schedules page lists it. Above everything, while no runtime is ready, the
- * setup checklist says what to do first (#234).
+ * setup checklist says what to do first (#234). The pull requests whose move is yours join "Needs you" from every
+ * Git project's Pulls actor (#865).
  */
 export const LiveHome = component(() => {
     const defs = useActorDefs();
@@ -71,6 +73,8 @@ export const LiveHome = component(() => {
     const needs = useNeedsSource()();
     const ws = useActorState(defs.Workspace, () => viewer.workspaceId && ([workspaceKeyOf(viewer.workspaceId), 'get'] as const), { live: true });
     const spend = useMonthSpend(defs, viewer);
+    const feed = createWorkspacePulls();
+    const pulls = livePullNeeds(feed, defs, () => viewer.workspaceId);
     return (): JSXElement => {
         const w = ws.value;
         if (w && w.agents.length === 0) {
@@ -86,7 +90,8 @@ export const LiveHome = component(() => {
         return (
             <Page title="Home" page="home" hideTitle>
                 <SetupChecklist />
-                <NeedsYou source={needs} />
+                <PullsFeed feed={feed} />
+                <NeedsYou source={needs} pulls={pulls} />
 
                 <aside data-home-rail aria-label="Today, spend and limits">
                     <Panel label={`Today · ${w?.settings.timeZone ?? 'UTC'}`} slots={{ aside: () => <Link to="/schedules">All schedules</Link> }}>
@@ -119,7 +124,7 @@ export const LiveHome = component(() => {
     };
 });
 
-/** `/` — what needs you (live through `useNeedsSource`, #40; on mock data also the pull requests whose move is yours, #826), today and spend, every active task; the platform's in live mode (#146). */
+/** `/` — what needs you (live through `useNeedsSource`, #40; the pull requests whose move is yours, #826, live #865), today and spend, every active task; the platform's in live mode (#146). */
 export const Home = component(() => {
     if (dataMode() === 'live') return () => <LiveHome />;
     const view = loadHome();
