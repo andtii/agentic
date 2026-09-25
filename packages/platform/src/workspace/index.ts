@@ -546,6 +546,8 @@ export function defineWorkspace(options: WorkspaceOptions = {}) {
                 // The manager (#784): a new project gets one from `pm`, or from the default preset unless the patch opts
                 // out (`pm: null`) or names its own coordinator; a change with `pm` creates or updates it, `null` unlinks it.
                 const pmSpec = patch.pm === null ? null : patch.pm !== undefined ? pmChecked('upsertProject', () => checkedPmSpec(patch.pm)) : !base && (patch.members?.coordinator ?? null) === null ? DEFAULT_PM_SPEC : undefined;
+                // The manager's policy (#819): checked like `setProjectPmPolicy`; the manager agent is left alone.
+                const pmPolicy = patch.pmPolicy !== undefined ? pmChecked('upsertProject', () => checkedPmPolicy(patch.pmPolicy)) : undefined;
                 const connectors = checkedConnectors(patch.connectors, base?.connectors);
                 const folders = await checkedFolders(ctx, base?.folders, patch.folders);
                 const features = await checkedFeatures(ctx, base?.features, patch.features);
@@ -579,12 +581,13 @@ export function defineWorkspace(options: WorkspaceOptions = {}) {
                     const { agentId, ...pm } = record.pm;
                     record = { ...record, members: { ...record.members, coordinator: record.members.coordinator === agentId ? null : record.members.coordinator }, pm };
                 }
+                if (pmPolicy) record = { ...record, pm: { ...(record.pm?.agentId ? { agentId: record.pm.agentId } : {}), policy: pmPolicy } };
                 const saved = record;
                 ctx.state.projects = base ? current.map((p) => (p.id === saved.id ? saved : p)) : [...current, saved];
                 await ctx.save();
                 // Through the Agent create path: its first (or next) config version, audited as `config.versioned`.
                 if (pmConfig) await ctx.actor(AgentActor, agentKey(ownerOfWorkspaceKey(ctx.key) as WorkspaceId, saved.pm!.agentId!)).update(pmConfig, `project manager of ${saved.name}`);
-                const data: ProjectChangedData = { projectId: record.id, name: record.name, op: base ? 'updated' : 'created', changed: changedKeys(base, record) };
+                const data: ProjectChangedData = { projectId: record.id, name: record.name, op: base ? 'updated' : 'created', changed: [...changedKeys(base, record), ...(pmPolicy && JSON.stringify(base?.pm?.policy) !== JSON.stringify(pmPolicy) ? ['pm.policy'] : [])] };
                 await recordAudit(ctx, ownerOfWorkspaceKey(ctx.key) as WorkspaceId, {
                     key: `${ctx.key}:project:${record.id}:${at}`,
                     kind: 'project.changed',

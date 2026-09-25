@@ -158,6 +158,8 @@ declare module './project.js' {
     interface ProjectPatch {
         /** Create or change the project's manager agent; `null` removes it. */
         readonly pm?: ProjectManagerSpec | null;
+        /** Replace the manager's policy (`pm.policy`, #819); the manager agent is kept. Left out → kept. */
+        readonly pmPolicy?: PmPolicy;
     }
 }
 
