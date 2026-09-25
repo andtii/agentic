@@ -12,9 +12,14 @@
  * while the PR is open, completes when it merges and fails when it is closed without merging. `pull.merged` and
  * `pull.closed` are audited once per PR.
  *
+ * Autopilot (#820, PRJ-09): an open PR with switches keeps one `AutopilotRun`, driven after every good poll through
+ * the app's `PullsAutopilotPort`; `setAutopilot`, `takeOver`, `stopAutopilot`, `resumeAutopilot`,
+ * `autopilotTurnEnded` and `answerMerge` are the page's and the chat's hooks. The view carries each PR through
+ * `withAutopilotRun`, so its `autopilot.attempt` and `activity` are the run's.
+ *
  * Workers eviction rule: every mutation below ends in `ctx.save()` inside the turn.
  */
-import { isTerminal, type ChatId, type ProjectId, type PullRequest, type SessionId, type TaskId, type WorkspaceId } from '@agentic/core';
+import { isTerminal, type AgentId, type ApprovalRule, type Autopilot, type ChatId, type ProjectId, type PullRequest, type SessionId, type TaskId, type WorkspaceId } from '@agentic/core';
 import { defineActor, type ActorContext, type ActorPolicy } from '@sigx/actors';
 import { ServerFnError } from '@sigx/server';
 import { auditPort, type AuditPort } from '../audit/port.js';
@@ -23,6 +28,20 @@ import { TaskActor } from '../task/actor.js';
 import { taskKey } from '../task/key.js';
 import { parsePullsKey, PULLS_TYPE } from './key.js';
 import type { PullSource, PullSourcePort } from './ports.js';
+import {
+    ASK_ON_MERGE,
+    autopilotMergeAnswered,
+    autopilotTurnEnded,
+    driveAutopilot,
+    NEW_AUTOPILOT_RUN,
+    resumeAutopilot,
+    stopAutopilot,
+    takeOverAutopilot,
+    withAutopilotRun,
+    type AutopilotPort,
+    type AutopilotRun
+} from './autopilot.js';
+import type { PullsAutopilotPort } from './autopilot-port.js';
 
 // ---------------------------------------------------------------------------
 // State
@@ -48,6 +67,10 @@ interface TrackedPull {
     audited?: boolean;
     /** The task this PR's end was already applied to. */
     taskDone?: TaskId;
+    /** The autopilot's run on this PR (#820), while it has switches. */
+    autopilot?: AutopilotRun;
+    /** A merge the autopilot asked you for, until `answerMerge` (or the PR stops being green). */
+    mergeAsk?: { readonly agentId: AgentId; readonly at: number };
 }
 
 export interface PullsState {
@@ -94,6 +117,28 @@ export interface PullsActorOptions {
     readonly allowAnonymous?: true;
     /** Where `pull.merged` / `pull.closed` go. Default: the workspace's Audit log. */
     readonly audit?: AuditPort;
+    /**
+     * What the autopilot acts through, per workspace (#820): turns in the PR's chat, the merge, your-move rows. Absent
+     * → the switches are kept and shown, but nothing is driven.
+     */
+    readonly autopilot?: (ref: { readonly workspaceId: WorkspaceId; readonly projectId: ProjectId }) => PullsAutopilotPort;
+}
+
+/** The switches `setAutopilot` takes: core's `Autopilot` without what the run fills. */
+export type AutopilotSwitches = Omit<Autopilot, 'attempt' | 'activity'>;
+/** The most fix attempts a PR's autopilot may be given. */
+export const AUTOPILOT_MAX_ATTEMPTS = 10;
+
+function checkSwitches(pilot: AutopilotSwitches): AutopilotSwitches {
+    if (!pilot || typeof pilot !== 'object') throw new ServerFnError(400, '[pulls] autopilot must be an object');
+    if (typeof pilot.agentId !== 'string' || !pilot.agentId.trim() || pilot.agentId.length > 200) throw new ServerFnError(400, '[pulls] autopilot.agentId must be an agent id');
+    for (const k of ['fixChecks', 'answerThreads', 'rebase', 'mergeWhenGreen'] as const) {
+        if (typeof pilot[k] !== 'boolean') throw new ServerFnError(400, `[pulls] autopilot.${k} must be a boolean`);
+    }
+    if (!Number.isSafeInteger(pilot.maxAttempts) || pilot.maxAttempts < 1 || pilot.maxAttempts > AUTOPILOT_MAX_ATTEMPTS) {
+        throw new ServerFnError(400, `[pulls] autopilot.maxAttempts must be 1..${AUTOPILOT_MAX_ATTEMPTS}`);
+    }
+    return { agentId: pilot.agentId, fixChecks: pilot.fixChecks, maxAttempts: pilot.maxAttempts, answerThreads: pilot.answerThreads, rebase: pilot.rebase, mergeWhenGreen: pilot.mergeWhenGreen };
 }
 
 /** The reminder every poll is armed under. */
@@ -156,7 +201,7 @@ export function definePullsActor(options: PullsActorOptions) {
         projectId: s.projectId,
         ...(s.repo ? { repo: { ...s.repo } } : {}),
         pulls: Object.values(s.pulls)
-            .map((t) => t.pr)
+            .map((t) => (t.autopilot ? withAutopilotRun(t.pr, t.autopilot) : t.pr))
             .sort((a, b) => b.number - a.number),
         ...(s.polledAt !== undefined ? { polledAt: s.polledAt } : {}),
         ...(s.next !== undefined ? { next: s.next } : {}),
@@ -250,6 +295,48 @@ export function definePullsActor(options: PullsActorOptions) {
         t.audited = true;
     };
 
+    const portFor = (s: PullsState): PullsAutopilotPort | undefined => options.autopilot?.({ workspaceId: s.workspaceId, projectId: s.projectId });
+
+    /**
+     * Step the PR's autopilot and take its actions (#820). A merge whose rule says `ask` is not taken: it is recorded
+     * as `mergeAsk`, told to you (`askMerge`) and waits for `answerMerge`; `deny` declines it; `allow` merges.
+     */
+    const drive = async (s: PullsState, t: TrackedPull): Promise<void> => {
+        const port = portFor(s);
+        if (!port || !t.pr.autopilot) return;
+        if (t.pr.state !== 'open') {
+            delete t.mergeAsk;
+            return;
+        }
+        const run = t.autopilot ?? NEW_AUTOPILOT_RUN;
+        let asked: { agentId: AgentId; rule: ApprovalRule } | undefined;
+        const gate: AutopilotPort = {
+            startTurn: (turn) => port.startTurn(turn),
+            merge: async (request) => {
+                if (request.rule.outcome === 'ask') {
+                    asked = { agentId: request.agentId, rule: request.rule };
+                    return { merged: false };
+                }
+                if (request.rule.outcome === 'deny') return { merged: false, reason: `the approval rule ${request.rule.id} denies it` };
+                return port.merge(request);
+            },
+            yourMove: async (event) => {
+                if (asked && event.stop.reason === 'merge-declined') return;
+                await port.yourMove?.(event);
+            }
+        };
+        let out = await driveAutopilot(gate, run, t.pr, now());
+        if (asked) {
+            // Not declined: asked. The run keeps `mergeAsked` (one ask per green run) and waits for the answer.
+            const { stopped: _s, ...rest } = out;
+            out = rest;
+            t.mergeAsk = { agentId: asked.agentId, at: now() };
+            await port.askMerge?.({ agentId: asked.agentId, rule: asked.rule, pr: t.pr }).catch(() => undefined);
+        }
+        if (!out.mergeAsked) delete t.mergeAsk;
+        t.autopilot = out;
+    };
+
     /** Read the source, fold, follow the tasks, arm the next poll — all inside this turn. */
     const poll = async (ctx: Ctx): Promise<void> => {
         const s = ctx.state;
@@ -299,6 +386,16 @@ export function definePullsActor(options: PullsActorOptions) {
             await record(ctx, t);
             await followTask(ctx, t);
         }
+        // Only on a good read: the autopilot acts on what the PR shows now, never on a stale view.
+        if (s.error === undefined) {
+            for (const t of Object.values(s.pulls)) {
+                try {
+                    await drive(s, t);
+                } catch (error) {
+                    console.warn(`[pulls] autopilot on #${t.pr.number} failed:`, error);
+                }
+            }
+        }
         prune(s);
         s.polledAt = at;
         s.next = at + delay;
@@ -332,6 +429,19 @@ export function definePullsActor(options: PullsActorOptions) {
         methods: (ctx) => {
             const requireKey = (): void => {
                 if (parsePullsKey(ctx.key) === null) throw new ServerFnError(400, `[pulls] key must be "{ws}:pulls:{projectId}", got "${ctx.key}"`);
+            };
+            const trackedOf = (number: number): TrackedPull => {
+                requireKey();
+                if (!Number.isSafeInteger(number) || number <= 0) throw new ServerFnError(400, '[pulls] number must be a PR number');
+                const t = ctx.state.pulls[String(number)];
+                if (!t) throw new ServerFnError(404, `[pulls] #${number} is not tracked`);
+                return t;
+            };
+            /** Save the change; with `pollNow`, read (and drive) at once on the next reminder. */
+            const settle = async (pollNow = true): Promise<PullsView> => {
+                await ctx.save();
+                if (pollNow && ctx.state.repo) await ctx.reminders.set(PULLS_POLL, { due: 0 });
+                return view(ctx.state);
             };
             return {
                 /** Track the repo the project's origin names (plugins-git `pullRepoOf`) and poll it now. Another repo starts over. */
@@ -397,6 +507,78 @@ export function definePullsActor(options: PullsActorOptions) {
                     s.intervalMs = POLL_FLOOR_MS;
                     await poll(ctx);
                     return view(s);
+                },
+
+                /**
+                 * Switch the PR's autopilot on with `switches`, or off for good with `null` (#820). A run that was
+                 * stopped or switched off starts again; the PR is read and driven at once.
+                 */
+                async setAutopilot(number: number, switches: AutopilotSwitches | null): Promise<PullsView> {
+                    const t = trackedOf(number);
+                    if (switches === null) {
+                        const { autopilot: _a, ...pr } = t.pr;
+                        t.pr = pr;
+                        delete t.autopilot;
+                        delete t.mergeAsk;
+                    } else {
+                        t.pr = { ...t.pr, autopilot: checkSwitches(switches) };
+                        if (t.autopilot && (t.autopilot.off || t.autopilot.stopped)) t.autopilot = resumeAutopilot(t.autopilot);
+                    }
+                    return settle();
+                },
+
+                /** `Take over`: the PR is yours; the autopilot keeps its switches and does nothing until resumed. */
+                async takeOver(number: number): Promise<PullsView> {
+                    const t = trackedOf(number);
+                    t.autopilot = takeOverAutopilot(t.autopilot ?? NEW_AUTOPILOT_RUN, now());
+                    delete t.mergeAsk;
+                    return settle(false);
+                },
+
+                /** `Stop autopilot`: switched off until resumed. */
+                async stopAutopilot(number: number): Promise<PullsView> {
+                    const t = trackedOf(number);
+                    t.autopilot = stopAutopilot(t.autopilot ?? NEW_AUTOPILOT_RUN);
+                    delete t.mergeAsk;
+                    return settle(false);
+                },
+
+                /** Back on the PR with a fresh attempt count; read and driven at once. */
+                async resumeAutopilot(number: number): Promise<PullsView> {
+                    const t = trackedOf(number);
+                    t.autopilot = resumeAutopilot(t.autopilot ?? NEW_AUTOPILOT_RUN);
+                    return settle();
+                },
+
+                /** The PR's chat says the autopilot's turn ended: the PR now has `AUTOPILOT_SETTLE_MS` to show its effect. */
+                async autopilotTurnEnded(number: number): Promise<PullsView> {
+                    const t = trackedOf(number);
+                    if (t.autopilot) t.autopilot = autopilotTurnEnded(t.autopilot, now());
+                    return settle(false);
+                },
+
+                /**
+                 * Your answer to the merge the autopilot asked for (`ask on merge`): approved, it merges through the
+                 * app's port and the PR is read at once; declined (or refused by the provider), the autopilot stops.
+                 */
+                async answerMerge(number: number, approve: boolean): Promise<PullsView> {
+                    const t = trackedOf(number);
+                    if (typeof approve !== 'boolean') throw new ServerFnError(400, '[pulls] approve must be a boolean');
+                    const ask = t.mergeAsk;
+                    if (!ask || t.pr.state !== 'open') throw new ServerFnError(409, `[pulls] #${number} has no merge waiting for an answer`);
+                    delete t.mergeAsk;
+                    const run = t.autopilot ?? NEW_AUTOPILOT_RUN;
+                    let answer: { merged: boolean; reason?: string } = { merged: false, reason: 'you declined it' };
+                    if (approve) {
+                        const port = portFor(ctx.state);
+                        try {
+                            answer = port ? await port.merge({ agentId: ask.agentId, rule: ASK_ON_MERGE, pr: t.pr }) : { merged: false, reason: 'no merge is wired on this deployment' };
+                        } catch (error) {
+                            answer = { merged: false, reason: (error instanceof Error ? error.message : String(error)).slice(0, 300) };
+                        }
+                    }
+                    t.autopilot = autopilotMergeAnswered(run, t.pr, answer.merged, now(), answer.reason).run;
+                    return settle(answer.merged);
                 },
 
                 /** Poll now. */
