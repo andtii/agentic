@@ -91,7 +91,7 @@ One slot per sub-issue of [#722](https://github.com/andtii/agentic/issues/722). 
 
 - #728: —
 
-- #729: —
+- #729: `pages/projects/index/model.ts` pill / strip wording (`cardPills`, `unassignedText`) could move to `@agentic/ui` once Home or project Overview needs the same `N YOUR MOVE` / `N AGENTS ON IT` pills.
 
 - #730: —
 

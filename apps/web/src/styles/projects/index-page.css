@@ -1,1 +1,44 @@
-/* Projects redesign (#722): the projects index: cards, tabs, strips — owned by #729. Empty until then (#725). */
+/* Projects redesign (#722): the projects index (#729) — heading, tabs, the strips and the 3-column card grid. */
+@import '@agentic/ui/css/breakpoints';
+
+[data-projects-index] { display: flex; flex-direction: column; gap: var(--space-lg); }
+[data-projects-head] { display: flex; align-items: center; justify-content: space-between; gap: var(--space-lg); }
+[data-projects-head] h1 { margin: 0; display: flex; align-items: baseline; gap: var(--space-sm); }
+[data-projects-count] { font-family: var(--font-mono); font-size: var(--text-sm); font-weight: 400; color: var(--ag-text-dim); }
+
+[data-projects-tabs] { display: flex; gap: var(--space-xl); border-block-end: var(--border) solid var(--ag-line); }
+[data-projects-tabs] .projects-tab { display: inline-flex; align-items: baseline; gap: var(--space-xs); padding-block: var(--space-sm); margin-block-end: -1px; color: var(--ag-text-muted); text-decoration: none; font-weight: 500; border-block-end: 2px solid transparent; }
+[data-projects-tabs] .projects-tab:hover { color: var(--color-base-content); }
+[data-projects-tabs] .projects-tab[aria-current="page"] { color: var(--color-base-content); border-block-end-color: var(--color-primary); }
+[data-projects-tab-count] { color: var(--ag-text-dim); }
+
+[data-projects-links-strip], [data-projects-unassigned] { display: flex; align-items: center; gap: var(--space-md); padding: var(--space-md) var(--space-lg); border: var(--border) solid var(--ag-line); border-radius: var(--radius-box); font-size: var(--text-sm); color: var(--ag-text-muted); min-inline-size: 0; }
+[data-projects-links-strip] { background: var(--color-base-200); }
+[data-projects-links-strip] strong { color: var(--color-base-content); font-weight: 600; white-space: nowrap; }
+[data-projects-links-summary] { flex: 1 1 auto; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ag-text-dim); }
+[data-projects-unassigned] { border-style: dashed; }
+[data-projects-unassigned] > span { flex: 1 1 auto; min-inline-size: 0; }
+.projects-strip-action { margin-inline-start: auto; white-space: nowrap; }
+
+[data-projects-grid] { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-lg); }
+[data-projects-grid] > li { display: flex; min-inline-size: 0; }
+[data-projects-index] .project-card { flex: 1 1 auto; display: flex; flex-direction: column; gap: var(--space-md); padding: var(--space-xl); background: var(--color-base-200); border: var(--border) solid var(--ag-line); border-radius: var(--radius-box); color: var(--color-base-content); text-decoration: none; min-inline-size: 0; transition: border-color var(--duration-fast) var(--ease-standard); }
+[data-projects-index] .project-card:hover { border-color: var(--ag-line-strong); }
+[data-projects-index] .project-card:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+[data-project-card-head] { display: flex; align-items: flex-start; gap: var(--space-md); min-inline-size: 0; }
+[data-project-card-title] { flex: 1 1 auto; display: flex; flex-direction: column; min-inline-size: 0; }
+[data-projects-index] [data-project-name] { font-weight: 600; font-size: var(--text-md); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+[data-projects-index] [data-project-description] { font-size: var(--text-sm); color: var(--ag-text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+[data-projects-index] [data-project-badges] { display: flex; flex-wrap: wrap; gap: var(--space-xs); align-items: center; }
+[data-projects-index] [data-project-badges] [data-tag] { font-family: var(--font-mono); gap: var(--space-xs); }
+[data-project-pills] { display: flex; flex-wrap: wrap; gap: var(--space-xs); }
+[data-project-next] { font-size: var(--text-sm); color: var(--ag-text-muted); overflow-wrap: anywhere; }
+
+/* 2 columns 768–1279, 1 below */
+@media (--below-xl) {
+    [data-projects-grid] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (--below-md) {
+    [data-projects-grid] { grid-template-columns: minmax(0, 1fr); }
+    [data-projects-links-summary] { display: none; }
+}
