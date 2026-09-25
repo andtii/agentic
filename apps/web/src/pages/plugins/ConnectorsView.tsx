@@ -13,7 +13,7 @@
  */
 import { component, signal, type Define, type JSXElement } from 'sigx';
 import type { Dependents, PluginView } from '@agentic/platform';
-import { AgentTile, Button, ConfirmDialog, EmptyState, FormDialog, Label, PluginRow, SearchField, Switch, TextField, type AgentHue } from '@agentic/ui';
+import { AgentTile, Button, ConfirmDialog, EmptyState, FilterChips, FormDialog, Label, PluginRow, SearchField, Switch, TextField, type AgentHue } from '@agentic/ui';
 import { connectorAccounts, connectorDependents, connectorFacts, connectorPlugins, connectorRecords } from '../../mock/plugins-connectors';
 import { dataMode } from '../../data-mode';
 import { OpsPage } from '../ops/OpsPage';
@@ -73,12 +73,13 @@ export const ConnectorsList = component<ConnectorsListProps>(({ props, emit }) =
                     lead: () => (
                         <div data-connectors-controls>
                             <SearchField model={() => st.query} label="Filter your connectors" placeholder="Filter your connectors" />
-                            <div role="group" aria-label="Filter by readiness" data-connector-chips>
-                                {connectorChips(all).map((c) => (
-                                    <button key={c.id} type="button" data-filter-chip data-chip={c.id} aria-pressed={st.filter === c.id ? 'true' : 'false'} onClick={() => { st.filter = c.id; }}>
-                                        <span data-chip-label>{c.label}</span>{' '}<span data-chip-count>{c.count}</span>
-                                    </button>
-                                ))}
+                            <div data-connector-chips>
+                                <FilterChips
+                                    label="Filter by readiness"
+                                    model={() => st.filter}
+                                    options={connectorChips(all).map((c) => ({ value: c.id, label: c.label, count: c.count }))}
+                                    onValueChange={(v: string) => { st.filter = v as ConnectorFilter; }}
+                                />
                             </div>
                         </div>
                     ),

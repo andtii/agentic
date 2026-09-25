@@ -5,15 +5,8 @@
 [data-connectors-controls] { flex: 1 1 auto; display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-md); min-inline-size: 0; }
 /* The kit box is `min(440px, 100%)`; the board's is 420 px, kept at that basis beside the chips. */
 [data-connectors-controls] [data-search-field] { flex: 0 1 420px; min-inline-size: min(420px, 100%); }
-[data-connector-chips] { display: flex; align-items: center; gap: 6px; flex: none; }
-/* The chip base these rows once took from history.css (moved here by #594); ConnectorsView moves onto the kit FilterChips in a follow-up. */
-[data-connector-chips] [data-filter-chip] { appearance: none; border: var(--border) solid var(--ag-line-strong); border-radius: var(--radius-field); background: transparent; color: var(--ag-text-muted); font: inherit; font-weight: var(--weight-medium); cursor: pointer; }
-[data-connector-chips] [data-filter-chip]:hover { color: var(--color-base-content); border-color: var(--ag-text-dim); }
-[data-connector-chips] [data-filter-chip][aria-pressed="true"] { background: var(--color-base-300); color: var(--color-base-content); }
-[data-connector-chips] [data-filter-chip]:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
-[data-connector-chips] [data-filter-chip] { display: inline-flex; align-items: center; gap: 6px; block-size: 30px; padding-inline: 10px; border-color: var(--ag-line); font-size: var(--text-sm); white-space: nowrap; }
-[data-connector-chips] [data-filter-chip][aria-pressed="true"] { border-color: var(--ag-line-strong); }
-[data-chip-count] { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--ag-text-dim); }
+/* The chips are the kit `FilterChips` (#687): the look is the toggle-group patch on `[data-filter-chips]`; the row only keeps them beside the box. */
+[data-connector-chips] { flex: none; }
 
 [data-plugin-connectors] { display: flex; flex-direction: column; gap: var(--space-sm); }
 [data-connectors-label] { display: flex; align-items: center; gap: var(--space-md); padding-inline: 4px; min-inline-size: 0; }
@@ -33,9 +26,9 @@
 [data-connector-schedules] { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--ag-text-dim); }
 [data-mcp-sign-in] { display: flex; flex-direction: column; gap: var(--space-md); margin-block-end: var(--space-lg); }
 
-/* The phone (#641): 44 px chips and Remove; the group label keeps one line. */
+/* The phone (#641): 44 px chips (a size override on the kit root) and Remove; the group label keeps one line. */
 @media (--below-md) {
-    [data-connector-chips] [data-filter-chip] { block-size: 44px; }
+    [data-connector-chips] > [data-filter-chips] > [data-part="item"] { block-size: 44px; }
     [data-connectors-label] > :first-child { white-space: nowrap; }
     [data-connector-remove] [data-scope="button"] { min-block-size: 44px; min-inline-size: 44px; }
 }

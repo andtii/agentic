@@ -85,7 +85,16 @@ describe('connectors model (#638)', () => {
 const rowOf = (root: ParentNode, id: string): HTMLElement => root.querySelector<HTMLElement>(`[data-connector-item="${id}"]`)!;
 const ids = (root: ParentNode): string[] => [...root.querySelectorAll('[data-connector-item]')].map((li) => li.getAttribute('data-connector-item')!);
 const readinessOf = (row: ParentNode): string | null => row.querySelector('[data-plugin-row]')?.getAttribute('data-readiness') ?? null;
-const chip = (root: ParentNode, id: string): HTMLButtonElement => root.querySelector<HTMLButtonElement>(`[data-connector-chips] [data-chip="${id}"]`)!;
+/** The kit `FilterChips` (#687): its items under `[data-filter-chips]`, no chip of the page's own. */
+const chips = (root: ParentNode): HTMLButtonElement[] => [...root.querySelectorAll<HTMLButtonElement>('[data-connector-chips] [data-filter-chips] [data-part="item"]')];
+/** `Needs sign-in 1`: the chip's label, a space, its `[data-chip-count]`. */
+const chipText = (b: Element): string => {
+    const count = b.querySelector('[data-chip-count]');
+    const label = [...b.childNodes].filter((n) => n !== count).map((n) => n.textContent).join('').trim();
+    return count ? `${label} ${count.textContent!.trim()}` : label;
+};
+const CHIP_LABELS: Record<string, string> = { all: 'All', ready: 'Ready', 'needs-sign-in': 'Needs sign-in' };
+const chip = (root: ParentNode, id: string): HTMLButtonElement => chips(root).find((b) => chipText(b).startsWith(`${CHIP_LABELS[id]} `))!;
 /** The open dialog: zero portals it out of the mounted root. */
 const popup = (_root?: ParentNode) => document.querySelector<HTMLElement>('[data-scope="dialog"][data-part="popup"][data-state="open"]');
 
@@ -129,7 +138,10 @@ describe('/plugins?kind=connector (#638, mock)', () => {
         // Only the one that needs it offers Sign in.
         expect(root.querySelectorAll('[data-plugin-row-part="fix"] button').length).toBe(1);
 
-        expect([...root.querySelectorAll('[data-connector-chips] [data-filter-chip]')].map((c) => text(c))).toEqual(['All 4', 'Ready 3', 'Needs sign-in 1']);
+        expect(root.querySelector('[data-connector-chips] [data-filter-chip]')).toBeNull();
+        expect(root.querySelector('[data-connector-chips] [data-filter-chips]')!.getAttribute('aria-label')).toBe('Filter by readiness');
+        expect(chips(root).map(chipText)).toEqual(['All 4', 'Ready 3', 'Needs sign-in 1']);
+        expect(chip(root, 'all').getAttribute('aria-pressed')).toBe('true');
         chip(root, 'needs-sign-in').click();
         await tick();
         expect(chip(root, 'needs-sign-in').getAttribute('aria-pressed')).toBe('true');
@@ -168,7 +180,7 @@ describe('/plugins?kind=connector (#638, mock)', () => {
         form.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
         await tick();
         expect(readinessOf(rowOf(root, 'linear'))).toBe('ready');
-        expect(text(chip(root, 'needs-sign-in'))).toBe('Needs sign-in 0');
+        expect(chipText(chip(root, 'needs-sign-in'))).toBe('Needs sign-in 0');
     });
 
     it('Remove confirms by name while an agent picks the connector, and removes one nobody picks at once', async () => {
@@ -234,7 +246,7 @@ describe('/plugins?kind=connector (#638, live)', () => {
         const row = () => rowOf(dom, 'linear');
         await until(() => !!row() && readinessOf(row()) === 'needs-sign-in', 'the signed-out row');
         expect(text(row().querySelector('[data-plugin-row-part="description"]'))).toBe('mcp.linear.test/mcp · token expired');
-        expect(text(chip(dom, 'needs-sign-in'))).toBe('Needs sign-in 1');
+        expect(chipText(chip(dom, 'needs-sign-in'))).toBe('Needs sign-in 1');
 
         buttonNamed(row(), 'Sign in').click();
         await until(() => popup(dom) !== null, 'the sign-in form');
