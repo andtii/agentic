@@ -25,16 +25,17 @@ export interface ProjectFeatureUi {
     readonly needs?: readonly ProjectFeatureNeed[];
 }
 
-const isStrings = (v: unknown): boolean => Array.isArray(v) && v.every((s) => typeof s === 'string' && s.length > 0);
+const isText = (v: unknown): boolean => typeof v === 'string' && v.length > 0;
+const isStrings = (v: unknown): boolean => Array.isArray(v) && v.every(isText);
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 
 /** Why a manifest's `ui` block is malformed, or `undefined` when it is well formed. */
 export function projectFeatureUiError(ui: unknown): string | undefined {
     if (!isObject(ui)) return 'ui must be an object';
     const { section, overviewCard, workStages, chatRefPrefixes, tools, needs } = ui;
-    if (section !== undefined && (!isObject(section) || typeof section.label !== 'string' || typeof section.icon !== 'string' || (section.badge !== undefined && section.badge !== 'open-items' && section.badge !== 'none')))
+    if (section !== undefined && (!isObject(section) || !isText(section.label) || !isText(section.icon) || (section.badge !== undefined && section.badge !== 'open-items' && section.badge !== 'none')))
         return 'ui.section needs a label and an icon';
-    if (overviewCard !== undefined && (!isObject(overviewCard) || typeof overviewCard.title !== 'string')) return 'ui.overviewCard needs a title';
+    if (overviewCard !== undefined && (!isObject(overviewCard) || !isText(overviewCard.title))) return 'ui.overviewCard needs a title';
     if (workStages !== undefined && (!isStrings(workStages) || (workStages as unknown[]).length < 2)) return 'ui.workStages needs at least two stage names';
     if (chatRefPrefixes !== undefined && !isStrings(chatRefPrefixes)) return 'ui.chatRefPrefixes must be strings';
     if (tools !== undefined && !isStrings(tools)) return 'ui.tools must be tool family names';

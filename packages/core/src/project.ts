@@ -13,7 +13,7 @@ import type { ConnectorRef } from './agent.js';
 import type { AgentId, ChatId, EnvironmentId, MachineId, ProjectId, TaskId } from './ids.js';
 import type { ConfigSchema } from './plugin-config.js';
 import type { PluginManifest } from './plugin.js';
-import { projectFeatureUiError, type ProjectFeatureCategory, type ProjectFeatureUi } from './project-ui.js';
+import { PROJECT_FEATURE_CATEGORIES, projectFeatureUiError, type ProjectFeatureCategory, type ProjectFeatureUi } from './project-ui.js';
 import type { FsError, FsGitInfo, FsOp, FsResult } from './workdir.js';
 
 /** A workspace holds at most this many projects. */
@@ -106,9 +106,10 @@ export interface ProjectFeatureManifest extends PluginManifest {
 
 export function isProjectFeatureManifest(manifest: PluginManifest): manifest is ProjectFeatureManifest {
     if (manifest.kind !== PROJECT_FEATURE_KIND || !Object.hasOwn(manifest, 'projectSettings')) return false;
-    const m = manifest as { projectSettings?: unknown; ui?: unknown };
+    const m = manifest as { projectSettings?: unknown; ui?: unknown; category?: unknown };
     const schema = m.projectSettings;
     if (typeof schema !== 'object' || schema === null || Array.isArray(schema)) return false;
+    if (m.category !== undefined && !(PROJECT_FEATURE_CATEGORIES as readonly unknown[]).includes(m.category)) return false;
     return m.ui === undefined || projectFeatureUiError(m.ui) === undefined;
 }
 

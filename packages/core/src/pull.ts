@@ -94,6 +94,6 @@ export function pullBlockers(pr: Pick<PullRequest, 'state' | 'draft' | 'checks' 
     const open = pr.review.threads.filter((t) => t.state !== 'resolved').length;
     if (open) out.push(count(open, 'open thread', 'open threads'));
     if (pr.review.state === 'changes-requested') out.push('changes requested');
-    else if (pr.review.state === 'requested') out.push(pr.review.reviewers.length ? `${pr.review.reviewers.join(', ')} has not approved` : 'review requested');
+    else if (pr.review.state === 'requested') out.push(pr.review.reviewers.length ? `${pr.review.reviewers.join(', ')} ${pr.review.reviewers.length === 1 ? 'has' : 'have'} not approved` : 'review requested');
     return out;
 }

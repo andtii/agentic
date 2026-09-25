@@ -37,12 +37,15 @@ describe('ProjectFeatureUi', () => {
         expect(projectFeatureUiError('x')).toBe('ui must be an object');
         expect(projectFeatureUiError({ section: { label: 'Code' } })).toMatch(/section/);
         expect(projectFeatureUiError({ section: { label: 'Code', icon: 'c', badge: 'lots' } })).toMatch(/section/);
+        expect(projectFeatureUiError({ section: { label: '', icon: 'c' } })).toMatch(/section/);
         expect(projectFeatureUiError({ overviewCard: {} })).toMatch(/overviewCard/);
+        expect(projectFeatureUiError({ overviewCard: { title: '' } })).toMatch(/overviewCard/);
         expect(projectFeatureUiError({ workStages: ['Only'] })).toMatch(/workStages/);
         expect(projectFeatureUiError({ chatRefPrefixes: [''] })).toMatch(/chatRefPrefixes/);
         expect(projectFeatureUiError({ tools: [1] })).toMatch(/tools/);
         expect(projectFeatureUiError({ needs: ['gpu'] })).toMatch(/needs/);
         expect(isProjectFeatureManifest(manifest({ ui: { workStages: [] } }))).toBe(false);
+        expect(isProjectFeatureManifest(manifest({ category: 'not-a-category' }))).toBe(false);
     });
 });
 
@@ -101,6 +104,7 @@ describe('pullBlockers', () => {
             }
         });
         expect(pullBlockers(blocked)).toEqual(['1 failing check', '1 check running', '2 open threads', 'Lint has not approved']);
+        expect(pullBlockers(pr({ review: { state: 'requested', reviewers: ['Lint', 'Nova'], threads: [] } }))).toEqual(['Lint, Nova have not approved']);
         expect(pullBlockers(pr({ draft: true, mergeable: false, review: { state: 'changes-requested', reviewers: [], threads: [] } }))).toEqual(['draft', 'conflicts with the base', 'changes requested']);
     });
 });
