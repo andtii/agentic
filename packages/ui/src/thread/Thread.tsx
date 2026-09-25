@@ -40,7 +40,7 @@ import { aiThreadAnatomy } from './anatomy.js';
 import { ApprovalPrompt, type RespondFn } from './ApprovalPrompt.js';
 import { QuestionPrompt } from './QuestionPrompt.js';
 import { Message, type MessageAuthor } from './Message.js';
-import { approvalContext, type DescribeRequestFn, type ToolLinksFn, type ToolMetaFn } from './ToolCall.js';
+import { approvalContext, type DescribeRequestFn, type PullLinksFn, type ToolLinksFn, type ToolMetaFn } from './ToolCall.js';
 import { DEFAULT_WINDOW, followRange, frozenRange, unitCount, windowRows } from './window.js';
 
 const SCOPE = aiThreadAnatomy.scope;
@@ -57,6 +57,8 @@ export type ThreadProps =
     & Define.Prop<'toolMeta', ToolMetaFn, false>
     /** Links a page puts on a call's card ("View diff"). */
     & Define.Prop<'toolLinks', ToolLinksFn, false>
+    /** Where a pull request a call returned leads (its `PullCard`): the PR page and its diff; the provider's page by default. */
+    & Define.Prop<'pullLinks', PullLinksFn, false>
     /** The approval card's context rows per request — rule, requester, environment, delegation path — resolved by the page. */
     & Define.Prop<'describeRequest', DescribeRequestFn, false>
     /** The session log long outputs link to. */
@@ -260,6 +262,7 @@ export const Thread = component<ThreadProps>(({ props, signal, onUpdated }) => {
                                 streaming={streaming && row.message === lastAssistant}
                                 toolMeta={props.toolMeta}
                                 toolLinks={props.toolLinks}
+                                pullLinks={props.pullLinks}
                                 logHref={props.logHref}
                                 onRespond={props.onRespond}
                                 describeRequest={props.describeRequest}

@@ -14,6 +14,7 @@ import { agentNamed, loadHome, rootOf, type MockTaskRow } from '../mock/workspac
 import { opsLimitAccounts } from '../mock/ops';
 import { SetupChecklist } from './home/SetupChecklist';
 import { NeedsYou, useNeedsSource } from './inbox';
+import { mockPullNeeds } from './projects/work/pull/links';
 import { TASK_TABLE_COLS, TASK_TABLE_COLUMNS } from './task/live';
 import { LiveActiveTasks } from './task/LiveTasks';
 import { costPartsOf, costText, monthLabel } from './usage/live';
@@ -118,11 +119,12 @@ export const LiveHome = component(() => {
     };
 });
 
-/** `/` — what needs you (live through `useNeedsSource`, #40), today and spend, every active task; the platform's in live mode (#146). */
+/** `/` — what needs you (live through `useNeedsSource`, #40; on mock data also the pull requests whose move is yours, #826), today and spend, every active task; the platform's in live mode (#146). */
 export const Home = component(() => {
     if (dataMode() === 'live') return () => <LiveHome />;
     const view = loadHome();
     const needs = useNeedsSource()();
+    const pulls = mockPullNeeds();
     const st = signal({ stopAll: false });
     const chains = () => [...new Set(view.tasks.map((t) => rootOf(t).objective))];
     return () => {
@@ -136,7 +138,7 @@ export const Home = component(() => {
         const spendPct = Math.min(100, Math.round((view.spend.monthUsd / view.spend.limitUsd) * 100));
         return (
             <Page title="Home" page="home" hideTitle>
-                <NeedsYou source={needs} />
+                <NeedsYou source={needs} pulls={pulls} />
 
                 <aside data-home-rail aria-label="Today, spend and limits">
                     <Panel label={`Today · ${view.timeZone}`} slots={{ aside: () => <Link to="/schedules">All schedules</Link> }}>
