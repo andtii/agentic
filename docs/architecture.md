@@ -619,7 +619,9 @@ _not yet_
 
 #### #734 platform: member roles/limits, project colour, project summaries
 
-_not yet_
+`Workspace.upsertProject` validates `ProjectMembers.roles` and `.limits`. A role is one line of at most `MAX_PROJECT_ROLE_LENGTH` (40) characters, and an empty role drops the entry. A limit is a whole number from 1 to `MEMBER_LIMIT_MAX`. Both are keyed by members only; a members patch that leaves them out keeps the entries of the agents that are still members. `color` must be one of `PROJECT_COLORS`, and `null` clears it. `project.changed` carries `data.changed`: the record keys that changed, or every key set when the project is created (#775 types it on `ProjectChangedData`).
+
+`Workspace.projectSummaries()` is reentrant. It returns one line per project with `openChats`, `archivedChats` (0 until chats can be archived, #774) and `lastActivityAt` (the newest entry's `at`), plus an `unassigned` line for chats in no project or in a removed one. The Workspace index holds chat ids only, so it reads each chat over hops (`Chat.get`, `Chat.history(null, 1)`), eight at a time; a chat that cannot be read is left out. The client adds the work and plan counts.
 
 #### #735 platform: Registry exposes project-feature ui slots, categories and needs
 

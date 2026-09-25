@@ -101,7 +101,7 @@ One slot per sub-issue of [#722](https://github.com/andtii/agentic/issues/722). 
 
 - #733: —
 
-- #734: —
+- #734: `eachLimited` (bounded-concurrency fan-out) in `packages/platform/src/workspace/index.ts` is generic: a candidate for `@sigx/actors` next to hop fan-out helpers.
 
 - #735: —
 

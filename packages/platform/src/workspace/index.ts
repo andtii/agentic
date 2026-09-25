@@ -15,10 +15,11 @@
  * ports: its tasks record the failure in `ops` and change nothing.
  */
 
-import type { AgentId, ChatFileStore, ChatId, ConnectorRef, HostOs, MachineId, NotificationPrefs, ProjectFeatures, ProjectId, ProjectMembers, ProjectPatch, ProjectRecord, RetentionSettings, ScheduleId, UpdateSettings, WorkdirRef, WorkspaceDefaults, WorkspaceId, WorkspaceSettings } from '@agentic/core';
-import { actorKey, createId, DEFAULT_UPDATE_SETTINGS, DEFAULT_WORKSPACE_SETTINGS, parseProjectFolderKey, pathWithin, PROJECTS_MAX } from '@agentic/core';
+import type { AgentId, ChatFileStore, ChatId, ConnectorRef, HostOs, MachineId, NotificationPrefs, ProjectColor, ProjectFeatures, ProjectId, ProjectMembers, ProjectPatch, ProjectRecord, RetentionSettings, ScheduleId, UpdateSettings, WorkdirRef, WorkspaceDefaults, WorkspaceId, WorkspaceSettings } from '@agentic/core';
+import { actorKey, createId, DEFAULT_UPDATE_SETTINGS, DEFAULT_WORKSPACE_SETTINGS, MEMBER_LIMIT_MAX, parseProjectFolderKey, pathWithin, PROJECT_COLORS, PROJECTS_MAX } from '@agentic/core';
 import { defineActor, type ActorContext, type ActorPolicy, type AnyActorDefinition } from '@sigx/actors';
 import { ServerFnError } from '@sigx/server';
+import type { ProjectChangedData } from '../audit/events.js';
 import { recordAudit } from '../audit/port.js';
 import { sameWorkspace, workspaceOwner, WORKSPACE_KEY_PREFIX } from '../auth/index.js';
 import { Chat } from '../chat/index.js';
@@ -84,6 +85,33 @@ export const RECENT_WORKDIRS_MAX = 20;
 
 /** A project's name is one line of at most this many characters; `upsertProject` collapses whitespace and rejects the rest. */
 export const MAX_PROJECT_NAME_LENGTH = 120;
+
+/** A member's role on a project (`ProjectMembers.roles`, #734) is one line of at most this many characters. */
+export const MAX_PROJECT_ROLE_LENGTH = 40;
+
+/** One project's line in `projectSummaries` (#734; PRJ-01/02): what the index cards and the sub-menu count. */
+export interface ProjectSummaryLine {
+    readonly projectId: ProjectId;
+    /** Chats in the project that are not archived. */
+    readonly openChats: number;
+    /** Archived chats in the project: always 0 until chats have an archive state (#774). */
+    readonly archivedChats: number;
+    /** The newest entry's `at` across the project's chats; absent while none has one. */
+    readonly lastActivityAt?: number;
+}
+
+/** What `projectSummaries` returns: one line per project in creation order, and the chats outside any project. */
+export interface ProjectSummaries {
+    readonly projects: readonly ProjectSummaryLine[];
+    /** Chats in no project, or in one the workspace no longer has (the "outside any project" strip). */
+    readonly unassigned: { readonly openChats: number; readonly lastActivityAt?: number };
+}
+
+/** The project keys an upsert is audited by (`project.changed` data `changed`). */
+const PROJECT_KEYS = ['name', 'description', 'members', 'folders', 'connectors', 'features', 'color'] as const;
+
+/** How many chats `projectSummaries` reads at once. */
+const SUMMARY_CONCURRENCY = 8;
 
 export interface WorkspaceState {
     v: number;
@@ -257,7 +285,11 @@ async function checkedFolders(ctx: ActorContext<WorkspaceState>, base: ProjectRe
     return folders;
 }
 
-/** `members` as stored: every agent of the workspace, the coordinator one of them or none. */
+/**
+ * `members` as stored: every agent of the workspace, the coordinator one of them or none; `roles` one line each and
+ * `limits` whole numbers 1…`MEMBER_LIMIT_MAX`, both keyed by members only (#734). `roles` / `limits` left out keep the
+ * base's entries for the agents that are still members; an empty role drops the entry.
+ */
 function checkedMembers(state: WorkspaceState, members: ProjectMembers | undefined, base: ProjectMembers | undefined): ProjectMembers {
     if (members === undefined) return base ?? { agentIds: [], coordinator: null };
     if (members === null || typeof members !== 'object' || !Array.isArray(members.agentIds)) bad('members must be { agentIds, coordinator }');
@@ -267,7 +299,49 @@ function checkedMembers(state: WorkspaceState, members: ProjectMembers | undefin
     }
     const coordinator = members.coordinator ?? null;
     if (coordinator !== null && !agentIds.includes(coordinator)) bad(`the coordinator ${String(coordinator)} must be one of the members`);
-    return { agentIds, coordinator };
+    const isMember = (id: string): boolean => (agentIds as string[]).includes(id);
+    const perMember = (given: unknown, kept: Readonly<Partial<Record<AgentId, unknown>>> | undefined, what: string): [string, unknown][] => {
+        if (given === undefined) return Object.entries(kept ?? {}).filter(([id, v]) => v !== undefined && isMember(id));
+        if (given === null || typeof given !== 'object' || Array.isArray(given)) bad(`${what} must be an object keyed by member agent id`);
+        const entries = Object.entries(given as Record<string, unknown>).filter(([, v]) => v !== undefined);
+        for (const [id] of entries) if (!isMember(id)) bad(`${what}: ${id} is not a member of the project`);
+        return entries;
+    };
+    const roles: Record<string, string> = {};
+    for (const [id, role] of perMember(members.roles, base?.roles, 'roles')) {
+        if (typeof role !== 'string') bad(`the role of ${id} must be text`);
+        const text = (role as string).replace(/\s+/g, ' ').trim();
+        if (text.length > MAX_PROJECT_ROLE_LENGTH) bad(`the role of ${id} is longer than ${MAX_PROJECT_ROLE_LENGTH} characters`);
+        if (text) roles[id] = text;
+    }
+    const limits: Record<string, number> = {};
+    for (const [id, limit] of perMember(members.limits, base?.limits, 'limits')) {
+        if (typeof limit !== 'number' || !Number.isInteger(limit) || limit < 1 || limit > MEMBER_LIMIT_MAX) bad(`the limit of ${id} must be a whole number from 1 to ${MEMBER_LIMIT_MAX}`);
+        limits[id] = limit as number;
+    }
+    return { agentIds, coordinator, ...(Object.keys(roles).length ? { roles } : {}), ...(Object.keys(limits).length ? { limits } : {}) };
+}
+
+/** `color` after the patch: one of `PROJECT_COLORS`; `null` clears it; left out keeps the base's. */
+function checkedColor(color: ProjectPatch['color'], base: ProjectColor | undefined): ProjectColor | undefined {
+    if (color === undefined) return base;
+    if (color === null) return undefined;
+    if (!(PROJECT_COLORS as readonly unknown[]).includes(color)) bad(`the colour must be one of ${PROJECT_COLORS.join(', ')}`);
+    return color;
+}
+
+/** The keys whose value differs between `base` and `record`; for a new project, every key it sets. */
+function changedKeys(base: ProjectRecord | undefined, record: ProjectRecord): string[] {
+    return PROJECT_KEYS.filter((k) => (base ? JSON.stringify(base[k]) !== JSON.stringify(record[k]) : record[k] !== undefined));
+}
+
+/** `fn` over `items`, at most `limit` at a time. */
+async function eachLimited<T>(items: readonly T[], limit: number, fn: (item: T) => Promise<void>): Promise<void> {
+    let next = 0;
+    const worker = async (): Promise<void> => {
+        while (next < items.length) await fn(items[next++]!);
+    };
+    await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
 }
 
 /** `connectors` as stored: refs with an id, one per id. */
@@ -317,7 +391,7 @@ export function defineWorkspace(options: WorkspaceOptions = {}) {
         authorize,
         persistence: 'explicit',
         // `projects` interleaves: `Chat.setProject` reads it back over a hop inside `createChat`'s own turn.
-        methodReentrancy: { get: 'always', recentWorkdirs: 'always', projects: 'always', listMachines: 'always' },
+        methodReentrancy: { get: 'always', recentWorkdirs: 'always', projects: 'always', listMachines: 'always', projectSummaries: 'always' },
         state: (key): WorkspaceState => ({
             v: WORKSPACE_STATE_VERSION,
             owner: ownerOfWorkspaceKey(key),
@@ -385,6 +459,41 @@ export function defineWorkspace(options: WorkspaceOptions = {}) {
             },
 
             /**
+             * Per project (#734; PRJ-01/02): open and archived chat counts and the newest activity, read from each
+             * chat of the index over a hop (`Chat.get` for its project, `Chat.history` for its newest entry), a few at
+             * a time. A chat that cannot be read is left out. Interleaves with writes: the index is copied first.
+             */
+            async projectSummaries(): Promise<ProjectSummaries> {
+                const projectIds = (ctx.state.projects ?? []).map((p) => p.id);
+                const chatIds = [...ctx.state.chats];
+                const workspaceId = ownerOfWorkspaceKey(ctx.key) as WorkspaceId;
+                type Line = { openChats: number; lastActivityAt?: number };
+                const unassigned: Line = { openChats: 0 };
+                const lines = new Map<ProjectId, Line>(projectIds.map((id) => [id, { openChats: 0 }]));
+                await eachLimited(chatIds, SUMMARY_CONCURRENCY, async (chatId) => {
+                    const chat = ctx.actor(Chat, actorKey(workspaceId, 'chat', chatId));
+                    let projectId: ProjectId | undefined;
+                    let at: number | undefined;
+                    try {
+                        const [summary, page] = await Promise.all([chat.get(), chat.history(null, 1)]);
+                        projectId = summary.projectId;
+                        const newest = page.entries.at(-1)?.entry as { at?: unknown } | undefined;
+                        if (typeof newest?.at === 'number') at = newest.at;
+                    } catch {
+                        return;
+                    }
+                    const line = (projectId !== undefined ? lines.get(projectId) : undefined) ?? unassigned;
+                    line.openChats += 1;
+                    if (at !== undefined && (line.lastActivityAt === undefined || at > line.lastActivityAt)) line.lastActivityAt = at;
+                });
+                const out = (line: Line) => ({ openChats: line.openChats, ...(line.lastActivityAt !== undefined ? { lastActivityAt: line.lastActivityAt } : {}) });
+                return {
+                    projects: projectIds.map((projectId) => ({ projectId, ...out(lines.get(projectId)!), archivedChats: 0 })),
+                    unassigned: out(unassigned)
+                };
+            },
+
+            /**
              * Create a project (no `id`; `name` required) or change one (#332), per the
              * `ProjectPatch` contract: a `null` folder, feature or description removes it,
              * fields left out are kept. Every folder the patch sets must be absolute and
@@ -414,6 +523,7 @@ export function defineWorkspace(options: WorkspaceOptions = {}) {
                 const connectors = checkedConnectors(patch.connectors, base?.connectors);
                 const folders = await checkedFolders(ctx, base?.folders, patch.folders);
                 const features = await checkedFeatures(ctx, base?.features, patch.features);
+                const color = checkedColor(patch.color, base?.color);
                 // The hops awaited: the record may have moved meanwhile (a concurrent remove, a `get` interleaving is read-only).
                 const current = ctx.state.projects ?? [];
                 if (base && !current.some((p) => p.id === base!.id)) throw new ServerFnError(404, `Workspace.upsertProject: project ${base.id} was removed meanwhile`);
@@ -426,18 +536,21 @@ export function defineWorkspace(options: WorkspaceOptions = {}) {
                     folders: folders as ProjectRecord['folders'],
                     connectors,
                     features,
+                    ...(color !== undefined ? { color } : {}),
                     createdAt: base?.createdAt ?? at,
                     updatedAt: at
                 };
                 ctx.state.projects = base ? current.map((p) => (p.id === record.id ? record : p)) : [...current, record];
                 await ctx.save();
+                // `changed` rides beside the declared fields until `ProjectChangedData` names it (#775).
+                const data: ProjectChangedData & { readonly changed: readonly string[] } = { projectId: record.id, name: record.name, op: base ? 'updated' : 'created', changed: changedKeys(base, record) };
                 await recordAudit(ctx, ownerOfWorkspaceKey(ctx.key) as WorkspaceId, {
                     key: `${ctx.key}:project:${record.id}:${at}`,
                     kind: 'project.changed',
                     at,
                     by: `user:${ctx.state.owner}`,
                     summary: `project ${record.name} (${record.id}) ${base ? 'updated' : 'created'}`,
-                    data: { projectId: record.id, name: record.name, op: base ? 'updated' : 'created' }
+                    data
                 });
                 return ctx.snapshot(record);
             },
