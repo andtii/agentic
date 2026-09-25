@@ -1,2 +1,6 @@
 # Shell scripts run on macOS / Linux from a zip built on any OS: never CRLF.
 *.sh text eol=lf
+
+# Loaded by the Claude Code Workflow tool, which refuses CRLF as hidden control characters.
+.claude/workflows/*.js text eol=lf
+.claude/skills/**/*.md text eol=lf
