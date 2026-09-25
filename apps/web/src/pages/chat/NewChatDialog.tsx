@@ -2,6 +2,7 @@ import { component, signal, watch, type Define } from 'sigx';
 import { BYPASS_PERMISSIONS_MODE, accountRefOf, environmentsForAccount, type AccountRef, type ProjectRecord } from '@agentic/core';
 import { RadioGroup } from '@sigx/zero';
 import { derivedModel } from '@sigx/zero/behaviors';
+import { Link } from '@sigx/router';
 import { Checkbox, Field } from '@sigx/zero-daisyui/components';
 import { ErrorNote, FormDialog, SelectField, type WorkdirEnvironment } from '@agentic/ui';
 import type { AgentIdentity } from './live';
@@ -338,7 +339,7 @@ export const NewChatDialog = component<NewChatDialogProps>(({ props, emit }) => 
                         />
                         {scope.bypassAllowed ? null : (
                             <p data-new-chat-permission-note="">
-                                bypassPermissions (--dangerously-skip-permissions) is off on {machine!.name}: allow it for the environment on <a href={`/machines/${machine!.id}`}>the machine's page</a>.
+                                bypassPermissions (--dangerously-skip-permissions) is off on {machine!.name}: allow it for the environment on <Link to={`/machines/${machine!.id}`}>the machine's page</Link>.
                             </p>
                         )}
                     </div>
