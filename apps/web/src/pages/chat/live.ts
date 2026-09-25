@@ -13,8 +13,9 @@ import type { AgentMessage, AgentPart, AgentTranscript, OpenRequest } from '@sig
 import { WIRE_PROTOCOL_VERSION, type SessionTransport, type WireCommand, type WireFrame, type WireReply } from '@sigx/ai-agent/wire';
 import { hueFor, type AgentHue, type EnvironmentParts, type MessageAuthor } from '@agentic/ui';
 import { failureOf, interruptionLine, INTERRUPTED_CODE, type FailureState, type Interruption } from '../../components/status';
-import { formatTime, USER, type MockChatMember, type MockChatSummary, type MockTaskRow } from '../../mock/workspace';
+import { formatTime, USER, type MockChatMember, type MockTaskRow } from '../../mock/workspace';
 import { isFileTokenAt, resourceText } from '../session/references';
+import type { ChatListRow } from './archive';
 
 // ---- identities --------------------------------------------------------------
 
@@ -233,7 +234,7 @@ export function unreadOf(entries: readonly IndexedEntry[], seen: number | undefi
  * line and the update time, the amber pill while a request is open, the
  * unread count against this device's marker (`seen`, see `read-marks.ts`).
  */
-export function chatRow(id: string, summary: ChatSummary, newest: readonly IndexedEntry[], lookup: AgentLookup, seen?: number): MockChatSummary {
+export function chatRow(id: string, summary: ChatSummary, newest: readonly IndexedEntry[], lookup: AgentLookup, seen?: number): ChatListRow {
     const waiting = waitingAgents(newest);
     const members = membersOf(summary, waiting);
     const last = lastOf(newest, lookup);
@@ -245,7 +246,9 @@ export function chatRow(id: string, summary: ChatSummary, newest: readonly Index
         unread: unreadOf(newest, seen),
         waiting: waiting.size > 0,
         updatedAt: last.at,
-        ...(summary.projectId ? { projectId: summary.projectId } : {})
+        ...(summary.projectId ? { projectId: summary.projectId } : {}),
+        // Archived (#884): the list draws it in its Archived group, project Chats under Archived.
+        ...(summary.archived ? { archived: true } : {})
     };
 }
 
