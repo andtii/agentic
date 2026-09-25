@@ -23,10 +23,16 @@ export function useDesktopNotifications(badge: () => number): void {
     const viewer = useViewer()();
     const list = useActorState(defs.Inbox, () => viewer.workspaceId && ([inboxKeyOf(viewer.workspaceId), 'list'] as const), { live: true });
     const workspace = useActorState(defs.Workspace, () => viewer.workspaceId && ([workspaceKeyOf(viewer.workspaceId), 'get'] as const), { live: true });
-    const tracker = noticeTracker();
+    // One tracker per workspace: switching workspaces without a reload takes the new one's first read as seen too.
+    let tracker = noticeTracker();
+    let trackedWorkspace = viewer.workspaceId;
     effect(() => {
         const notifications = list.value;
         const settings = workspace.value?.settings;
+        if (viewer.workspaceId !== trackedWorkspace) {
+            trackedWorkspace = viewer.workspaceId;
+            tracker = noticeTracker();
+        }
         if (!notifications || !settings) return;
         for (const notice of tracker.next(notifications, settings.notifications.push)) void host.notify(notice).catch(() => {});
     });
