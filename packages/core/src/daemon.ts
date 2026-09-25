@@ -29,9 +29,10 @@ export interface DaemonBuild {
  * (`policy.request`, #355), `log` (`log.request`) and `login` (`login.*`) follow the same rule; a restart from the web
  * is an `update.request { target: 'restart' }` and rides `update`. `files` (#559) is the read-only `fs.request` kinds
  * `tree`, `read` and `changes` over a session's folder; `run` (#617) the `fs.request` kind `run`, a project command;
- * `worktrees` (#622) the `fs.request` kind `worktrees`, a repository's worktrees.
+ * `worktrees` (#622) the `fs.request` kind `worktrees`, a repository's worktrees; `pin` (#752) the `fs.request` kinds
+ * `pin` and `read-at`, file lines pinned to a commit.
  */
-export type DaemonFeature = 'update' | 'harness' | 'policy' | 'log' | 'login' | 'files' | 'run' | 'worktrees';
+export type DaemonFeature = 'update' | 'harness' | 'policy' | 'log' | 'login' | 'files' | 'run' | 'worktrees' | 'pin';
 
 /**
  * Why the host ended a session (#359), beside the human `reason`: the reason is for people, the code for the platform,

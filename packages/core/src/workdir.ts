@@ -63,7 +63,16 @@ export type FsOp =
      * `dirty` and stays, one on another branch than `branch` is `worktree-mismatch`. With `deleteBranch`, `branch` is
      * then deleted if merged (`git branch -d`); an unmerged one is kept (`branchDeleted: false`).
      */
-    | { readonly kind: 'worktree-remove'; readonly repo: string; readonly path: string; readonly branch?: string; readonly deleteBranch?: boolean };
+    | { readonly kind: 'worktree-remove'; readonly repo: string; readonly path: string; readonly branch?: string; readonly deleteBranch?: boolean }
+    /**
+     * Pin file lines to a commit (#752; the `pin` daemon feature, PRJ-11): lines `from`–`to` (1-based, inclusive) of
+     * `path` (relative to `root`, `/`-separated, as the `files` kinds name it) as committed at the HEAD of the repository
+     * `root` is in, answered with that commit's full sha. `root` lies within the environment's `cwdRoots`. At most
+     * `FS_PIN_MAX_LINES` lines; a `to` past the file's end stops at its last line.
+     */
+    | { readonly kind: 'pin'; readonly root: string; readonly path: string; readonly from: number; readonly to: number }
+    /** The same lines read back at `sha` (#752), however the file changed since: how a pinned file ref shows its code. */
+    | { readonly kind: 'read-at'; readonly root: string; readonly path: string; readonly sha: string; readonly from: number; readonly to: number };
 
 /** Which version of a file a `read` returns (#559). */
 export type FsReadRev = 'working' | 'head' | 'base';
@@ -262,7 +271,21 @@ export interface FsWorktreeRemoveResult {
 }
 
 
-export type FsResult = FsListResult | FsWorktreeResult | FsLocateResult | FsTreeResult | FsReadResult | ChangeSet | FsRunResult | FsWorktreesResult | FsWorktreeRemoveResult;
+/**
+ * Pinned file lines (#752): `path`'s lines `from`–`to` as committed at `sha` (a full commit id). `to` is the last line
+ * actually returned, so `lines.length === to - from + 1`. The answer to both `pin` (at HEAD) and `read-at`.
+ */
+export interface FsPinnedLines {
+    readonly kind: 'pin' | 'read-at';
+    readonly path: string;
+    readonly sha: string;
+    readonly from: number;
+    readonly to: number;
+    /** The lines, without their line endings. */
+    readonly lines: readonly string[];
+}
+
+export type FsResult = FsListResult | FsWorktreeResult | FsLocateResult | FsTreeResult | FsReadResult | ChangeSet | FsRunResult | FsWorktreesResult | FsWorktreeRemoveResult | FsPinnedLines;
 
 export type FsErrorCode =
     | 'outside-roots'
@@ -304,6 +327,8 @@ export const CHANGES_MAX_FILES = 500;
 export const CHANGES_MAX_COMMITS = 100;
 /** A `worktrees` answer lists at most this many (#622). */
 export const FS_WORKTREES_MAX = 100;
+/** A `pin` / `read-at` covers at most this many lines (#752); a wider range is `too-large`. */
+export const FS_PIN_MAX_LINES = 200;
 /** A `run` without `timeoutMs` stops after this long (#617)… */
 export const FS_RUN_DEFAULT_TIMEOUT_MS = 10 * 60_000;
 /** …and none runs longer than this. */

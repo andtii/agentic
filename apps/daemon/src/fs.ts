@@ -486,6 +486,7 @@ export async function answerFsRequest(environments: readonly LocalEnvironment[],
         if (op.kind === 'locate') return { result: await locate(op, env.cwdRoots, platform) };
         if (op.kind === 'worktrees') return await worktrees(op, env.cwdRoots, { platform, git: options.git ?? 'git' });
         if (op.kind === 'run') return await runCommand(op, env.cwdRoots, { platform, ...(options.runEnv ? { env: options.runEnv } : {}) });
+        if (op.kind === 'pin' || op.kind === 'read-at') return fail('unsupported', `this daemon does not answer ${op.kind} yet`);
         return await answerFilesOp(op, env.cwdRoots, { platform, ...(options.git ? { git: options.git } : {}), ...(options.vcs ? { providers: options.vcs } : {}) });
     } catch (e) {
         logger.warn('fs: request failed', { environment: environmentId, op: op.kind, error: e });
