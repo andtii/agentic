@@ -748,6 +748,14 @@ _not yet_
 
 `packages/mcp/src/server/plan.ts`: the same eight tools on the orchestration surface over `PlatformPort.plan` (`PlanMcpPort`, every call names its `projectId`; `plan_next`/`plan_claim` name the agent), gated by the `projects` scope. The external client acts in its user's name, so it has the people's tools; the actor's refusals come back as `isError` results. A host without the port declares none of them.
 
+#### #816 platform+web: bind the plan_* tool ports to the Plan actor
+
+`packages/platform/src/plan/port.ts`: `createPlanPort` maps the Plan actor (#750) onto the runtimes' `PlanPort` (#751). `board()` is `Plan.list()` plus the project's members by handle (an agent's name as a slug — `Forge Bot` → `forge-bot` — else its id; a person by user id), the calling agent as `me`, the project's coordinator as manager and `memberLimit` as the limit; handles resolve to agents by handle, id or name. Each write is the actor method of the same name (`claim` with the session's current task, `assign`, `update` — ticks as `tick` — `ref`, `add` — the only plan's last phase by default, `split` when splitting — `handoff`, back to `assignedBy` without a `to`), and its refusal comes back unchanged. After every call the caller's `takeNotices()` go to `deliver`. A file ref goes through `pin` first and is stored unpinned when that answers nothing.
+
+`createActorToolPorts` (`routing/tools.ts`) binds it per call: the project is the current task's, else the chat's; the record is read as the workspace's user; the Plan actor, Chat and Agents under the agent's principal. The actor's `ServerFnError` becomes a `ToolCallError` with the rule's code (`blocked`, `taken`, …) and the same words. `pin` is the session machine's `fs` `pin` op (#752) on the session's folder, only when the daemon reports the `pin` feature; notices are one post in the session's chat, waking nobody. No project → the tools answer `unsupported`.
+
+`apps/web/src/auth/oauth-server/port.ts`: `PlatformPort.plan` per `projectId` over the same helpers, as the workspace's user (the Plan actor admits a person or an agent, never an external client; the `projects` scope gates the family); `plan_claim` is made as the named agent, which must be a project member. `plan_ref` from outside stores the ref as given (no session folder to pin in).
+
 #### #752 daemon: pin file refs to a commit (resolve sha, read range)
 
 Two `fs.request` kinds behind the `pin` daemon feature (contract #786). `pin { root, path, from, to }` answers

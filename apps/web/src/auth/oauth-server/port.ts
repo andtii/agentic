@@ -8,8 +8,14 @@
  * a capability the client holds: reading the Workspace index (the root
  * actor admits its owner only) and driving the router (`Routing.run`, the
  * same principal the schedule trigger uses).
+ *
+ * The plan tools (#816) run as the workspace's user too: an external client
+ * acts in its user's name on a plan (the `projects` scope gates the family),
+ * and the Plan actor admits a person or an agent, never a client. A claim is
+ * the one call made as the agent it names — a member of the project — since
+ * only an agent claims for itself.
  */
-import { createId, pathWithin, projectFolderPlaces, type AgentId, type EnvironmentDescriptor, type MachineId, type Principal, type SessionId, type TaskContract, type TaskId, type WorkspaceId, type WorkspaceSource } from '@agentic/core';
+import { createId, pathWithin, projectFolderPlaces, type AgentId, type EnvironmentDescriptor, type MachineId, type Plan, type Principal, type ProjectId, type ProjectRecord, type SessionId, type TaskContract, type TaskId, type WorkspaceId, type WorkspaceSource } from '@agentic/core';
 import type { ExternalPrincipal, PlatformPort, TaskSummary, TaskTreeNode } from '@agentic/mcp';
 import {
     AgentActor,
@@ -20,6 +26,15 @@ import {
     agentChatKey,
     agentKey,
     asPrincipal,
+    definePlanActor,
+    mintAgentPrincipal,
+    planAdd,
+    planHandoffTarget,
+    planKey,
+    planPatch,
+    resolvePlanMember,
+    type PlanActorClient,
+    type PlanPeople,
     machineKey,
     machineWorkspaceSource,
     memoryActorKey,
@@ -68,6 +83,9 @@ const summary = (t: TaskView): TaskSummary => ({
     ...(t.transitions[0] !== undefined ? { createdAt: t.transitions[0].at } : {}),
     children: t.children
 });
+
+/** The Plan actor as a client handle (#816): only its `type` addresses the object; the host runs the registry's own. */
+const PlanStore = definePlanActor();
 
 const tree = (t: TaskTree): TaskTreeNode => ({ taskId: t.id, status: t.status, assignee: t.assignee, objective: t.objective, depth: t.depth, ...(t.wait !== undefined ? { wait: t.wait } : {}), children: t.children.map(tree) });
 
@@ -128,6 +146,25 @@ export function createActorPlatformPort(principal: ExternalPrincipal, options: A
         const base = await baseOf(spec.taskId);
         return machineWorkspaceSource(machine(spec.machineId, driver), spec.environmentId, spec.cwd, base !== undefined ? { base } : {});
     }
+
+    /** A project's Plan actor as the workspace's user (#816), and its people for handles. */
+    async function planOf(projectId: ProjectId): Promise<{ readonly client: PlanActorClient; readonly project: ProjectRecord; readonly people: PlanPeople }> {
+        const project = (await workspace().projects()).find((p) => p.id === projectId);
+        if (!project) throw new ServerFnError(404, `no project ${projectId} in this workspace`);
+        const names = new Map<AgentId, string>();
+        await Promise.all(
+            project.members.agentIds.map(async (id) => {
+                const name = await as(AgentActor, agentKey(workspaceId, id), driver)
+                    .get()
+                    .then((a) => a.config.name, () => undefined);
+                if (name) names.set(id, name);
+            })
+        );
+        const client = as(PlanStore, planKey(workspaceId, projectId), driver) as unknown as PlanActorClient;
+        return { client, project, people: { project, names, users: [driver.kind === 'user' ? driver.userId : workspaceId] } };
+    }
+
+    const inPlan = (plans: readonly Plan[], planId: string | undefined): readonly Plan[] => (planId === undefined ? plans : plans.filter((p) => p.id === planId));
 
     async function createTask(contract: TaskContract): Promise<TaskView> {
         const id = createId('task') as TaskId;
@@ -313,6 +350,40 @@ export function createActorPlatformPort(principal: ExternalPrincipal, options: A
             },
             setChatMachine: async (chatId, machineId) => {
                 await as(Chat, agentChatKey(workspaceId, chatId)).setMachine(machineId);
+            }
+        },
+        plan: {
+            list: async (projectId, planId) => inPlan((await (await planOf(projectId)).client.list()).plans, planId),
+            async next(projectId, agentId, planId) {
+                const { client } = await planOf(projectId);
+                const item = await client.next(agentId);
+                if (item === null || planId === undefined) return item;
+                // The actor picks across every plan; one named plan narrows the answer, never widens it.
+                return inPlan((await client.list()).plans, planId).some((p) => p.phases.some((ph) => ph.items.some((i) => i.id === item.id))) ? item : null;
+            },
+            async claim(projectId, item, agentId, leaseMs) {
+                const { project } = await planOf(projectId);
+                if (!project.members.agentIds.includes(agentId)) throw new ServerFnError(403, `agent ${agentId} is not a member of project ${projectId}`);
+                // Only an agent claims, for itself: the claim is made as that agent, in a session named for this client.
+                const agent = mintAgentPrincipal({ workspaceId, agentId, sessionId: `mcp_${clientId}` as SessionId });
+                const out = await (as(PlanStore, planKey(workspaceId, projectId), agent) as unknown as PlanActorClient).claim(item, { leaseMs });
+                return out.item;
+            },
+            async assign(projectId, item, to, index) {
+                const { client, people } = await planOf(projectId);
+                return client.assign(item, resolvePlanMember(people, to), index);
+            },
+            update: async (projectId, item, update) => (await planOf(projectId)).client.update(item, planPatch(update)),
+            async ref(projectId, item, ref) {
+                // No session, so no folder to pin a file ref in: it is stored as given.
+                await (await planOf(projectId)).client.ref(item, ref);
+                return ref;
+            },
+            add: async (projectId, input) => planAdd((await planOf(projectId)).client, input),
+            async handoff(projectId, item, to, note) {
+                const { client, people } = await planOf(projectId);
+                const target = to !== undefined ? resolvePlanMember(people, to) : planHandoffTarget(people, (await client.list()).plans, item, undefined);
+                return client.handoff(item, target, note);
             }
         },
         usage: {
