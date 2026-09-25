@@ -2,6 +2,7 @@
 //! configured Agentic server, a tray, and nothing else: the web app runs
 //! unchanged on its own origin.
 
+mod deeplink;
 mod machine;
 mod notify;
 mod server;
@@ -27,6 +28,8 @@ pub struct Server {
     /// added at runtime but not removed, so changing the server afterwards
     /// restarts the app instead of leaving the old origin granted.
     granted: Arc<Mutex<Option<String>>>,
+    /// An `agentic://` link's path waiting for the connect page to open it (#847).
+    pending: Arc<Mutex<Option<String>>>,
 }
 
 impl Server {
@@ -39,6 +42,8 @@ impl Server {
 struct ServerInfo {
     server: Option<String>,
     suggested: Option<String>,
+    /// Where to go once connected: a deep link's path, handed over once. `None` is the server's root.
+    path: Option<String>,
 }
 
 #[tauri::command]
@@ -46,6 +51,7 @@ fn get_server(state: State<'_, Server>) -> ServerInfo {
     ServerInfo {
         server: state.get(),
         suggested: server::build_default(),
+        path: state.pending.lock().unwrap().take(),
     }
 }
 
@@ -179,6 +185,7 @@ pub fn run() {
     tauri::Builder::default()
         // First, so a second launch exits before it builds anything.
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| show_main(app)))
+        .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
@@ -203,6 +210,25 @@ pub fn run() {
             }
             build_window(&handle, MAIN, WebviewUrl::App("index.html".into()), None)?;
             tray::build(&handle)?;
+            // `agentic://` links (#847): the one that started the app, then each one while it runs
+            // (a second launch hands its link over through single-instance).
+            {
+                use tauri_plugin_deep_link::DeepLinkExt;
+                // Installers register the scheme; this also covers an AppImage or a dev build.
+                #[cfg(any(windows, target_os = "linux"))]
+                let _ = handle.deep_link().register_all();
+                if let Ok(Some(links)) = handle.deep_link().get_current() {
+                    if let Some(path) = links.iter().find_map(deeplink::route) {
+                        *state.pending.lock().unwrap() = Some(path);
+                    }
+                }
+                let links_app = handle.clone();
+                handle.deep_link().on_open_url(move |event| {
+                    if let Some(link) = event.urls().first() {
+                        deeplink::open(&links_app, link);
+                    }
+                });
+            }
             Ok(())
         })
         .on_window_event(|window, event| {
