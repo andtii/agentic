@@ -87,12 +87,15 @@ jobs:
     if: needs.changes.outputs.workers == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [test:workers, test:acceptance]
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
       - run: pnpm build
-      - run: pnpm --filter @agentic/web test:workers
-      - run: pnpm --filter @agentic/web test:acceptance
+      - run: pnpm --filter @agentic/web ${{ matrix.suite }}
 
   # Playwright against the dev server. PRs: phone-400 + desktop-1280 in two
   # shards; main: all three widths.

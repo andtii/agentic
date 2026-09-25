@@ -15,6 +15,10 @@ import { lanesFor } from './lib/ci-changes.mjs';
 const argv = process.argv.slice(2);
 const flag = (name) => argv.includes(name);
 const base = argv.includes('--base') ? argv[argv.indexOf('--base') + 1] : 'origin/main';
+if (!base || base.startsWith('--')) {
+    console.error('✗ --base needs a ref, e.g. pnpm check --base origin/main');
+    process.exit(2);
+}
 
 const git = (...args) => execFileSync('git', args, { encoding: 'utf8' }).split('\n').map((l) => l.trim()).filter(Boolean);
 const files = [
