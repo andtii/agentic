@@ -7,7 +7,7 @@
  * daemon's message; a chosen worktree kept as it is.
  */
 import { describe, expect, it } from 'vitest';
-import { PROJECT_FEATURE_KIND, applyProjectFeaturePreset, configDefaults, isProjectFeatureManifest, suggestWorktreePath, validateConfig, type ChatId, type EnvironmentId, type FsError, type FsGitInfo, type FsOp, type FsResult, type ProjectFeatureFs, type ProjectFeatureSessionInput, type ProjectId, type ProjectRecord, type TaskId } from '@agentic/core';
+import { PROJECT_FEATURE_KIND, applyProjectFeaturePreset, configDefaults, isProjectFeatureManifest, projectFolderKey, suggestWorktreePath, validateConfig, type ChatId, type EnvironmentId, type FsError, type FsGitInfo, type FsOp, type FsResult, type MachineId, type ProjectFeatureFs, type ProjectFeatureSessionInput, type ProjectId, type ProjectRecord, type TaskId } from '@agentic/core';
 
 import { chatWorktreeFor, splitCommand, DEFAULT_BRANCH_PREFIX, DEFAULT_WORKTREE_NOTICE, GIT_FEATURE_ID, gitBranchFor, gitSettingsErrors, gitFeatureManifest, gitFeaturePlugin, hostOsOfPath, identityOf, isValidBranchName } from '../src/index';
 
@@ -275,6 +275,12 @@ describe('beforeSession', () => {
         // The project folder itself is never "chosen", even when it is a worktree: every chat still gets its own.
         ops.length = 0;
         await gitFeaturePlugin.beforeSession!(input(record(listing({ kind: 'worktree', branch: 'dev' })), '/work/agentic', { settings: { worktreePerChat: true } }));
+        expect(ops.map((o) => o.kind)).toEqual(['worktree']);
+        // …also when the folder is the machine's, shared by its environments (#702).
+        ops.length = 0;
+        const machineId = 'machine_1' as MachineId;
+        const shared = { ...input(record(listing({ kind: 'worktree', branch: 'dev' })), '/work/agentic', { settings: { worktreePerChat: true } }), machineId };
+        await gitFeaturePlugin.beforeSession!({ ...shared, project: { ...project, folders: { [projectFolderKey(machineId)]: '/work/agentic' } } });
         expect(ops.map((o) => o.kind)).toEqual(['worktree']);
     });
 });

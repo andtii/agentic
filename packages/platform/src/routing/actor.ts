@@ -82,7 +82,7 @@
  * machine, and the machine may not drive sessions.
  */
 
-import { accountKeyFor, accountRefOf, actorKey, enabledProjectFeatures, type ProjectFeatureReleaseReason, type ProjectId, BYPASS_PERMISSIONS_MODE, createId, environmentsForAccount, hasScope, isChatFilePart, isTerminal, pathWithin, projectFolderFor, SESSION_EVENTS_TOPIC, type AccountKey, type AccountRef, type AgentId, type ApprovalRule, type Author, type ChatEntry, type ChatFilePart, type ChatId, type ChatRoster, type EnvironmentDescriptor, type EnvironmentId, type FrozenAgentConfig, type FsOp, type SessionOptions, type HostOs, type MachineId, type OpenSpec, type OpenSpecPolicy, type Principal, type ProjectRecord, type PromptPart, type RuntimeId, type SessionClosedCode, type SessionEvent, type SessionId, type TaskError, type TaskId, type WaitReason, type WorkdirRef, type WorkspaceId } from '@agentic/core';
+import { accountKeyFor, accountRefOf, actorKey, enabledProjectFeatures, type ProjectFeatureReleaseReason, type ProjectId, BYPASS_PERMISSIONS_MODE, createId, environmentsForAccount, hasScope, isChatFilePart, isTerminal, parseProjectFolderKey, pathWithin, projectFolderFor, projectFolderIsShared, SESSION_EVENTS_TOPIC, type AccountKey, type AccountRef, type AgentId, type ApprovalRule, type Author, type ChatEntry, type ChatFilePart, type ChatId, type ChatRoster, type EnvironmentDescriptor, type EnvironmentId, type FrozenAgentConfig, type FsOp, type SessionOptions, type HostOs, type MachineId, type OpenSpec, type OpenSpecPolicy, type Principal, type ProjectRecord, type PromptPart, type RuntimeId, type SessionClosedCode, type SessionEvent, type SessionId, type TaskError, type TaskId, type WaitReason, type WorkdirRef, type WorkspaceId } from '@agentic/core';
 import { buildSystemPrompt, type TaskReport } from '@agentic/runtimes';
 import { actor, defineActor, topic, type ActorClientWith, type ActorContext, type ActorPolicy, type AnyActorDefinition } from '@sigx/actors';
 import type { AgentEvent, AgentTranscript } from '@sigx/ai-agent';
@@ -267,6 +267,18 @@ function finalText(transcript: AgentTranscript | undefined, turnId: string): str
 const osOf = (m: MachineView): HostOs => m.os ?? 'windows';
 
 /** The connectors an agent names — and its task's project adds (#332) — for `gate()` to answer for (#240), one per id. */
+/**
+ * The project's folder for `environmentId` on `machineId` (#702): an override or a pre-#702 entry as stored, the
+ * machine's shared folder only when this environment's roots hold it — an environment that cannot reach it falls
+ * through to the next candidate instead of failing.
+ */
+function projectFolderOn(project: Pick<ProjectRecord, 'folders'>, environmentId: EnvironmentId, machineId: MachineId | undefined, located: LocatedEnvironment | null | undefined): string | undefined {
+    const folder = projectFolderFor(project, environmentId, machineId);
+    if (folder === undefined || machineId === undefined || !projectFolderIsShared(project, environmentId, machineId)) return folder;
+    if (!located || located.machine.machineId !== machineId) return folder;
+    return pathWithin(folder, located.env.cwdRoots, osOf(located.machine)) ? folder : undefined;
+}
+
 const connectorIds = (config: Pick<FrozenAgentConfig, 'connectors'>, project?: Pick<ProjectRecord, 'connectors'>): readonly string[] => [...new Set([...config.connectors.map((c) => c.id), ...(project?.connectors.map((c) => c.id) ?? [])])];
 
 /** The slice of the Registry actor the router asks (`defineRegistry`). */
@@ -771,6 +783,7 @@ export function defineRoutingActor(ports: RoutingPorts) {
                     taskId: route.taskId,
                     ...(route.chatId ? { chatId: route.chatId } : {}),
                     ...(route.environmentId ? { environmentId: route.environmentId } : {}),
+                    ...(route.machineId ? { machineId: route.machineId } : {}),
                     ...(route.cwd !== undefined ? { cwd: route.cwd } : {}),
                     fs: fs === 'daemon' && route.machineId && route.environmentId ? machineFs(machine(route.machineId), route.environmentId, { now }) : noDaemonFs
                 });
@@ -1469,10 +1482,11 @@ export function defineRoutingActor(ports: RoutingPorts) {
                         }
                         envFrom = config.execution.defaultEnvironmentId ? "the agent's default" : named ? "the delegating task's" : "the workspace's default";
                     }
-                    // The folder, once (#190, #332, EXE-12): the task's own, the project's folder for this environment, a delegating
-                    // parent's in the same environment (on the same machine), the agent's default in its default environment, else the
-                    // environment's first root — which needs the machine's report.
-                    const projectFolder = project ? projectFolderFor(project, environmentId) : undefined;
+                    // The folder, once (#190, #332, EXE-12): the task's own, the project's folder for this environment on this machine, a
+                    // delegating parent's in the same environment (on the same machine), the agent's default in its default environment,
+                    // else the environment's first root — which needs the machine's report, so the machine is located first (#702).
+                    if (located === undefined) located = await locate(environmentId, requestedMachineId);
+                    const projectFolder = project ? projectFolderOn(project, environmentId, detail.machineId ?? located?.machine.machineId ?? requestedMachineId, located) : undefined;
                     const asked: { cwd: string; from: string } | undefined =
                         workdir !== undefined
                             ? { cwd: workdir, from: "the task's own" }
@@ -1483,7 +1497,6 @@ export function defineRoutingActor(ports: RoutingPorts) {
                                 : config.execution.defaultWorkdir !== undefined && environmentId === config.execution.defaultEnvironmentId && pinFolder
                                   ? { cwd: config.execution.defaultWorkdir, from: "the agent's default" }
                                   : undefined;
-                    if (located === undefined) located = await locate(environmentId, requestedMachineId);
                     const cwd = asked?.cwd ?? located?.env.cwdRoots[0];
                     const folder = cwd === undefined ? '' : `; folder ${cwd} (${asked ? asked.from : "the environment's first root"})`;
                     await chosen(`runtime ${runtime} in environment ${environmentId} (${envFrom})${folder}; offline policy ${config.execution.offlinePolicy}${alsoWhy}`, environmentId, { ...(cwd !== undefined ? { cwd } : {}), ...detail });
@@ -1921,9 +1934,21 @@ export function defineRoutingActor(ports: RoutingPorts) {
                         const plugin = Object.hasOwn(projectFeatures, id) ? projectFeatures[id] : undefined;
                         if (!plugin?.onChatReleased) continue;
                         const settings = featureSettings(plugin, project, id);
-                        for (const [environmentId, cwd] of Object.entries(project.folders) as [EnvironmentId, string | undefined][]) {
+                        for (const [key, cwd] of Object.entries(project.folders)) {
                             if (!cwd) continue;
-                            const located = await locate(environmentId).catch(() => null);
+                            // Where the folder lives (#702): an override or a pre-#702 entry names its environment; a machine's
+                            // folder runs once, on the first environment of that machine whose roots hold it and has no override.
+                            const parsed = parseProjectFolderKey(key);
+                            if (!parsed) continue;
+                            let located: LocatedEnvironment | null = null;
+                            if (parsed.machineId === undefined) located = await locate(parsed.environmentId!).catch(() => null);
+                            else {
+                                const m = await readPairedMachine(parsed.machineId).catch(() => null);
+                                const env = m?.environments.find((e) => (parsed.environmentId !== undefined ? e.id === parsed.environmentId : projectFolderIsShared(project, e.id, parsed.machineId!) && pathWithin(cwd, e.cwdRoots, osOf(m))));
+                                if (m && env) located = { machine: m, env };
+                                else if (parsed.environmentId === undefined) continue;
+                            }
+                            const environmentId = located?.env.id ?? parsed.environmentId!;
                             let outcome: string | undefined;
                             let error: string | undefined;
                             if (!located?.machine.online) error = `environment ${environmentId} is offline or no machine reports it`;
@@ -1936,7 +1961,7 @@ export function defineRoutingActor(ports: RoutingPorts) {
                                 if (outcome === undefined && error === undefined) continue;
                             }
                             await audit.record(ctx, workspaceId, {
-                                key: `${ctx.key}:released:${chatId}:${projectId}:${id}:${environmentId}:${at}`,
+                                key: `${ctx.key}:released:${chatId}:${projectId}:${id}:${located ? `${located.machine.machineId}/` : ''}${environmentId}:${at}`,
                                 kind: 'project.chat-released',
                                 at,
                                 by: ROUTER,

@@ -3,13 +3,17 @@
  * rules, feature detection and the effective folder of a chat member.
  */
 import { describe, it, expect } from 'vitest';
-import type { EnvironmentId, ProjectFeatureManifest, ProjectRecord } from '@agentic/core';
-import { connectorOptionsOf, detectedFeatures, effectiveWorkdir, featureManifestsOf, originMismatch, originOf, projectDraftOf, projectEnvironments, projectPatchOf, validateProjectDraft, withOrigin } from '../../src/pages/projects/model';
+import { projectFolderKey, type EnvironmentId, type MachineId, type ProjectFeatureManifest, type ProjectRecord } from '@agentic/core';
+import type { WorkdirEnvironment } from '@agentic/ui';
+import { connectorOptionsOf, detectedFeatures, effectiveWorkdir, featureManifestsOf, hasUnplacedFolders, originMismatch, originOf, projectDraftOf, projectPatchOf, projectPlaces, resolveFolders, validateProjectDraft, withOrigin, type ProjectMachine } from '../../src/pages/projects/model';
 import { PROJECTS } from '../../src/mock/workspace';
 import { opsPlugins } from '../../src/mock/ops';
 
-const WORK = 'env_work' as EnvironmentId;
-const MAC = 'env_mac' as EnvironmentId;
+const WIN_M = 'machine_win' as MachineId;
+const MAC_M = 'machine_mac' as MachineId;
+/** The folder keys (#702): each machine's folder. */
+const WORK = projectFolderKey(WIN_M);
+const MAC = projectFolderKey(MAC_M);
 const GIT = { kind: 'repo', branch: 'main', origin: 'https://github.com/andtii/agentic.git' } as const;
 
 const stored: ProjectRecord = {
@@ -69,11 +73,46 @@ describe('folders and origins', () => {
         expect(originMismatch(other, WORK)).toBe(true);
     });
 
-    it('lists the environments a project has a folder on with the picker labels', () => {
-        expect(projectEnvironments(PROJECTS[0]!, [{ id: 'env_alien01_work', label: 'alien01 / work' }])).toEqual([
-            { id: 'env_alien01_work', label: 'alien01 / work', path: 'C:\\Dev\\agentic\\main' },
-            { id: 'env_alien01_personal', label: 'env_alien01_personal', path: 'C:\\Users\\andy\\src\\agentic' }
+    it('lists where a project has folders: the machine by name, an override by its environment label', () => {
+        const machines: ProjectMachine[] = [{ id: 'alien01', name: 'alien01', environments: [environment('env_alien01_personal', 'alien01 / personal', 'windows', ['C:\\Users\\andy'])] }];
+        expect(projectPlaces(PROJECTS[0]!, machines)).toEqual([
+            { key: 'alien01/*', label: 'alien01', path: 'C:\\Dev\\agentic\\main' },
+            { key: 'alien01/env_alien01_personal', label: 'alien01 / personal', path: 'C:\\Users\\andy\\src\\agentic' }
         ]);
+        // A machine no longer listed keeps its id; a pre-#702 key is labelled by an environment of that id.
+        expect(projectPlaces({ folders: { 'gone/*': '/x', env_alien01_personal: 'C:\\Users\\andy\\x' } }, machines).map((p) => p.label)).toEqual(['gone', 'alien01 / personal']);
+    });
+});
+
+const environment = (id: string, label: string, os: WorkdirEnvironment['os'], roots: string[]): WorkdirEnvironment => ({ id: id as EnvironmentId, label, os, roots });
+
+describe('folders stored before #702 (keyed by a bare environment id)', () => {
+    // The reported case: both machines have an environment the daemon named `env_claude`, each with its own roots.
+    const mac: ProjectMachine = { id: MAC_M, name: 'Andii Mac', environments: [environment('env_andii', 'Andii Mac / andii', 'darwin', ['/Users/andii/dev']), environment('env_claude', 'Andii Mac / claude', 'darwin', ['/Users/andii/dev']), environment('env_claude2', 'Andii Mac / claude2', 'darwin', ['/Users/andii/dev'])] };
+    const win: ProjectMachine = { id: WIN_M, name: 'machine-6', environments: [environment('env_claude', 'machine-6 / Claude', 'windows', ['C:\\Dev']), environment('env_claude_2', 'machine-6 / Claude 2', 'windows', ['C:\\Dev']), environment('env_codex', 'machine-6 / Codex', 'windows', ['D:\\work'])] };
+
+    it('go to the machine whose environment of that id holds them; one folder for all of them becomes the machine folder', () => {
+        const folders = { env_andii: { path: '/Users/andii/dev/agentic/main' }, env_claude2: { path: '/Users/andii/dev/agentic/main' }, env_claude: { path: 'C:\\Dev\\agentic\\main' }, env_claude_2: { path: 'C:\\Dev\\agentic\\main' } };
+        expect(hasUnplacedFolders(folders)).toBe(true);
+        const placed = resolveFolders(folders, [mac, win]);
+        expect(placed).toEqual({ [MAC]: { path: '/Users/andii/dev/agentic/main' }, [WORK]: { path: 'C:\\Dev\\agentic\\main' } });
+        expect(hasUnplacedFolders(placed)).toBe(false);
+    });
+
+    it('different folders on one machine stay overrides; one no machine can take is left out; nothing moves before the machines are known', () => {
+        const folders = { env_andii: { path: '/Users/andii/dev/a' }, env_claude2: { path: '/Users/andii/dev/b', git: GIT }, env_claude: { path: 'E:\\elsewhere' }, env_gone: { path: '/x' } };
+        expect(resolveFolders(folders, [mac, win])).toEqual({ [projectFolderKey(MAC_M, 'env_andii' as EnvironmentId)]: { path: '/Users/andii/dev/a' }, [projectFolderKey(MAC_M, 'env_claude2' as EnvironmentId)]: { path: '/Users/andii/dev/b', git: GIT } });
+        // Outside every root but reported by one machine only: kept there, so the save explains it instead of losing it.
+        expect(resolveFolders({ env_codex: { path: 'C:\\elsewhere' } }, [mac, win])).toEqual({ [WORK]: { path: 'C:\\elsewhere' } });
+        expect(resolveFolders(folders, [])).toEqual(folders);
+    });
+
+    it('the save removes the old keys and sends the placed ones; a folder not yet placed is never sent', () => {
+        const record = { ...stored, folders: { env_andii: '/Users/andii/dev/agentic/main' } };
+        const draft = projectDraftOf(record);
+        expect(projectPatchOf(draft, record).folders).toEqual({});
+        draft.folders = resolveFolders(draft.folders, [mac, win]);
+        expect(projectPatchOf(draft, record).folders).toEqual({ [MAC]: '/Users/andii/dev/agentic/main', env_andii: null });
     });
 });
 
@@ -103,11 +142,17 @@ describe('features', () => {
 
 describe('effectiveWorkdir', () => {
     it('the override wins, else the project\u2019s folder for the member\u2019s environment, else none', () => {
-        const project = { folders: { [WORK]: 'C:\\Dev\\agentic\\main' } };
-        expect(effectiveWorkdir({ workdir: { environmentId: MAC, path: '/tmp/x' } }, WORK, project)).toEqual({ ref: { environmentId: MAC, path: '/tmp/x' }, inherited: false });
-        expect(effectiveWorkdir({}, WORK, project)).toEqual({ ref: { environmentId: WORK, path: 'C:\\Dev\\agentic\\main' }, inherited: true });
-        expect(effectiveWorkdir({}, MAC, project)).toEqual({ ref: null, inherited: false });
+        const project = { folders: { env_work: 'C:\\Dev\\agentic\\main' } };
+        // A pre-#702 folder keyed by the environment id alone.
+        expect(effectiveWorkdir({ workdir: { environmentId: 'env_mac' as EnvironmentId, path: '/tmp/x' } }, 'env_work', project)).toEqual({ ref: { environmentId: 'env_mac', path: '/tmp/x' }, inherited: false });
+        expect(effectiveWorkdir({}, 'env_work', project)).toEqual({ ref: { environmentId: 'env_work', path: 'C:\\Dev\\agentic\\main' }, inherited: true });
+        expect(effectiveWorkdir({}, 'env_mac', project)).toEqual({ ref: null, inherited: false });
         expect(effectiveWorkdir({}, undefined, project)).toEqual({ ref: null, inherited: false });
-        expect(effectiveWorkdir({}, WORK, undefined)).toEqual({ ref: null, inherited: false });
+        // By machine (#702): the environment's override on the chat's machine, else that machine's folder.
+        const byMachine = { folders: { [projectFolderKey(WIN_M)]: 'C:\\Dev\\agentic\\main', [projectFolderKey(WIN_M, 'env_codex' as EnvironmentId)]: 'D:\\work\\agentic' } };
+        expect(effectiveWorkdir({}, 'env_claude', byMachine, WIN_M).ref).toEqual({ environmentId: 'env_claude', path: 'C:\\Dev\\agentic\\main' });
+        expect(effectiveWorkdir({}, 'env_codex', byMachine, WIN_M).ref).toEqual({ environmentId: 'env_codex', path: 'D:\\work\\agentic' });
+        expect(effectiveWorkdir({}, 'env_claude', byMachine, MAC_M).ref).toBeNull();
+        expect(effectiveWorkdir({}, 'env_work', undefined)).toEqual({ ref: null, inherited: false });
     });
 });

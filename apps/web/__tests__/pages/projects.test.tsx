@@ -1,6 +1,7 @@
 /**
  * `/projects` and the project form on mock data (#333): the list with its
- * environment badges, one folder row per daemon environment, Browse keeping
+ * place badges, one folder row per machine with an override per environment
+ * on it (#702), Browse keeping
  * the folder's git badge on the row, Find through the mock `locate`, the
  * different-origin warning, a feature's settings from its manifest schema
  * with the origin prefilled, `detect` suggesting a feature, and the patch a
@@ -20,7 +21,14 @@ import { mountAt, setText, text } from './helpers';
 import { mountRoute, page, texts } from './mount';
 
 const settle = async (): Promise<void> => { for (let i = 0; i < 3; i++) await new Promise((r) => setTimeout(r, 0)); };
-const row = (dom: ParentNode, env: string): HTMLElement => dom.querySelector<HTMLElement>(`[data-project-folder="${env}"]`)!;
+/** A machine's folder row (#702); `override` is one environment's row inside it. */
+const row = (dom: ParentNode, machine: string): HTMLElement => dom.querySelector<HTMLElement>(`[data-project-folder="${machine}"]`)!;
+const override = (dom: ParentNode, machine: string, env: string): HTMLElement => row(dom, machine).querySelector<HTMLElement>(`[data-project-override="${env}"]`)!;
+const chip = (el: ParentNode): string => text(el.querySelector('[data-scope="ag-workdir"][data-part="chip"]'));
+const openOverrides = async (dom: ParentNode, machine: string): Promise<void> => {
+    row(dom, machine).querySelector<HTMLButtonElement>('[data-project-override-open]')!.click();
+    await settle();
+};
 const openPopup = (): HTMLElement => document.querySelector<HTMLElement>('[data-scope="dialog"][data-part="popup"][data-state="open"]')!;
 const buttonIn = (root: ParentNode, label: string): HTMLButtonElement => {
     const b = [...root.querySelectorAll<HTMLButtonElement>('button')].find((x) => x.textContent?.trim() === label && !x.disabled);
@@ -28,9 +36,9 @@ const buttonIn = (root: ParentNode, label: string): HTMLButtonElement => {
     return b;
 };
 
-/** Browse: open the row's picker, walk `path` from the root shortcut, use the folder. */
-async function browse(dom: ParentNode, env: string, root: string, ...names: string[]): Promise<void> {
-    buttonIn(row(dom, env), 'Change…').click();
+/** Browse: open the row's picker (a machine's, or an `override` row), walk `path` from the root shortcut, use the folder. */
+async function browse(at: HTMLElement, root: string, ...names: string[]): Promise<void> {
+    buttonIn(at, 'Change…').click();
     await settle();
     const dialog = document.querySelector<HTMLElement>('[data-scope="ag-workdir-picker"][data-part="root"]')!;
     // A row with a folder opens inside it: back to the top level (Recent + Roots) first.
@@ -54,7 +62,8 @@ describe('/projects (mock)', () => {
         expect(page(dom, 'projects')).not.toBeNull();
         const rows = [...dom.querySelectorAll<HTMLElement>('[data-project-row]')];
         expect(rows.map((r) => r.getAttribute('data-project-row'))).toEqual(['p_agentic', 'p_docs']);
-        expect(texts([...rows[0]!.querySelectorAll('.project-env')])).toEqual(['alien01 / work', 'alien01 / personal']);
+        // The machine's folder by the machine's name, an override by its environment (#702).
+        expect(texts([...rows[0]!.querySelectorAll('.project-env')])).toEqual(['alien01', 'alien01 / personal']);
         expect(texts([...rows[0]!.querySelectorAll('.project-feature')])).toEqual(['Git']);
         expect(rows[0]!.querySelectorAll('[data-member-tiles] [data-scope="avatar"][data-part="root"]').length).toBe(3);
         expect(texts([...rows[1]!.querySelectorAll('.project-env')])).toEqual(['alien01 / personal']);
@@ -74,10 +83,14 @@ describe('/projects (mock)', () => {
         // A plain text field: an origin is whatever git wrote (`git@host:path` is no URL), so the schema declares no `format` (#335).
         expect(feature.querySelector('input[name="feature-agentic.feature.git.origin"]')!.getAttribute('type')).toBe('text');
         expect(feature.querySelector<HTMLInputElement>('input[role="switch"]')!.checked).toBe(true);
-        // One folder row per daemon environment, the stored ones filled.
-        expect([...dom.querySelectorAll('[data-project-folder]')].map((r) => r.getAttribute('data-project-folder'))).toEqual(mockWorkdirEnvironments.list().map((e) => e.id));
-        expect(text(row(dom, 'env_alien01_work').querySelector('[data-scope="ag-workdir"][data-part="chip"]'))).toContain('agentic');
-        expect(text(row(dom, 'env_nuclab_work').querySelector('[data-scope="ag-workdir"][data-part="chip"]'))).toContain('No folder on this environment');
+        // One folder row per machine (#702), the stored ones filled; an environment with its own folder shows it, the others the machine's.
+        expect([...dom.querySelectorAll('[data-project-folder]')].map((r) => r.getAttribute('data-project-folder'))).toEqual(['alien01', 'nuc-lab']);
+        expect(chip(row(dom, 'alien01'))).toContain('agentic');
+        expect(chip(override(dom, 'alien01', 'env_alien01_personal'))).toContain('agentic');
+        expect(chip(override(dom, 'alien01', 'env_alien01_codex'))).toContain("The machine's folder");
+        // The acme environment's roots do not hold the machine's folder: it says so.
+        expect(text(override(dom, 'alien01', 'env_alien01_client_acme'))).toContain("outside this environment's folders");
+        expect(chip(row(dom, 'nuc-lab'))).toContain('No folder on this machine');
     });
 });
 
@@ -87,19 +100,21 @@ describe('/projects/new from a folder (#336)', () => {
         const dom = await mountRoute(`/projects/new?name=agentic&env=env_alien01_work&path=${encodeURIComponent(path)}&origin=${encodeURIComponent(AGENTIC_ORIGIN)}`);
         expect(page(dom, 'project')).not.toBeNull();
         expect(dom.querySelector<HTMLInputElement>('input[name="project-name"]')!.value).toBe('agentic');
-        expect(text(row(dom, 'env_alien01_work').querySelector('[data-scope="ag-workdir"][data-part="chip"]'))).toContain('x');
-        expect(texts([...row(dom, 'env_alien01_work').querySelectorAll('[data-project-folder-meta] [data-scope="badge"][data-part="root"]')])).toContain('repo');
-        expect(buttonIn(row(dom, 'env_alien01_personal'), 'Find')).toBeTruthy();
-        expect(text(row(dom, 'env_nuclab_work').querySelector('[data-scope="ag-workdir"][data-part="chip"]'))).toContain('No folder on this environment');
+        // The folder of `env` lands on the machine reporting it (#702).
+        expect(chip(row(dom, 'alien01'))).toContain('x');
+        expect(texts([...row(dom, 'alien01').querySelectorAll('[data-project-folder-meta] [data-scope="badge"][data-part="root"]')])).toContain('repo');
+        await openOverrides(dom, 'alien01');
+        expect(buttonIn(override(dom, 'alien01', 'env_alien01_personal'), 'Find')).toBeTruthy();
+        expect(chip(row(dom, 'nuc-lab'))).toContain('No folder on this machine');
     });
 
     it('a name alone, or a folder without an origin, prefill just that', async () => {
         const named = await mountRoute('/projects/new?name=blog');
         expect(named.querySelector<HTMLInputElement>('input[name="project-name"]')!.value).toBe('blog');
         expect([...named.querySelectorAll<HTMLButtonElement>('button')].some((b) => b.textContent?.trim() === 'Find')).toBe(false);
-        const plain = await mountRoute(`/projects/new?env=env_alien01_work&path=${encodeURIComponent('C:\\notes')}`);
+        const plain = await mountRoute(`/projects/new?env=env_alien01_work&path=${encodeURIComponent('C:\\Dev\\notes')}`);
         expect(plain.querySelector<HTMLInputElement>('input[name="project-name"]')!.value).toBe('');
-        expect(text(row(plain, 'env_alien01_work').querySelector('[data-scope="ag-workdir"][data-part="chip"]'))).toContain('notes');
+        expect(chip(row(plain, 'alien01'))).toContain('notes');
         expect([...plain.querySelectorAll<HTMLButtonElement>('button')].some((b) => b.textContent?.trim() === 'Find')).toBe(false);
     });
 });
@@ -111,7 +126,7 @@ describe('the project form (mock)', () => {
             <ProjectForm
                 agents={AGENTS}
                 environments={mockWorkdirEnvironments.list()}
-                machineOf={mockWorkdirEnvironments.machineOf}
+                machines={mockWorkdirEnvironments.projectMachines()}
                 connectors={connectorOptionsOf(opsPlugins)}
                 features={featureManifestsOf(opsPlugins)}
                 locate={mockLocate()}
@@ -127,15 +142,16 @@ describe('the project form (mock)', () => {
         expect(dom.querySelectorAll('[data-project-folder] button').length).toBeGreaterThan(0);
         // No origin yet: no Find anywhere.
         expect([...dom.querySelectorAll<HTMLButtonElement>('button')].some((b) => b.textContent?.trim() === 'Find')).toBe(false);
-        await browse(dom, 'env_alien01_work', 'C:\\Dev', 'agentic', 'main');
-        expect(text(row(dom, 'env_alien01_work').querySelector('[data-scope="ag-workdir"][data-part="chip"]'))).toContain('agentic');
+        await browse(row(dom, 'alien01'), 'C:\\Dev', 'agentic', 'main');
+        expect(chip(row(dom, 'alien01'))).toContain('agentic');
         // The build's git feature (#335) detects the badge and suggests itself on the row.
-        expect(texts([...row(dom, 'env_alien01_work').querySelectorAll('[data-project-folder-meta] [data-scope="badge"][data-part="root"]')])).toEqual(['repo · main', 'Git']);
-        // Now every empty row offers Find; the offline machine's row says why it cannot.
-        expect(buttonIn(row(dom, 'env_alien01_personal'), 'Find')).toBeTruthy();
-        expect(row(dom, 'env_nuclab_work').querySelector<HTMLButtonElement>('button[disabled]')).not.toBeNull();
+        expect(texts([...row(dom, 'alien01').querySelectorAll('[data-project-folder-meta] [data-scope="badge"][data-part="root"]')])).toEqual(['repo · main', 'Git']);
+        // Now every empty row offers Find; the offline machine's row cannot.
+        expect(row(dom, 'nuc-lab').querySelector<HTMLButtonElement>('button[disabled]')).not.toBeNull();
+        await openOverrides(dom, 'alien01');
+        expect(buttonIn(override(dom, 'alien01', 'env_alien01_personal'), 'Find')).toBeTruthy();
 
-        buttonIn(row(dom, 'env_alien01_personal'), 'Find').click();
+        buttonIn(override(dom, 'alien01', 'env_alien01_personal'), 'Find').click();
         await settle();
         const popup = openPopup();
         const matches = mockFsLocate('env_alien01_personal', AGENTIC_ORIGIN);
@@ -145,11 +161,12 @@ describe('the project form (mock)', () => {
         expect(popup.querySelector<HTMLInputElement>('input[name="project-locate-match"]')!.checked).toBe(true);
         buttonIn(popup, 'Use this folder').click();
         await settle();
-        expect(text(row(dom, 'env_alien01_personal').querySelector('[data-scope="ag-workdir"][data-part="chip"]'))).toContain('agentic');
+        expect(chip(override(dom, 'alien01', 'env_alien01_personal'))).toContain('agentic');
         expect(dom.querySelector('[data-project-folder-warning]')).toBeNull();
 
         // No match to use (here: the mock has no tree for the codex environment, an error): confirming keeps the dialog and its answer in view; Cancel closes it.
-        buttonIn(row(dom, 'env_alien01_codex'), 'Find').click();
+        // An environment that inherits the machine's folder can still look for another checkout of its own.
+        buttonIn(override(dom, 'alien01', 'env_alien01_codex'), 'Find').click();
         await settle();
         // The error line is the kit ErrorNote (#592): zero's Alert, announced, keeping its hook.
         const locateError = openPopup().querySelector('[data-project-locate="error"]')!;
@@ -163,9 +180,9 @@ describe('the project form (mock)', () => {
         expect(document.querySelector('[data-scope="dialog"][data-part="popup"][data-state="open"]')).toBeNull();
 
         // Another repo on the work row: both rows now disagree, and say so without blocking.
-        await browse(dom, 'env_alien01_work', 'C:\\Dev', 'sigx');
-        expect(row(dom, 'env_alien01_work').hasAttribute('data-mismatch')).toBe(true);
-        expect(text(row(dom, 'env_alien01_work').querySelector('[data-project-folder-warning]'))).toContain('another origin');
+        await browse(row(dom, 'alien01'), 'C:\\Dev', 'sigx');
+        expect(row(dom, 'alien01').hasAttribute('data-mismatch')).toBe(true);
+        expect(text(row(dom, 'alien01').querySelector('[data-project-folder-warning]'))).toContain('another origin');
     });
 
     it('a feature switched on renders its settings from the schema with the origin prefilled from the folders; detect preselects it', async () => {
@@ -174,9 +191,9 @@ describe('the project form (mock)', () => {
         const feature = () => dom.querySelector<HTMLElement>('[data-project-feature="agentic.feature.git"]')!;
         expect(feature().hasAttribute('data-on')).toBe(false);
         expect(feature().querySelector('[data-form="schema"]')).toBeNull();
-        await browse(dom, 'env_alien01_work', 'C:\\Dev', 'agentic', 'main');
+        await browse(row(dom, 'alien01'), 'C:\\Dev', 'agentic', 'main');
         // The badge said "repo": the plugin's detect suggested the feature, the row shows it, and the settings opened on the origin.
-        expect(texts([...row(dom, 'env_alien01_work').querySelectorAll('[data-project-folder-meta] [data-scope="badge"][data-part="root"]')])).toEqual(['repo · main', 'Git']);
+        expect(texts([...row(dom, 'alien01').querySelectorAll('[data-project-folder-meta] [data-scope="badge"][data-part="root"]')])).toEqual(['repo · main', 'Git']);
         expect(feature().hasAttribute('data-on')).toBe(true);
         expect(feature().querySelector<HTMLInputElement>('input[name="feature-agentic.feature.git.origin"]')!.value).toBe(AGENTIC_ORIGIN);
         expect(feature().querySelector<HTMLInputElement>('input[role="switch"]')!.checked).toBe(true);
@@ -198,7 +215,7 @@ describe('the project form (mock)', () => {
         const radio = dom.querySelector<HTMLInputElement>('[data-new-chat-agent="forge"] input[name="coordinator"]')!;
         radio.checked = true;
         radio.dispatchEvent(new Event('change', { bubbles: true }));
-        await browse(dom, 'env_alien01_work', 'C:\\Dev', 'agentic', 'main');
+        await browse(row(dom, 'alien01'), 'C:\\Dev', 'agentic', 'main');
         // The badge switched the build's git feature on (detect, #335) with the origin prefilled: nothing to click.
         expect(dom.querySelector<HTMLInputElement>('[data-project-feature="agentic.feature.git"] input[role="switch"]')!.checked).toBe(true);
         buttonIn(dom, 'Create project').click();
@@ -206,7 +223,7 @@ describe('the project form (mock)', () => {
         expect(saved).toEqual([{
             name: 'agentic',
             members: { agentIds: ['forge', 'lint'], coordinator: 'forge' },
-            folders: { env_alien01_work: 'C:\\Dev\\agentic\\main' },
+            folders: { 'alien01/*': 'C:\\Dev\\agentic\\main' },
             connectors: [],
             features: { 'agentic.feature.git': { origin: AGENTIC_ORIGIN } }
         }]);
@@ -215,7 +232,7 @@ describe('the project form (mock)', () => {
     it('a feature\u2019s presets fill its fields, the preview follows the draft, and the plugin\u2019s own errors keep the page here (#621)', async () => {
         const { dom, saved } = await mountForm();
         setText(dom.querySelector<HTMLInputElement>('input[name="project-name"]')!, 'agentic');
-        await browse(dom, 'env_alien01_work', 'C:\\Dev', 'agentic', 'main');
+        await browse(row(dom, 'alien01'), 'C:\\Dev', 'agentic', 'main');
         const feature = () => dom.querySelector<HTMLElement>('[data-project-feature="agentic.feature.git"]')!;
         const preview = () => Object.fromEntries([...feature().querySelectorAll('[data-project-feature-preview-line]')].map((l) => [text(l.querySelector('dt')), text(l.querySelector('dd'))]));
         const field = (key: string) => feature().querySelector<HTMLInputElement>(`input[name="feature-agentic.feature.git.${key}"]`)!;
@@ -255,7 +272,7 @@ describe('the project form (mock)', () => {
         const { dom } = await mountForm();
         // happy-dom does no layout; the structural rule is what the CSS pins: every grid on the form collapses to one column below 768.
         expect(dom.querySelector('[data-project-form]')).not.toBeNull();
-        expect(dom.querySelectorAll('[data-project-folder]').length).toBe(mockWorkdirEnvironments.list().length);
+        expect(dom.querySelectorAll('[data-project-folder]').length).toBe(mockWorkdirEnvironments.projectMachines().length);
         expect(PROJECTS.length).toBe(2);
     });
 });

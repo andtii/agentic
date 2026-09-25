@@ -1,15 +1,16 @@
 /**
  * The project form (#333): name and description, the roster on the New
  * chat member cards with the coordinator radio, the connectors as chips,
- * one folder row per daemon environment (Browse through the picker scoped
- * to that environment; Find through `locate` once another row's badge
- * says which repo this is), and the feature plugins as switches whose
+ * one folder row per machine — every environment on it whose roots hold
+ * the folder runs there — with an override per environment on demand
+ * (#702; Browse through the picker scoped to the machine's environments;
+ * Find through `locate` once another row's badge says which repo this is), and the feature plugins as switches whose
  * settings render from the manifest's `projectSettings` schema. A folder's
  * git badge stays on its row; a plugin's `detect` suggests the feature;
  * a row whose checkout is of another repo warns and never blocks.
  */
 import { component, signal, watch, type Define } from 'sigx';
-import { applyProjectFeaturePreset, configDefaults, type EnvironmentId, type FsGitInfo, type ProjectFeatureManifest, type ProjectFeaturePlugin, type ProjectFeaturePreset, type ProjectPatch, type ProjectRecord } from '@agentic/core';
+import { applyProjectFeaturePreset, configDefaults, parseProjectFolderKey, projectFolderKey, type EnvironmentId, type FsGitInfo, type MachineId, type ProjectFeatureManifest, type ProjectFeaturePlugin, type ProjectFeaturePreset, type ProjectPatch, type ProjectRecord } from '@agentic/core';
 import { derivedModel } from '@sigx/zero/behaviors';
 import { RadioGroup } from '@sigx/zero';
 import { Field } from '@sigx/zero-daisyui/components';
@@ -19,7 +20,7 @@ import { MemberPicker } from '../chat/MemberPicker';
 import type { AgentIdentity } from '../chat/live';
 import { WorkdirInput } from '../workdir/WorkdirInput';
 import type { LocateBackend } from './locate';
-import { detectedFeatures, originMismatch, originOf, projectDraftOf, projectPatchOf, validateProjectDraft, withOrigin, type ProjectDraft, type ProjectErrors, type ProjectFolderDraft } from './model';
+import { detectedFeatures, hasUnplacedFolders, originMismatch, originOf, projectDraftOf, projectPatchOf, reaches, resolveFolders, validateProjectDraft, withOrigin, type ProjectDraft, type ProjectErrors, type ProjectFolderDraft, type ProjectMachine } from './model';
 
 export type ProjectFormProps =
     /** The project being edited; absent on the New project page. */
@@ -27,9 +28,10 @@ export type ProjectFormProps =
     /** What a new project opens on (#336, `projectPrefillOf`): a name and a folder row with its badge, as if picked. */
     & Define.Prop<'initial', Partial<ProjectDraft>>
     & Define.Prop<'agents', readonly AgentIdentity[], true>
-    /** Every daemon environment: one folder row each; the quota badges on the member cards. */
+    /** Every daemon environment: the quota badges on the member cards. */
     & Define.Prop<'environments', readonly WorkdirEnvironment[], true>
-    & Define.Prop<'machineOf', (environmentId: string) => string | undefined>
+    /** Every paired machine with its environments: one folder row each, an override row per environment (#702). */
+    & Define.Prop<'machines', readonly ProjectMachine[], true>
     & Define.Prop<'connectors', readonly { readonly value: string; readonly label: string }[]>
     /** The enabled project feature manifests: one switch each, settings from `projectSettings`. */
     & Define.Prop<'features', readonly ProjectFeatureManifest[]>
@@ -45,12 +47,13 @@ export type ProjectFormProps =
 
 export const ProjectForm = component<ProjectFormProps>(({ props, emit }) => {
     const onOf = (features: Readonly<Record<string, unknown>>): Record<string, boolean> => Object.fromEntries(Object.keys(features).map((id) => [id, true]));
-    const st = signal<ProjectDraft & { attempted: boolean; finding: EnvironmentId | null; match: string; detected: Record<string, string[]>; removing: boolean; featureError: string; on: Record<string, boolean>; live: Record<string, Record<string, unknown>> }>({
+    const st = signal<ProjectDraft & { attempted: boolean; finding: { key: string; machineId: string; environmentId: EnvironmentId; label: string } | null; overrides: Record<string, boolean>; match: string; detected: Record<string, string[]>; removing: boolean; featureError: string; on: Record<string, boolean>; live: Record<string, Record<string, unknown>> }>({
         ...projectDraftOf(props.project),
         ...(props.project ? {} : props.initial ?? {}),
         on: onOf(props.project?.features ?? {}),
         attempted: false,
         finding: null,
+        overrides: {},
         match: '',
         detected: {},
         removing: false,
@@ -63,6 +66,14 @@ export const ProjectForm = component<ProjectFormProps>(({ props, emit }) => {
         () => {
             if (props.project && !st.name) Object.assign(st, projectDraftOf(props.project), { on: onOf(props.project.features) });
         }
+    );
+    // A folder keyed by a bare environment id — a pre-#702 project or a prefill — is placed on its machine once the machines are known.
+    watch(
+        () => [props.machines, st.folders] as const,
+        () => {
+            if (hasUnplacedFolders(st.folders) && props.machines.length) st.folders = resolveFolders(st.folders, props.machines);
+        },
+        { immediate: true }
     );
     const apis: Record<string, SchemaFormApi | null> = {};
     const catalogue = (): Readonly<Record<string, ProjectFeaturePlugin>> => props.catalogue ?? projectFeatureCatalogue;
@@ -99,21 +110,22 @@ export const ProjectForm = component<ProjectFormProps>(({ props, emit }) => {
         st.featureError = '';
     };
     /** The features a folder's badge suggests, applied: a project with no feature yet takes the suggestion; one that has chosen keeps its choice. */
-    const suggest = (environmentId: EnvironmentId, row: ProjectFolderDraft): void => {
+    const suggest = (key: string, row: ProjectFolderDraft): void => {
         const found = row.git ? detectedFeatures(catalogue(), { path: row.path, git: row.git }) : [];
-        st.detected = { ...st.detected, [environmentId]: found };
+        st.detected = { ...st.detected, [key]: found };
         if (found.length && !Object.keys(st.features).length) for (const id of found) { const m = features().find((f) => f.id === id); if (m) toggleFeature(m, true); }
     };
-    const setFolder = (environmentId: EnvironmentId, pick: WorkdirSelection | null): void => {
+    /** A row's folder by `projectFolderKey`: the machine's (`<machineId>/*`) or one environment's override on it. */
+    const setFolder = (key: string, pick: WorkdirSelection | null): void => {
         const next = { ...st.folders };
         if (pick) {
-            next[environmentId] = { path: pick.path, ...(pick.git ? { git: pick.git } : {}) };
+            next[key] = { path: pick.path, ...(pick.git ? { git: pick.git } : {}) };
             st.folders = next;
-            suggest(environmentId, next[environmentId]!);
+            suggest(key, next[key]!);
         } else {
             const detected = { ...st.detected };
-            delete next[environmentId];
-            delete detected[environmentId];
+            delete next[key];
+            delete detected[key];
             st.folders = next;
             st.detected = detected;
         }
@@ -121,15 +133,16 @@ export const ProjectForm = component<ProjectFormProps>(({ props, emit }) => {
     };
     // A prefilled folder (#336) counts as picked: its badge suggests the features and its origin fills their settings.
     if (!props.project) {
-        for (const [id, row] of Object.entries(props.initial?.folders ?? {})) suggest(id as EnvironmentId, row);
+        for (const [key, row] of Object.entries(st.folders)) suggest(key, row);
         prefillOrigins();
     }
-    const find = (environmentId: EnvironmentId): void => {
+    /** Find the repo for a row: under the roots of the environment it names, or for a machine's row its first browsable one. */
+    const find = (key: string, machine: ProjectMachine, env: WorkdirEnvironment | undefined): void => {
         const o = origin();
-        if (!o) return;
+        if (!o || !env) return;
         st.match = '';
-        st.finding = environmentId;
-        props.locate.start(environmentId, o);
+        st.finding = { key, machineId: machine.id, environmentId: env.id, label: parseProjectFolderKey(key)?.environmentId ? env.label : machine.name };
+        props.locate.start(env.id, o, machine.id);
     };
     const closeFind = (): void => {
         st.finding = null;
@@ -140,10 +153,10 @@ export const ProjectForm = component<ProjectFormProps>(({ props, emit }) => {
     const matchModel = derivedModel<string>(matchInEffect, (path) => { st.match = path; });
     /** Confirm: fill the row with the match — while there is none (still searching, an error, nothing found) the dialog stays, its results in view. */
     const useMatch = (): void => {
-        const env = st.finding;
+        const at = st.finding;
         const hit = props.locate.state.matches.find((m) => m.path === matchInEffect());
-        if (!env || !hit) return;
-        setFolder(env, { environmentId: env, path: hit.path, git: hit.git });
+        if (!at || !hit) return;
+        setFolder(at.key, { environmentId: at.environmentId, path: hit.path, git: hit.git });
         closeFind();
     };
     const save = (): void => {
@@ -165,7 +178,7 @@ export const ProjectForm = component<ProjectFormProps>(({ props, emit }) => {
     return () => {
         const errors: ProjectErrors = st.attempted ? validateProjectDraft(st) : {};
         const o = origin();
-        const finding = st.finding ? props.environments.find((e) => e.id === st.finding) : undefined;
+        const finding = st.finding;
         const found = props.locate.state;
         return (
             <div data-project-form data-editing={props.project ? '' : undefined}>
@@ -202,33 +215,65 @@ export const ProjectForm = component<ProjectFormProps>(({ props, emit }) => {
 
                 <section data-project-section="folders" aria-label="Folders">
                     <Label>Folders</Label>
-                    <p data-project-hint>Where the project lives on each machine. A chat member runs in the folder of its environment unless it is given another one in the chat.</p>
-                    {props.environments.length ? (
+                    <p data-project-hint>Where the project lives on each machine. Every environment on the machine runs there, unless it has its own folder here or a chat member is given another one in the chat.</p>
+                    {props.machines.length ? (
                         <ul data-project-folders>
-                            {props.environments.map((env) => {
-                                const row = st.folders[env.id];
-                                const mismatch = originMismatch(st.folders, env.id);
-                                const detected = st.detected[env.id] ?? [];
+                            {props.machines.map((m) => {
+                                const key = projectFolderKey(m.id as MachineId);
+                                const row = st.folders[key];
+                                const mismatch = originMismatch(st.folders, key);
+                                const detected = st.detected[key] ?? [];
+                                const browsable = m.environments.find((e) => !e.unavailable);
+                                const at = row ? (m.environments.find((e) => reaches(e, row.path)) ?? m.environments[0]) : undefined;
+                                const overridden = m.environments.filter((e) => st.folders[projectFolderKey(m.id as MachineId, e.id)]);
+                                const open = !!st.overrides[m.id] || overridden.length > 0;
                                 return (
-                                    <li data-project-folder={env.id} data-mismatch={mismatch ? '' : undefined}>
+                                    <li data-project-folder={m.id} data-mismatch={mismatch ? '' : undefined}>
                                         <WorkdirInput
-                                            value={row ? { environmentId: env.id, path: row.path } : null}
-                                            environments={[env]}
-                                            {...(props.machineOf ? { machineOf: props.machineOf } : {})}
-                                            preferred={env.id}
-                                            label={env.label}
-                                            placeholder="No folder on this environment"
-                                            name={`project-folder-${env.id}`}
-                                            disabled={!!props.busy}
-                                            onChange={(pick) => setFolder(env.id, pick)}
+                                            value={row && at ? { environmentId: at.id, path: row.path } : null}
+                                            environments={m.environments}
+                                            machineOf={() => m.id}
+                                            {...(at ? { preferred: at.id } : {})}
+                                            label={m.name}
+                                            placeholder="No folder on this machine"
+                                            name={`project-folder-${m.id}`}
+                                            disabled={!!props.busy || !m.environments.length}
+                                            onChange={(pick) => setFolder(key, pick)}
                                         />
                                         <span data-project-folder-meta>
                                             {row?.git ? <Tag>{badgeText(row.git)}</Tag> : null}
                                             {detected.map((id) => <Tag tone="live">{features().find((f) => f.id === id)?.name ?? id}</Tag>)}
-                                            {!row && o ? <Button intent="default" icon="search" disabled={!!props.busy || !!env.unavailable} onClick={() => find(env.id)}>Find</Button> : null}
-                                            {!row && o && env.unavailable ? <span data-project-folder-note>{env.unavailable}</span> : null}
+                                            {!row && o ? <Button intent="default" icon="search" disabled={!!props.busy || !browsable} onClick={() => find(key, m, browsable)}>Find</Button> : null}
+                                            {!row && o && !browsable && m.environments[0]?.unavailable ? <span data-project-folder-note>{m.environments[0].unavailable}</span> : null}
+                                            {m.environments.length > 0 && !open ? <button type="button" data-link-button data-project-override-open onClick={() => { st.overrides = { ...st.overrides, [m.id]: true }; }}>Another folder for one environment…</button> : null}
                                         </span>
                                         {mismatch ? <p data-project-folder-warning role="status">This checkout has another origin ({row!.git!.origin}) than the rest of the project.</p> : null}
+                                        {open ? (
+                                            <ul data-project-overrides aria-label={`Environments on ${m.name}`}>
+                                                {m.environments.map((env) => {
+                                                    const okey = projectFolderKey(m.id as MachineId, env.id);
+                                                    const own = st.folders[okey];
+                                                    const inherits = !own && !!row && reaches(env, row.path);
+                                                    return (
+                                                        <li data-project-override={env.id} data-mismatch={originMismatch(st.folders, okey) ? '' : undefined}>
+                                                            <WorkdirInput
+                                                                value={own ? { environmentId: env.id, path: own.path } : null}
+                                                                environments={[env]}
+                                                                machineOf={() => m.id}
+                                                                preferred={env.id}
+                                                                label={env.label}
+                                                                placeholder={inherits ? `The machine's folder (${row!.path})` : 'No folder in this environment'}
+                                                                name={`project-folder-${m.id}-${env.id}`}
+                                                                disabled={!!props.busy}
+                                                                onChange={(pick) => setFolder(okey, pick)}
+                                                            />
+                                                            {!own && row && !inherits ? <span data-project-folder-note>The machine's folder is outside this environment's folders ({env.roots.join(', ') || 'none'}): it runs in its first folder unless you pick one here.</span> : null}
+                                                            {!own && o && !env.unavailable ? <Button intent="default" icon="search" disabled={!!props.busy} onClick={() => find(okey, m, env)}>Find</Button> : null}
+                                                        </li>
+                                                    );
+                                                })}
+                                            </ul>
+                                        ) : null}
                                     </li>
                                 );
                             })}

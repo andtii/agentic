@@ -1,5 +1,5 @@
 import { component, signal, watch, type Define } from 'sigx';
-import { BYPASS_PERMISSIONS_MODE, accountRefOf, environmentsForAccount, type AccountRef, type ProjectRecord } from '@agentic/core';
+import { BYPASS_PERMISSIONS_MODE, accountRefOf, environmentsForAccount, parseProjectFolderKey, projectFolderFor, type AccountRef, type EnvironmentId, type MachineId, type ProjectRecord } from '@agentic/core';
 import { RadioGroup } from '@sigx/zero';
 import { derivedModel } from '@sigx/zero/behaviors';
 import { Link } from '@sigx/router';
@@ -198,11 +198,16 @@ export const NewChatDialog = component<NewChatDialogProps>(({ props, emit }) => 
             else applyProject(id);
         }
     );
+    /** The machine the prefilled folder is on (#702): the chat's, else the one reporting its environment. */
+    const prefillMachine = (): MachineEntry | undefined => {
+        const env = props.prefill?.environmentId;
+        return machinesOf().find((m) => m.id === st.machine && m.environments.some((e) => e.id === env)) ?? machinesOf().find((m) => m.environments.some((e) => e.id === env));
+    };
     /** What the folder means for this chat, given the project in effect (#336). */
     const workdirOf = (project: NewChatProject | undefined): NewChatWorkdir | undefined => {
         const prefill = props.prefill;
         if (!prefill) return undefined;
-        const has = project ? typeof project.folders[prefill.environmentId as keyof typeof project.folders] === 'string' : true;
+        const has = project ? projectFolderFor(project, prefill.environmentId as EnvironmentId, prefillMachine()?.id as MachineId | undefined) !== undefined : true;
         return { environmentId: prefill.environmentId, path: prefill.path, saveToProject: !!project && !has && st.saveFolder };
     };
     /** The mode (#698): a person's pick while the machine still allows it, else bypass where allowed, else the runtime's own. */
@@ -229,10 +234,19 @@ export const NewChatDialog = component<NewChatDialogProps>(({ props, emit }) => 
             : undefined;
         const envLabel = (id: string): string => props.environments?.find((e) => e.id === id)?.label ?? id;
         const folders = project ? Object.entries(project.folders).filter((e): e is [string, string] => typeof e[1] === 'string') : [];
+        /** A folder's place (#702): the machine's name, "machine / environment" for an override, the environment for a pre-#702 one. */
+        const folderLabel = (key: string): string => {
+            const at = parseProjectFolderKey(key);
+            if (!at) return key;
+            if (at.machineId === undefined) return envLabel(at.environmentId!);
+            const m = machinesOf().find((x) => x.id === at.machineId);
+            const name = m?.name ?? at.machineId;
+            return at.environmentId === undefined ? name : `${name} / ${m?.environments.find((e) => e.id === at.environmentId)?.name ?? at.environmentId}`;
+        };
         const prefill = props.prefill;
         const creatingProject = !!prefill && !project && st.mode === 'project';
         const { scope, modes, mode: permission } = permissionInEffect();
-        const projectFolder = prefill && project ? project.folders[prefill.environmentId as keyof typeof project.folders] : undefined;
+        const projectFolder = prefill && project ? projectFolderFor(project, prefill.environmentId as EnvironmentId, prefillMachine()?.id as MachineId | undefined) : undefined;
         return (
             <FormDialog
                 model={props.model}
@@ -269,7 +283,7 @@ export const NewChatDialog = component<NewChatDialogProps>(({ props, emit }) => 
                             <p data-new-chat-project-line>
                                 {project.connectors.length ? `Connectors: ${project.connectors.map((c) => c.id).join(', ')}` : 'No connectors'}
                                 {' · '}
-                                {folders.length ? folders.map(([env, path]) => `${envLabel(env)}: ${path}`).join(' · ') : 'no folders yet'}
+                                {folders.length ? folders.map(([key, path]) => `${folderLabel(key)}: ${path}`).join(' · ') : 'no folders yet'}
                             </p>
                         ) : null}
                     </div>
@@ -285,7 +299,7 @@ export const NewChatDialog = component<NewChatDialogProps>(({ props, emit }) => 
                                 </p>
                             ) : (
                                 <Checkbox.Root model={() => st.saveFolder} name="chat-save-folder" data-new-chat-save-folder="">
-                                    Save {prefill.path} as this project's folder on {envLabel(prefill.environmentId)}
+                                    Save {prefill.path} as this project's folder on {prefillMachine()?.name ?? envLabel(prefill.environmentId)}
                                 </Checkbox.Root>
                             )
                         ) : (

@@ -15,8 +15,8 @@
  * ports: its tasks record the failure in `ops` and change nothing.
  */
 
-import type { AgentId, ChatFileStore, ChatId, ConnectorRef, EnvironmentDescriptor, EnvironmentId, HostOs, MachineId, NotificationPrefs, ProjectFeatures, ProjectId, ProjectMembers, ProjectPatch, ProjectRecord, RetentionSettings, ScheduleId, UpdateSettings, WorkdirRef, WorkspaceDefaults, WorkspaceId, WorkspaceSettings } from '@agentic/core';
-import { actorKey, createId, DEFAULT_UPDATE_SETTINGS, DEFAULT_WORKSPACE_SETTINGS, pathWithin, PROJECTS_MAX } from '@agentic/core';
+import type { AgentId, ChatFileStore, ChatId, ConnectorRef, HostOs, MachineId, NotificationPrefs, ProjectFeatures, ProjectId, ProjectMembers, ProjectPatch, ProjectRecord, RetentionSettings, ScheduleId, UpdateSettings, WorkdirRef, WorkspaceDefaults, WorkspaceId, WorkspaceSettings } from '@agentic/core';
+import { actorKey, createId, DEFAULT_UPDATE_SETTINGS, DEFAULT_WORKSPACE_SETTINGS, parseProjectFolderKey, pathWithin, PROJECTS_MAX } from '@agentic/core';
 import { defineActor, type ActorContext, type ActorPolicy, type AnyActorDefinition } from '@sigx/actors';
 import { ServerFnError } from '@sigx/server';
 import { recordAudit } from '../audit/port.js';
@@ -204,47 +204,55 @@ const bad = (message: string): never => {
 
 /**
  * The `folders` of a project after `patch.folders` — `null` removes an entry — with every folder the patch sets
- * checked against its environment's roots through the paired machines' reports (the same directory the router
- * scans, `routing/locate.ts`): a folder no machine can run in is never stored.
+ * checked through the paired machine it names (#702: environment ids are only unique per machine). A machine's
+ * folder (`<machineId>/*`) must be inside the roots of at least one of its environments — the others simply do not
+ * inherit it; an override (`<machineId>/<environmentId>`) must be inside that environment's roots. A pre-#702 key
+ * (a bare environment id) is kept and may be removed, never set: a folder no machine can run in is never stored.
  */
 async function checkedFolders(ctx: ActorContext<WorkspaceState>, base: ProjectRecord['folders'] | undefined, patch: ProjectPatch['folders']): Promise<Record<string, string>> {
     const folders: Record<string, string> = {};
-    for (const [environmentId, path] of Object.entries(base ?? {})) if (typeof path === 'string') folders[environmentId] = path;
+    for (const [key, path] of Object.entries(base ?? {})) if (typeof path === 'string') folders[key] = path;
     if (patch === undefined) return folders;
-    if (patch === null || typeof patch !== 'object' || Array.isArray(patch)) bad('folders must be an object keyed by environment id');
+    if (patch === null || typeof patch !== 'object' || Array.isArray(patch)) bad('folders must be an object keyed by <machineId>/* or <machineId>/<environmentId>');
     const workspaceId = ownerOfWorkspaceKey(ctx.key) as WorkspaceId;
-    let machines: MachineView[] | undefined;
-    const environment = async (environmentId: EnvironmentId): Promise<{ env: EnvironmentDescriptor; os: HostOs } | null> => {
-        if (!machines) {
-            machines = [];
-            for (const entry of ctx.state.machines) {
-                if (entry.status !== 'paired') continue;
+    const machines = new Map<MachineId, MachineView | null>();
+    const machineOf = async (machineId: MachineId): Promise<MachineView | null> => {
+        if (!machines.has(machineId)) {
+            let view: MachineView | null = null;
+            if (ctx.state.machines.some((m) => m.id === machineId && m.status === 'paired')) {
                 try {
-                    machines.push(await (ctx.actor(machineRefDef(), machineKey(workspaceId, entry.id)) as unknown as MachineGetClient).get());
+                    view = await (ctx.actor(machineRefDef(), machineKey(workspaceId, machineId)) as unknown as MachineGetClient).get();
                 } catch {
                     // A machine that cannot be read reports no environment.
                 }
             }
+            machines.set(machineId, view);
         }
-        for (const m of machines) {
-            const env = m.environments.find((e) => e.id === environmentId);
-            if (env) return { env, os: osOf(m) };
-        }
-        return null;
+        return machines.get(machineId)!;
     };
-    for (const [environmentId, path] of Object.entries(patch)) {
+    for (const [key, path] of Object.entries(patch)) {
         if (path === undefined) continue;
-        if (!environmentId.trim()) bad('an environment id is required for every folder');
+        const parsed = parseProjectFolderKey(key);
+        if (!parsed) bad(`${key} is not a folder key: use <machineId>/* or <machineId>/<environmentId>`);
         if (path === null) {
-            delete folders[environmentId];
+            delete folders[key];
             continue;
         }
-        if (typeof path !== 'string' || !path.trim()) bad(`the folder for environment ${environmentId} must be a path`);
+        if (parsed!.legacy) bad(`key folders by machine: ${key} is a bare environment id, use <machineId>/* or <machineId>/${key}`);
+        if (typeof path !== 'string' || !path.trim()) bad(`the folder for ${key} must be a path`);
         const folder = path.trim();
-        const found = await environment(environmentId as EnvironmentId);
-        if (!found) bad(`no machine of the workspace reports environment ${environmentId}`);
-        if (!pathWithin(folder, found!.env.cwdRoots, found!.os)) bad(`folder ${folder} is outside the roots of environment ${environmentId} (${found!.env.cwdRoots.join(', ') || 'none'})`);
-        folders[environmentId] = folder;
+        const m = await machineOf(parsed!.machineId!);
+        if (!m) bad(`machine ${parsed!.machineId} is not a paired machine of the workspace`);
+        const environmentId = parsed!.environmentId;
+        if (environmentId !== undefined) {
+            const env = m!.environments.find((e) => e.id === environmentId);
+            if (!env) bad(`machine ${m!.name} reports no environment ${environmentId}`);
+            if (!pathWithin(folder, env!.cwdRoots, osOf(m!))) bad(`folder ${folder} is outside the roots of environment ${environmentId} on machine ${m!.name} (${env!.cwdRoots.join(', ') || 'none'})`);
+        } else if (!m!.environments.some((e) => pathWithin(folder, e.cwdRoots, osOf(m!)))) {
+            const roots = [...new Set(m!.environments.flatMap((e) => e.cwdRoots))];
+            bad(`folder ${folder} is outside the roots of every environment on machine ${m!.name} (${roots.join(', ') || 'none'})`);
+        }
+        folders[key] = folder;
     }
     return folders;
 }

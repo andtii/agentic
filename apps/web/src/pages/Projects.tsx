@@ -32,7 +32,7 @@ export const Projects = component(() => {
     useHead({ title: 'Projects' });
     return () => (dataMode() === 'live'
         ? <LiveProjects />
-        : <ProjectsView projects={PROJECTS} environments={mockWorkdirEnvironments.list()} lookup={agentNamed} featureName={mockFeatureName} />);
+        : <ProjectsView projects={PROJECTS} machines={mockWorkdirEnvironments.projectMachines()} lookup={agentNamed} featureName={mockFeatureName} />);
 });
 
 /** The form on mock data: the sample agents, environments, plugins and folders; a save only navigates. */
@@ -47,7 +47,7 @@ const MockProjectForm = component<{ project?: ProjectRecord; initial?: Partial<P
             {...(props.initial ? { initial: props.initial } : {})}
             agents={AGENTS}
             environments={mockWorkdirEnvironments.list()}
-            machineOf={mockWorkdirEnvironments.machineOf}
+            machines={mockWorkdirEnvironments.projectMachines()}
             connectors={connectorOptionsOf(opsPlugins)}
             features={featureManifestsOf(opsPlugins)}
             locate={locate}

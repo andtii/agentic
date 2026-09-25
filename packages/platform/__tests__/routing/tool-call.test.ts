@@ -241,8 +241,8 @@ describe('createToolCallPort: projects (#334)', () => {
         await chat().addAgent(AGENT, 'all');
         expect(await call('projects', { action: 'list' })).toEqual({
             projects: [
-                { id: project.id, name: 'Agentic', description: 'The agent platform', environments: [] },
-                { id: expect.stringMatching(/^project_/), name: 'Zero', environments: [] }
+                { id: project.id, name: 'Agentic', description: 'The agent platform', machines: [], environments: [] },
+                { id: expect.stringMatching(/^project_/), name: 'Zero', machines: [], environments: [] }
             ]
         });
         expect(await call('projects', { action: 'set', chatId: CHAT, projectId: project.id })).toEqual({ chatId: CHAT, projectId: project.id, previous: null });

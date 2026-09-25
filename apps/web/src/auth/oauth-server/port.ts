@@ -9,7 +9,7 @@
  * actor admits its owner only) and driving the router (`Routing.run`, the
  * same principal the schedule trigger uses).
  */
-import { createId, pathWithin, type AgentId, type EnvironmentDescriptor, type EnvironmentId, type MachineId, type Principal, type SessionId, type TaskContract, type TaskId, type WorkspaceId, type WorkspaceSource } from '@agentic/core';
+import { createId, pathWithin, projectFolderPlaces, type AgentId, type EnvironmentDescriptor, type MachineId, type Principal, type SessionId, type TaskContract, type TaskId, type WorkspaceId, type WorkspaceSource } from '@agentic/core';
 import type { ExternalPrincipal, PlatformPort, TaskSummary, TaskTreeNode } from '@agentic/mcp';
 import {
     AgentActor,
@@ -306,7 +306,7 @@ export function createActorPlatformPort(principal: ExternalPrincipal, options: A
                     id: p.id,
                     name: p.name,
                     ...(p.description !== undefined ? { description: p.description } : {}),
-                    environments: Object.entries(p.folders).flatMap(([environmentId, folder]) => (typeof folder === 'string' ? [environmentId as EnvironmentId] : []))
+                    ...projectFolderPlaces(p.folders)
                 })),
             setChatProject: async (chatId, projectId) => {
                 await as(Chat, agentChatKey(workspaceId, chatId)).setProject(projectId);

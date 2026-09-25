@@ -156,7 +156,7 @@ export const ContextPanel = component<ContextPanelProps>(({ props, emit }) => {
                             // A folder picked on another machine is stale there (#414): the activation leaves it aside, the project's folder or the first root applies.
                             const stale = !!(member.workdir && machineId && props.hosted && !props.hosted(machineId, member.workdir.environmentId));
                             // The folder it runs in: its override for this chat, else the project's for its environment (#333).
-                            const folder = effectiveWorkdir(stale ? { ...member, workdir: undefined } : member, onMachine ?? a.environmentId, props.project);
+                            const folder = effectiveWorkdir(stale ? { ...member, workdir: undefined } : member, onMachine ?? a.environmentId, props.project, machineId ?? (a.environmentId ? props.machineOf?.(a.environmentId) : undefined));
                             const environments = props.environments;
                             const quota = environments ? memberQuota(a, folder.ref?.environmentId, environments, machineId ? { machineId, ...(props.machineName ? { machineName: props.machineName } : {}), accountEnvironment: (m, r, ref) => props.accountEnvironment?.(m, r, ref) } : undefined) : undefined;
                             // The model it runs here: its override for this chat, else its config's (#450).
@@ -318,7 +318,7 @@ export const ContextPanel = component<ContextPanelProps>(({ props, emit }) => {
                         model={() => st.picking}
                         title={st.pickFor ? `Working folder for ${lookup(st.pickFor).name}` : 'Working folder'}
                         // Opens on the folder in effect: the override, else the project's (#333).
-                        value={(() => { const m = props.chat.members.find((x) => x.agentId === st.pickFor); return m ? effectiveWorkdir(m, lookup(m.agentId).environmentId, props.project).ref : null; })()}
+                        value={(() => { const m = props.chat.members.find((x) => x.agentId === st.pickFor); return m ? effectiveWorkdir(m, lookup(m.agentId).environmentId, props.project, props.chat.machineId ?? (lookup(m.agentId).environmentId ? props.machineOf?.(lookup(m.agentId).environmentId!) : undefined)).ref : null; })()}
                         environments={props.environments}
                         {...(props.machineOf ? { machineOf: props.machineOf } : {})}
                         // A daemon agent's identity names its default environment there (`identityOf`); anything else is ignored.

@@ -10,7 +10,7 @@
  * never a silent fallback.
  */
 
-import { configDefaults, enabledProjectFeatures, FS_RUN_DEFAULT_TIMEOUT_MS, FS_RUN_MAX_TIMEOUT_MS, type ChatId, type EnvironmentId, type FsOp, type ProjectFeatureFs, type ProjectFeaturePlugin, type ProjectRecord, type TaskId } from '@agentic/core';
+import { configDefaults, enabledProjectFeatures, FS_RUN_DEFAULT_TIMEOUT_MS, FS_RUN_MAX_TIMEOUT_MS, type ChatId, type EnvironmentId, type FsOp, type MachineId, type ProjectFeatureFs, type ProjectFeaturePlugin, type ProjectRecord, type TaskId } from '@agentic/core';
 import { isServerFnError } from '@sigx/server';
 import type { FsResultView } from '../machine/index.js';
 
@@ -84,6 +84,7 @@ export interface FeatureHooksInput {
     readonly chatId?: ChatId;
     /** Absent on the API path: a platform-hosted runtime runs in no folder, so `beforeSession` is not called there. */
     readonly environmentId?: EnvironmentId;
+    readonly machineId?: MachineId;
     readonly cwd?: string;
     readonly fs: ProjectFeatureFs;
 }
@@ -118,7 +119,7 @@ export async function runFeatureHooks(input: FeatureHooksInput): Promise<Feature
         const settings = featureSettings(plugin, project, id);
         try {
             if (plugin.beforeSession && input.environmentId !== undefined && cwd !== undefined) {
-                const effect = await plugin.beforeSession({ project, settings, taskId: input.taskId, ...(input.chatId ? { chatId: input.chatId } : {}), environmentId: input.environmentId, cwd, fs: input.fs });
+                const effect = await plugin.beforeSession({ project, settings, taskId: input.taskId, ...(input.chatId ? { chatId: input.chatId } : {}), environmentId: input.environmentId, ...(input.machineId !== undefined ? { machineId: input.machineId } : {}), cwd, fs: input.fs });
                 if (typeof effect?.cwd === 'string' && effect.cwd.trim()) cwd = effect.cwd.trim();
                 if (typeof effect?.instructions === 'string' && effect.instructions.trim()) fragments.push(effect.instructions.trim());
             }
