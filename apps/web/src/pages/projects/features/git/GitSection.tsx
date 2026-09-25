@@ -36,7 +36,7 @@ const stats = (s: GitSummary) => (
 /** The Code card in the Overview's right column. */
 export const GitOverviewCard = component<ProjectPageProps>(({ props }) => {
     // In setup, not render: the hook subscribes once pulls are live.
-    const summary = useGitSummary(props.project.id);
+    const summary = useGitSummary(() => props.project.id);
     return () => {
         const s = summary();
         const without = s.branchesWithoutPr;
@@ -92,7 +92,7 @@ const pullRow = (projectId: string, o: GitOpenPull) => {
 
 /** The Code section: stats, open pull requests, branches without a PR. */
 export const GitSection = component<ProjectPageProps>(({ props }) => {
-    const summary = useGitSummary(props.project.id);
+    const summary = useGitSummary(() => props.project.id);
     return () => {
         const id = props.project.id;
         const s = summary();
