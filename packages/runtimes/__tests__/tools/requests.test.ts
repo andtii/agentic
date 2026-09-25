@@ -94,6 +94,7 @@ describe('request tools', () => {
         expect((all.requests as unknown[]).length).toBe(4);
         const out = await run(fake.port, 'requests_list', { state: 'accepted' });
         expect(out.requests).toEqual([expect.objectContaining({ id: 'req_2', from: AGENTIC, sender: FORGE, refs: ['pr:604'], resultItem: 14 })]);
+        await expect(run(fakeRequestsPort(board({ me: FORGE, member: false })).port, 'requests_list', {})).rejects.toThrow(/refused: you are not a member of project_signalx/);
     });
 
     it('triage and resolve are the manager’s: any other agent is refused without a write', async () => {

@@ -228,6 +228,7 @@ export function requestTools(port: RequestsPort | undefined) {
             annotations: READ,
             execute: async (input, ctx) => {
                 const board = await need(port, LIST).board(call(ctx));
+                if (!board.member) throw new RequestRefusal(`you are not a member of ${board.project}, so you cannot read its requests.`);
                 const requests = board.requests.filter((r) => input.state === undefined || r.state === input.state).map(requestView);
                 return { project: board.project, manager: board.manager === board.me, requests };
             }
