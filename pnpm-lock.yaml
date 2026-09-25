@@ -18,6 +18,9 @@ catalogs:
     '@sigx/actors-cloudflare':
       specifier: ^0.11.0
       version: 0.11.0
+    '@sigx/actors-ws':
+      specifier: ^0.11.0
+      version: 0.11.0
     '@sigx/ai':
       specifier: ^0.2.1
       version: 0.2.1
@@ -213,6 +216,9 @@ importers:
       '@sigx/actors-cloudflare':
         specifier: 'catalog:'
         version: 0.11.0(@sigx/actors@0.11.0(@sigx/reactivity@1.0.1)(@sigx/runtime-core@1.0.1(@sigx/reactivity@1.0.1))(@sigx/serialize@1.0.1)(@sigx/server@1.0.1(sigx@1.0.1))(@sigx/vite@1.0.1(@sigx/server-renderer@1.0.1(sigx@1.0.1))(@sigx/server@1.0.1(sigx@1.0.1))(sigx@1.0.1)(vite@8.3.0(@types/node@26.6.1)(esbuild@0.28.1)(jiti@2.7.0)))(undici@7.29.0)(vite@8.3.0(@types/node@26.6.1)(esbuild@0.28.1)(jiti@2.7.0)))
+      '@sigx/actors-ws':
+        specifier: 'catalog:'
+        version: 0.11.0(@sigx/actors@0.11.0(@sigx/reactivity@1.0.1)(@sigx/runtime-core@1.0.1(@sigx/reactivity@1.0.1))(@sigx/serialize@1.0.1)(@sigx/server@1.0.1(sigx@1.0.1))(@sigx/vite@1.0.1(@sigx/server-renderer@1.0.1(sigx@1.0.1))(@sigx/server@1.0.1(sigx@1.0.1))(sigx@1.0.1)(vite@8.3.0(@types/node@26.6.1)(esbuild@0.28.1)(jiti@2.7.0)))(undici@7.29.0)(vite@8.3.0(@types/node@26.6.1)(esbuild@0.28.1)(jiti@2.7.0)))(ws@8.21.3)
       '@sigx/ai-agent':
         specifier: 'catalog:'
         version: 0.2.1(@sigx/ai@0.2.1(@sigx/reactivity@1.0.1)(@sigx/runtime-core@1.0.1(@sigx/reactivity@1.0.1)))(@sigx/reactivity@1.0.1)(@sigx/runtime-core@1.0.1(@sigx/reactivity@1.0.1))
@@ -1972,6 +1978,16 @@ packages:
     engines: {node: ^20.19.0 || >=22.12.0}
     peerDependencies:
       '@sigx/actors': ^0.11.0
+
+  '@sigx/actors-ws@0.11.0':
+    resolution: {integrity: sha512-QjUZF9myXCIHsWrhtjqwDEpfMvpKJotzTPp5Wdorz/xTYamuXaKOt0Hjsq0J72WV7Xqh/JvmEwttZoDleI627w==}
+    engines: {node: ^20.19.0 || >=22.12.0}
+    peerDependencies:
+      '@sigx/actors': ^0.11.0
+      ws: '>=8'
+    peerDependenciesMeta:
+      ws:
+        optional: true
 
   '@sigx/actors@0.11.0':
     resolution: {integrity: sha512-x60am6ukrhCZU0b1vvhyHAhYapfyqyuVCZ3AAjsivylOVQxtWjWxhAFI/XyZGSkIOx6sj7WNsEwShIwl9MzoDg==}
@@ -4315,6 +4331,12 @@ snapshots:
   '@sigx/actors-cloudflare@0.11.0(@sigx/actors@0.11.0(@sigx/reactivity@1.0.1)(@sigx/runtime-core@1.0.1(@sigx/reactivity@1.0.1))(@sigx/serialize@1.0.1)(@sigx/server@1.0.1(sigx@1.0.1))(@sigx/vite@1.0.1(@sigx/server-renderer@1.0.1(sigx@1.0.1))(@sigx/server@1.0.1(sigx@1.0.1))(sigx@1.0.1)(vite@8.3.0(@types/node@26.6.1)(esbuild@0.28.1)(jiti@2.7.0)))(undici@7.29.0)(vite@8.3.0(@types/node@26.6.1)(esbuild@0.28.1)(jiti@2.7.0)))':
     dependencies:
       '@sigx/actors': 0.11.0(@sigx/reactivity@1.0.1)(@sigx/runtime-core@1.0.1(@sigx/reactivity@1.0.1))(@sigx/serialize@1.0.1)(@sigx/server@1.0.1(sigx@1.0.1))(@sigx/vite@1.0.1(@sigx/server-renderer@1.0.1(sigx@1.0.1))(@sigx/server@1.0.1(sigx@1.0.1))(sigx@1.0.1)(vite@8.3.0(@types/node@26.6.1)(esbuild@0.28.1)(jiti@2.7.0)))(undici@7.29.0)(vite@8.3.0(@types/node@26.6.1)(esbuild@0.28.1)(jiti@2.7.0))
+
+  '@sigx/actors-ws@0.11.0(@sigx/actors@0.11.0(@sigx/reactivity@1.0.1)(@sigx/runtime-core@1.0.1(@sigx/reactivity@1.0.1))(@sigx/serialize@1.0.1)(@sigx/server@1.0.1(sigx@1.0.1))(@sigx/vite@1.0.1(@sigx/server-renderer@1.0.1(sigx@1.0.1))(@sigx/server@1.0.1(sigx@1.0.1))(sigx@1.0.1)(vite@8.3.0(@types/node@26.6.1)(esbuild@0.28.1)(jiti@2.7.0)))(undici@7.29.0)(vite@8.3.0(@types/node@26.6.1)(esbuild@0.28.1)(jiti@2.7.0)))(ws@8.21.3)':
+    dependencies:
+      '@sigx/actors': 0.11.0(@sigx/reactivity@1.0.1)(@sigx/runtime-core@1.0.1(@sigx/reactivity@1.0.1))(@sigx/serialize@1.0.1)(@sigx/server@1.0.1(sigx@1.0.1))(@sigx/vite@1.0.1(@sigx/server-renderer@1.0.1(sigx@1.0.1))(@sigx/server@1.0.1(sigx@1.0.1))(sigx@1.0.1)(vite@8.3.0(@types/node@26.6.1)(esbuild@0.28.1)(jiti@2.7.0)))(undici@7.29.0)(vite@8.3.0(@types/node@26.6.1)(esbuild@0.28.1)(jiti@2.7.0))
+    optionalDependencies:
+      ws: 8.21.3
 
   '@sigx/actors@0.11.0(@sigx/reactivity@1.0.1)(@sigx/runtime-core@1.0.1(@sigx/reactivity@1.0.1))(@sigx/serialize@1.0.1)(@sigx/server@1.0.1(sigx@1.0.1))(@sigx/vite@1.0.1(@sigx/server-renderer@1.0.1(sigx@1.0.1))(@sigx/server@1.0.1(sigx@1.0.1))(sigx@1.0.1)(vite@8.3.0(@types/node@26.6.1)(esbuild@0.28.1)(jiti@2.7.0)))(undici@7.29.0)(vite@8.3.0(@types/node@26.6.1)(esbuild@0.28.1)(jiti@2.7.0))':
     dependencies:
