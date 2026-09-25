@@ -2,7 +2,7 @@ import { component, useData, useHead, type JSXElement } from 'sigx';
 import { Link, RouterView, useRoute, useRouter } from '@sigx/router';
 import { ThemeProvider, themeInitScript } from '@sigx/zero';
 import { Avatar, Breadcrumbs } from '@sigx/zero-daisyui/components';
-import { AppShell, Button, ConnectionStrip, connectionRows, OfflineBanner } from '@agentic/ui';
+import { AppShell, Button, ConnectionStrip, connectionRows, OfflineBanner, type NavGroup } from '@agentic/ui';
 import { NAV_GROUPS } from './nav';
 import { backOf, titleOf, trailFor } from './crumbs';
 import { machines } from './mock/data';
@@ -13,7 +13,8 @@ import { useViewer } from './actors/defs';
 import { signInOptions } from './api/sign-in.server';
 import { DEV_LOGIN_PATH } from './auth/dev-login';
 import { useNeedsSource } from './pages/inbox';
-import { projectMenuFor } from './pages/projects/layout/menu';
+import { projectMenuFor, projectMenuSource } from './pages/projects/layout/menu';
+import { openProjectPicker } from './pages/projects/layout/ProjectPicker';
 
 /**
  * The signed-in person's mark in the sidebar foot: zero's `Avatar` as a
@@ -77,6 +78,20 @@ function initials(id: string): string {
     return (tail.slice(0, 2) || 'WS').toUpperCase();
 }
 
+/**
+ * The sidebar's groups with the open project's switcher (#794): the entry carrying the project's menu (`Projects`,
+ * #725) gets the project's name and id, which the shell draws as the "Switch project" button over the menu (#727).
+ * Off a project route there is no menu, so no switcher.
+ */
+function withSwitcher(groups: readonly NavGroup[], route: Parameters<typeof projectMenuSource>[0]): readonly NavGroup[] {
+    const src = projectMenuSource(route);
+    if (!src) return groups;
+    return groups.map(group => ({
+        ...group,
+        items: group.items.map(item => (item.children ? { ...item, switcher: { name: src.name, id: src.id } } : item))
+    }));
+}
+
 /** Schibsted Grotesk (interface) + JetBrains Mono (anything a machine said), 400–700, swapped in. */
 const FONTS_HREF = 'https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap';
 
@@ -129,11 +144,13 @@ export const App = component(() => {
             <ThemeProvider>
                 <AppShell
                     brand="agentic"
-                    groups={NAV_GROUPS(needs().length, projectMenuFor(route))}
+                    groups={withSwitcher(NAV_GROUPS(needs().length, projectMenuFor(route)), route)}
                     currentPath={route.path}
                     flush={FLUSH_ROUTES.has(String(route.name ?? ''))}
                     title={titleOf(crumbs)}
                     back={backOf(crumbs)}
+                    // The switcher over a project's menu (#727) opens the project picker `ProjectLayout` mounts (#728).
+                    onSwitch={openProjectPicker}
                     slots={{
                         link: ({ item, icon, meta, props }) => <a {...props} onClick={(e: MouseEvent) => { props.onClick?.(e); follow(e, item.href); }}>{icon}{item.label}{meta}</a>,
                         back: ({ href, icon }) => <Link to={href}><span data-visually-hidden="">Back</span>{icon}</Link>,
