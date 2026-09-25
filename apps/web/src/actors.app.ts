@@ -105,8 +105,6 @@ import {
     type KekSource,
 
     definePullsActor,
-    projectPullToken,
-    tokenPullSources,
     type PullSourcePort,
     pmSummaryTrigger,
     pullMergeNotices,
@@ -131,9 +129,7 @@ import { channelCatalogue, connectorOpener, learningCatalogue, memoryCatalogue, 
 import { createPurgeHandler, durableObjectWorkspaceStore, r2ArtifactSink, type R2BucketLike } from './retention';
 import { runWithHost } from './host-scope';
 import { observeSlowTurns } from './actors/slow-turns';
-import { pullsAutopilot, pullsPlacement } from './actors/pulls';
-import { GIT_FEATURE_ID, GITHUB_TOKEN_SECRET } from '@agentic/plugins-git';
-import { createGitHubPullProvider } from '@agentic/plugins-git/provider';
+import { githubPullSources, pullsAutopilot, pullsPlacement } from './actors/pulls';
 
 export { DAEMON_SOCKET_PREFIX };
 
@@ -305,9 +301,9 @@ export function platformActors(ports: PlatformPorts = defaultPorts): readonly An
         });
     // A project's pull requests (#742): read through the git feature's GitHub adapter with the project's credential (#840),
     // falling back to the workspace's token (#793); no credential → the view says `needs-sign-in`.
-    // Autopilot (#820): turns in the PR's chat through the router, rows to the Inbox, the merge through the same adapter.
+    // Autopilot (#820): turns in the PR's chat through the router, rows to the Inbox, the merge through the same adapter and credential (#915).
     // A merge tells the requesters whose request became the plan item it finishes, in their chat, as the manager (#868).
-    const Pulls = definePullsActor({ sources: ports.pulls ?? tokenPullSources({ adapters: { github: (token) => createGitHubPullProvider({ token }) }, token: projectPullToken({ registry, workspace: () => Workspace, pluginId: GIT_FEATURE_ID, secret: GITHUB_TOKEN_SECRET }) }), autopilot: pullsAutopilot({ routing: () => Routing, inbox: () => Inbox, registry }), merged: pullMergeNotices(), inbox: () => Inbox });
+    const Pulls = definePullsActor({ sources: ports.pulls ?? githubPullSources({ registry, workspace: () => Workspace }), autopilot: pullsAutopilot({ routing: () => Routing, inbox: () => Inbox, registry, workspace: () => Workspace }), merged: pullMergeNotices(), inbox: () => Inbox });
     const Workspace = defineWorkspace({ ...(sink ? { sink } : {}), ...(store ? { store } : {}), ...withFiles });
     // Removing a member ends its session through the router (#399, architecture §6). A chat titles itself (#460): the
     // runtime's title when one reports it, else the platform's own model call with the workspace's Anthropic key.

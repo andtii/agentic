@@ -16,6 +16,7 @@ import { useAgentDirectory } from '../../../chat/directory';
 import type { ProjectPageProps } from '../../layout/types';
 import { findPull, type PullActions, type PullPageData } from './model';
 import { PullView, type PullAgent } from './PullView';
+import { PullsSignIn } from './PullsSignIn';
 
 export type PullProps = ProjectPageProps & Define.Prop<'number', number, true>;
 
@@ -50,11 +51,18 @@ const LivePull = component<PullProps>(({ props }) => {
     };
     return () => {
         const pr = view.value?.pulls.find((p) => p.number === props.number);
-        if (!pr) return view.loading ? null : missing(props.number, 'The project has not read a pull request by that number.');
+        // No credential for the repo (#915): say how to sign in, not that the PR does not exist.
+        const signIn = <PullsSignIn projectId={props.project.id} readiness={view.value?.readiness} />;
+        if (!pr) return view.loading ? null : view.value?.readiness === 'needs-sign-in' ? signIn : missing(props.number, 'The project has not read a pull request by that number.');
         const env = pr.autopilot ? directory.lookup(pr.autopilot.agentId).environment : undefined;
         const data: PullPageData = { pr, ...(env && env.machine !== '—' ? { linked: { environment: env } } : {}) };
         const run = view.value?.runs?.[String(pr.number)];
-        return <PullView projectId={props.project.id} data={data} agentOf={agentOf} now={Date.now()} actions={actions} {...(run ? { run } : {})} />;
+        return (
+            <>
+                {signIn}
+                <PullView projectId={props.project.id} data={data} agentOf={agentOf} now={Date.now()} actions={actions} {...(run ? { run } : {})} />
+            </>
+        );
     };
 }, { name: 'LivePull' });
 

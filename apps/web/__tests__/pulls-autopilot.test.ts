@@ -4,7 +4,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AgentId, ProjectId, PullRequest, WorkspaceId } from '@agentic/core';
-import { ASK_ON_MERGE, AuditActor, defineRegistry, generateWorkspaceKek, importWorkspaceKek, registryKey } from '@agentic/platform';
+import { ASK_ON_MERGE, AuditActor, defineRegistry, generateWorkspaceKek, importWorkspaceKek, registryKey, Workspace } from '@agentic/platform';
 import { gitFeatureManifest, GITHUB_TOKEN_SECRET } from '@agentic/plugins-git';
 import { testActorApp, userPrincipal, type TestActorApp } from '../../../packages/platform/src/testing/index';
 import { githubPullMerger } from '../src/actors/pulls';
@@ -35,16 +35,17 @@ const pr: PullRequest = {
 
 const KEK = generateWorkspaceKek();
 const Registry = defineRegistry({ kek: () => importWorkspaceKek(KEK), catalogue: [gitFeatureManifest] });
+const actors = { registry: () => Registry, workspace: () => Workspace };
 let app: TestActorApp;
 beforeEach(() => {
-    app = testActorApp([Registry, AuditActor]);
+    app = testActorApp([Registry, AuditActor, Workspace]);
     return app.start();
 });
 afterEach(() => app.stop());
 
 describe('githubPullMerger', () => {
     it('no token or another provider: not merged, with why', async () => {
-        const merge = githubPullMerger(() => Registry, ref);
+        const merge = githubPullMerger(actors, ref);
         expect(await merge({ agentId, rule: ASK_ON_MERGE, pr })).toEqual({ merged: false, reason: 'no GitHub token for the git feature' });
         expect(await merge({ agentId, rule: ASK_ON_MERGE, pr: { ...pr, provider: 'gitlab' } })).toEqual({ merged: false, reason: 'no gitlab adapter merges pull requests' });
     });
@@ -58,7 +59,7 @@ describe('githubPullMerger', () => {
             const json = status === 200 ? { merged: true, sha: 'abc' } : { message: 'Head branch was modified' };
             return new Response(JSON.stringify(json), { status, headers: { 'content-type': 'application/json' } });
         }) as typeof fetch;
-        const merge = githubPullMerger(() => Registry, ref, fetchImpl);
+        const merge = githubPullMerger(actors, ref, fetchImpl);
         expect(await merge({ agentId, rule: ASK_ON_MERGE, pr })).toEqual({ merged: true });
         expect(calls[0]).toMatchObject({ url: `https://api.github.com/repos/${REPO}/pulls/12/merge`, method: 'PUT', body: { merge_method: 'squash', commit_title: 'Add autopilot (#12)' } });
         expect(calls[0]!.auth).toMatch(/ghp_secret123/);

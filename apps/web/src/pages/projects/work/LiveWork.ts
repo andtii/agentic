@@ -4,16 +4,19 @@
  * requests (#865); plan items stay `[]` until their store exists (`live.ts`). Called in the page's setup; `WorkView` renders the board.
  */
 import type { PlanItem, ProjectRecord, PullRequest } from '@agentic/core';
+import type { PullsReadiness } from '@agentic/platform';
 import { useActorDefs, useViewer } from '../../../actors/defs';
 import { useAgentDirectory } from '../../chat/directory';
 import { useChatRows } from '../../chat/LiveChats';
-import { featuresOf, projectTasks, useFeatureUi, usePlanItems, usePulls, useTaskIndexRows } from './live';
+import { featuresOf, projectTasks, useFeatureUi, usePlanItems, usePullsState, useTaskIndexRows } from './live';
 import type { WorkFeatures, WorkTask } from './model';
 import type { WorkAgentLookup } from './WorkView';
 
 export interface LiveWorkInputs {
     tasks(): readonly WorkTask[];
     pulls(): readonly PullRequest[];
+    /** The Pulls actor's `needs-sign-in` (#915): no GitHub credential for the project's repo. */
+    pullsReadiness(): PullsReadiness | undefined;
     planItems(): readonly PlanItem[];
     features(): WorkFeatures;
     readonly agentOf: WorkAgentLookup;
@@ -27,7 +30,7 @@ export function useLiveWork(project: () => ProjectRecord): LiveWorkInputs {
     const chats = useChatRows(defs, viewer, directory);
     const index = useTaskIndexRows(defs, viewer);
     const uiOf = useFeatureUi(defs, viewer);
-    const pulls = usePulls(() => project().id);
+    const pullsState = usePullsState(() => project().id);
     const planItems = usePlanItems(project().id);
     return {
         tasks: () => {
@@ -35,7 +38,8 @@ export function useLiveWork(project: () => ProjectRecord): LiveWorkInputs {
             const ids = new Set(chats.rows().filter((c) => c.projectId === id).map((c) => c.id));
             return projectTasks(index.rows(), ids);
         },
-        pulls,
+        pulls: pullsState.pulls,
+        pullsReadiness: pullsState.readiness,
         planItems,
         features: () => featuresOf(project(), uiOf),
         agentOf: (id) => {

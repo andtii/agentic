@@ -5,7 +5,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { ChatId, ProjectId, ProjectRecord, PullRequest, TaskId, WorkspaceId } from '@agentic/core';
-import { AuditActor, definePullsActor, defineRegistry, generateWorkspaceKek, importWorkspaceKek, pullsKey, registryKey, TaskActor, type PullSource } from '@agentic/platform';
+import { AuditActor, definePullsActor, defineRegistry, generateWorkspaceKek, importWorkspaceKek, pullsKey, registryKey, TaskActor, Workspace, type PullSource } from '@agentic/platform';
 import { gitBranchFor, gitFeatureManifest, GIT_FEATURE_ID, GITHUB_TOKEN_SECRET } from '@agentic/plugins-git';
 import { testActorApp, userPrincipal, type TestActorApp } from '../../../packages/platform/src/testing/index';
 import { githubPullSources, pullsPlacement } from '../src/actors/pulls';
@@ -58,7 +58,7 @@ let app: TestActorApp;
 beforeEach(() => {
     source = new FakeSource();
     Pulls = definePullsActor({ sources: { open: () => source } });
-    app = testActorApp([Registry, AuditActor, TaskActor, Pulls]);
+    app = testActorApp([Registry, AuditActor, TaskActor, Workspace, Pulls]);
     return app.start();
 });
 afterEach(() => app.stop());
@@ -68,20 +68,20 @@ const pulls = () => app.as(owner).actor(Pulls, pullsKey(WS, PROJECT));
 
 describe('githubPullSources', () => {
     it('has no source until the workspace stores a github-token, then reads GitHub with it', async () => {
-        expect(await githubPullSources(() => Registry).open(ref)).toBeUndefined();
+        expect(await githubPullSources({ registry: () => Registry, workspace: () => Workspace }).open(ref)).toBeUndefined();
         await app.as(owner).actor(Registry, registryKey(WS)).setSecret(GITHUB_TOKEN_SECRET, 'ghp_secret123');
         const auth: string[] = [];
         const fetchImpl = (async (_url: RequestInfo | URL, init?: RequestInit) => {
             auth.push(new Headers(init?.headers).get('authorization') ?? '');
             return new Response(JSON.stringify({ message: 'Not Found' }), { status: 404, headers: { 'content-type': 'application/json' } });
         }) as typeof fetch;
-        const opened = await githubPullSources(() => Registry, fetchImpl).open(ref);
+        const opened = await githubPullSources({ registry: () => Registry, workspace: () => Workspace }, fetchImpl).open(ref);
         expect(opened).toBeDefined();
         await opened!.get(REPO, 7).catch(() => undefined);
         expect(auth.length).toBeGreaterThan(0);
         expect(auth[0]).toContain('ghp_secret123');
         // Another provider has no adapter.
-        expect(await githubPullSources(() => Registry).open({ ...ref, provider: 'gitlab' })).toBeUndefined();
+        expect(await githubPullSources({ registry: () => Registry, workspace: () => Workspace }).open({ ...ref, provider: 'gitlab' })).toBeUndefined();
     });
 });
 
