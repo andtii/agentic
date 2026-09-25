@@ -109,7 +109,7 @@ describe('projects on the live pages (#333)', () => {
         const list = await mountLive('/projects', h);
         await until(() => list.querySelectorAll('[data-project-row]').length === 1, 'the project row');
         expect(texts(list.querySelectorAll('[data-project-row] .project-env'))).toEqual(['laptop']);
-        expect(list.querySelectorAll('[data-project-row] [data-scope="avatar"][data-part="root"]').length).toBe(1);
+        expect(list.querySelectorAll('[data-project-row] [data-scope="avatar"][data-part="root"]').length).toBe(2); // Forge and the project's manager (#784)
 
         const edit = await mountLive(`/projects/${id}/settings/general`, h);
         await until(() => edit.querySelector<HTMLInputElement>('input[name="project-name"]')?.value === 'agentic', 'the form on the record');

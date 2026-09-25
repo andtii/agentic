@@ -15,12 +15,14 @@
  * ports: its tasks record the failure in `ops` and change nothing.
  */
 
-import type { AgentId, ChatFileStore, ChatId, ConnectorRef, HostOs, MachineId, NotificationPrefs, ProjectColor, ProjectFeatures, ProjectId, ProjectMembers, ProjectPatch, ProjectRecord, RetentionSettings, ScheduleId, UpdateSettings, WorkdirRef, WorkspaceDefaults, WorkspaceId, WorkspaceSettings } from '@agentic/core';
+import type { AgentConfig, AgentId, ChatFileStore, ChatId, ConnectorRef, HostOs, MachineId, NotificationPrefs, ProjectColor, ProjectFeatures, ProjectId, ProjectManagerSpec, ProjectMembers, ProjectPatch, ProjectRecord, RetentionSettings, ScheduleId, UpdateSettings, WorkdirRef, WorkspaceDefaults, WorkspaceId, WorkspaceSettings } from '@agentic/core';
 import { actorKey, createId, DEFAULT_UPDATE_SETTINGS, DEFAULT_WORKSPACE_SETTINGS, MEMBER_LIMIT_MAX, parseProjectFolderKey, pathWithin, PROJECT_COLORS, PROJECTS_MAX } from '@agentic/core';
 import { defineActor, type ActorContext, type ActorPolicy, type AnyActorDefinition } from '@sigx/actors';
 import { ServerFnError } from '@sigx/server';
 import type { ProjectChangedData } from '../audit/events.js';
 import { recordAudit } from '../audit/port.js';
+import { AgentActor, agentKey } from '../agent/agent.actor.js';
+import type { AgentVersionInfo } from '../agent/entries.js';
 import { sameWorkspace, workspaceOwner, WORKSPACE_KEY_PREFIX } from '../auth/index.js';
 import { Chat } from '../chat/index.js';
 import { defineMachineActor, machineKey, type MachineView } from '../machine/index.js';
@@ -31,6 +33,7 @@ import { Registry } from '../registry/actor.js';
 import { registryKey } from '../registry/key.js';
 import { deleteWorkspace, exportWorkspace } from './cascade.js';
 import type { ArtifactSink, WorkspaceStore } from './ports.js';
+import { checkedPmSpec, DEFAULT_PM_SPEC, pmCoordinatorError, PmSpecError, projectManagerConfig, projectManagerConfigPatch, withProjectManager, type ProjectManagerPatch } from './project-manager.js';
 
 export const WORKSPACE_STATE_VERSION = 1;
 
@@ -229,6 +232,16 @@ const osOf = (m: MachineView): HostOs => m.os ?? 'windows';
 const bad = (message: string): never => {
     throw new ServerFnError(400, `Workspace.upsertProject: ${message}`);
 };
+
+/** `fn()`, with a `PmSpecError` answered as a 400 from `method` (#784). */
+function pmChecked<T>(method: string, fn: () => T): T {
+    try {
+        return fn();
+    } catch (error) {
+        if (error instanceof PmSpecError) throw new ServerFnError(400, `Workspace.${method}: ${error.message}`);
+        throw error;
+    }
+}
 
 /**
  * The `folders` of a project after `patch.folders` — `null` removes an entry — with every folder the patch sets
@@ -520,6 +533,11 @@ export function defineWorkspace(options: WorkspaceOptions = {}) {
                 let description = patch.description === null ? undefined : patch.description === undefined ? base?.description : typeof patch.description === 'string' ? patch.description.trim() : bad('the description must be text');
                 if (description === '') description = undefined;
                 const members = checkedMembers(ctx.state, patch.members, base?.members);
+                const pmError = pmCoordinatorError(projects, base?.id, members.coordinator);
+                if (pmError) bad(pmError);
+                // The manager (#784): a new project gets one from `pm`, or from the default preset unless the patch opts
+                // out (`pm: null`) or names its own coordinator; a change with `pm` creates or updates it, `null` unlinks it.
+                const pmSpec = patch.pm === null ? null : patch.pm !== undefined ? pmChecked('upsertProject', () => checkedPmSpec(patch.pm)) : !base && (patch.members?.coordinator ?? null) === null ? DEFAULT_PM_SPEC : undefined;
                 const connectors = checkedConnectors(patch.connectors, base?.connectors);
                 const folders = await checkedFolders(ctx, base?.folders, patch.folders);
                 const features = await checkedFeatures(ctx, base?.features, patch.features);
@@ -528,7 +546,7 @@ export function defineWorkspace(options: WorkspaceOptions = {}) {
                 const current = ctx.state.projects ?? [];
                 if (base && !current.some((p) => p.id === base!.id)) throw new ServerFnError(404, `Workspace.upsertProject: project ${base.id} was removed meanwhile`);
                 const at = now();
-                const record: ProjectRecord = {
+                let record: ProjectRecord = {
                     id: base?.id ?? (createId('project') as ProjectId),
                     name: name!,
                     ...(description !== undefined ? { description } : {}),
@@ -537,11 +555,27 @@ export function defineWorkspace(options: WorkspaceOptions = {}) {
                     connectors,
                     features,
                     ...(color !== undefined ? { color } : {}),
+                    ...(base?.pm ? { pm: base.pm } : {}),
                     createdAt: base?.createdAt ?? at,
                     updatedAt: at
                 };
-                ctx.state.projects = base ? current.map((p) => (p.id === record.id ? record : p)) : [...current, record];
+                let pmConfig: AgentConfig | undefined;
+                if (pmSpec) {
+                    const known = record.pm?.agentId;
+                    const agentId = known && ctx.state.agents.includes(known) ? known : (createId('agent') as AgentId);
+                    const withPm = withProjectManager(record, agentId);
+                    pmConfig = pmChecked('upsertProject', () => projectManagerConfig(withPm, pmSpec));
+                    if (!ctx.state.agents.includes(agentId)) ctx.state.agents.push(agentId);
+                    record = withPm;
+                } else if (pmSpec === null && record.pm?.agentId) {
+                    const { agentId, ...pm } = record.pm;
+                    record = { ...record, members: { ...record.members, coordinator: record.members.coordinator === agentId ? null : record.members.coordinator }, pm };
+                }
+                const saved = record;
+                ctx.state.projects = base ? current.map((p) => (p.id === saved.id ? saved : p)) : [...current, saved];
                 await ctx.save();
+                // Through the Agent create path: its first (or next) config version, audited as `config.versioned`.
+                if (pmConfig) await ctx.actor(AgentActor, agentKey(ownerOfWorkspaceKey(ctx.key) as WorkspaceId, saved.pm!.agentId!)).update(pmConfig, `project manager of ${saved.name}`);
                 // `changed` rides beside the declared fields until `ProjectChangedData` names it (#775).
                 const data: ProjectChangedData & { readonly changed: readonly string[] } = { projectId: record.id, name: record.name, op: base ? 'updated' : 'created', changed: changedKeys(base, record) };
                 await recordAudit(ctx, ownerOfWorkspaceKey(ctx.key) as WorkspaceId, {
@@ -553,6 +587,52 @@ export function defineWorkspace(options: WorkspaceOptions = {}) {
                     data
                 });
                 return ctx.snapshot(record);
+            },
+
+            /**
+             * Give project `projectId` its manager (#784; PRJ-14): an agent built from `spec` (`projectManagerConfig`),
+             * written through the Agent create path (index entry, then its config version, audited), set as the
+             * project's coordinator and member, and recorded as `pm.agentId`. Idempotent: a project that has a manager
+             * gets that agent's config updated, never a second agent. 404 for an unknown project, 400 for a bad spec.
+             */
+            async createProjectManager(projectId: ProjectId, spec: ProjectManagerSpec): Promise<ProjectRecord> {
+                const project = (ctx.state.projects ?? []).find((p) => p.id === projectId);
+                if (!project) throw new ServerFnError(404, `Workspace.createProjectManager: no project ${String(projectId)} in this workspace`);
+                const checked = pmChecked('createProjectManager', () => checkedPmSpec(spec));
+                const known = project.pm?.agentId;
+                const agentId = known && ctx.state.agents.includes(known) ? known : (createId('agent') as AgentId);
+                const record: ProjectRecord = { ...withProjectManager(project, agentId), updatedAt: now() };
+                const config = pmChecked('createProjectManager', () => projectManagerConfig(record, checked));
+                if (!ctx.state.agents.includes(agentId)) ctx.state.agents.push(agentId);
+                ctx.state.projects = (ctx.state.projects ?? []).map((p) => (p.id === projectId ? record : p));
+                await ctx.save();
+                const workspaceId = ownerOfWorkspaceKey(ctx.key) as WorkspaceId;
+                await ctx.actor(AgentActor, agentKey(workspaceId, agentId)).update(config, `project manager of ${record.name}`);
+                const at = record.updatedAt;
+                const data: ProjectChangedData & { readonly changed: readonly string[] } = { projectId, name: record.name, op: 'updated', changed: ['members', 'pm'] };
+                await recordAudit(ctx, workspaceId, {
+                    key: `${ctx.key}:project:${projectId}:pm:${at}`,
+                    kind: 'project.changed',
+                    at,
+                    by: `user:${ctx.state.owner}`,
+                    summary: `project ${record.name} (${projectId}) manager ${agentId} ${known === agentId ? 'updated' : 'created'}`,
+                    data
+                });
+                return ctx.snapshot(record);
+            },
+
+            /**
+             * Change project `projectId`'s manager (#784): its name, personality or skills — a new config version of the
+             * agent (AGT-06), nothing else. 404 for an unknown project, 400 for one without a manager or a bad patch.
+             */
+            async updateProjectManager(projectId: ProjectId, patch: ProjectManagerPatch): Promise<AgentVersionInfo> {
+                const project = (ctx.state.projects ?? []).find((p) => p.id === projectId);
+                if (!project) throw new ServerFnError(404, `Workspace.updateProjectManager: no project ${String(projectId)} in this workspace`);
+                const agentId = project.pm?.agentId;
+                if (!agentId) throw new ServerFnError(400, `Workspace.updateProjectManager: project ${project.name} has no project manager`);
+                const configPatch = pmChecked('updateProjectManager', () => projectManagerConfigPatch(patch));
+                const changed = Object.keys(configPatch).join(', ');
+                return ctx.actor(AgentActor, agentKey(ownerOfWorkspaceKey(ctx.key) as WorkspaceId, agentId)).update(configPatch, `project manager of ${project.name}: ${changed} changed`);
             },
 
             /**

@@ -317,7 +317,7 @@ An open tab kept about 10 Durable Objects awake, because every `live: true` read
 
 The projects handoff ([`docs/design/projects/`](design/projects/HANDOFF.md), requirements §20 `PRJ-*`) redesigns a project around what needs you, who is on it and how work moves. It left four questions open (HANDOFF.md "Projects" → "Open questions") and a few seams unnamed. These are the answers.
 
-1. **One agent can manage several projects.** The project manager is `ProjectMembers.coordinator`, so nothing stops the same agent being the coordinator of more than one project.
+1. **Each project has its own project manager** (revised by #784, 2026-09-25; it first said one agent could manage several projects). The manager is a real agent with a personality and skills, created with the project (from the default preset when the patch names none; `pm: null`, or naming your own coordinator, opts out), recorded as `ProjectRecord.pm.agentId` and set as `ProjectMembers.coordinator`. It runs on the platform runtime so it answers with every machine off. A project manager is never the coordinator of another project; it may still be a plain member of one.
 2. **The working limit is per agent per project**, default 1. An agent busy on one project does not use up its slot on another.
 3. **Requests between two projects of the same owner skip approval**, unless the target's project-manager policy says "Ask me first". High or urgent priority still always comes to a person (PRJ-14).
 4. **Global `/chats` groups by project** and keeps the filter chip.

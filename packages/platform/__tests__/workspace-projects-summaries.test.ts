@@ -6,6 +6,7 @@
  */
 import { MEMBER_LIMIT_MAX, actorKey, type AgentId, type ChatId, type ProjectId, type WorkspaceId } from '@agentic/core';
 import { AuditActor, auditKey } from '../src/audit/index';
+import { AgentActor } from '../src/agent/index';
 import { workspaceKey } from '../src/auth/index';
 import { Chat, ChatPage } from '../src/chat/index';
 import { PairingDirectory } from '../src/pairing/index';
@@ -20,7 +21,7 @@ const Registry = defineRegistry({ catalogue: [] });
 
 let app: TestActorApp;
 beforeEach(async () => {
-    app = testActorApp([Workspace, PairingDirectory, Chat, ChatPage, Registry, AuditActor]);
+    app = testActorApp([Workspace, PairingDirectory, Chat, ChatPage, Registry, AuditActor, AgentActor]);
     await app.start();
 });
 afterEach(async () => {

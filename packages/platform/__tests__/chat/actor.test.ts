@@ -5,6 +5,7 @@
  */
 import type { AgentId, ChatEntry, EnvironmentId, MachineId, Principal, ProjectId, Scope, SessionId, WorkspaceId } from '@agentic/core';
 import { AuditActor, auditKey } from '../../src/audit/index.js';
+import { AgentActor } from '../../src/agent/index.js';
 import { workspaceKey } from '../../src/auth/index.js';
 import { Chat, ChatPage, MAX_TITLE_LENGTH, PAGE, WINDOW, pageKey, sessionEvents } from '../../src/chat/index.js';
 import { defineMachineActor } from '../../src/machine/index.js';
@@ -294,7 +295,7 @@ describe('project (#332)', () => {
 
     beforeEach(async () => {
         await app.stop();
-        app = testActorApp([Chat, ChatPage, Workspace, PairingDirectory, AuditActor]);
+        app = testActorApp([Chat, ChatPage, Workspace, PairingDirectory, AuditActor, AgentActor]);
         await app.start();
     });
 
@@ -318,7 +319,7 @@ describe('project (#332)', () => {
         const before = await chat.get();
         const { storage } = app;
         await app.stop();
-        app = testActorApp([Chat, ChatPage, Workspace, PairingDirectory, AuditActor], { storage });
+        app = testActorApp([Chat, ChatPage, Workspace, PairingDirectory, AuditActor, AgentActor], { storage });
         await app.start();
         expect(await chatAs(user).get()).toEqual(before);
     });
@@ -375,7 +376,7 @@ describe('machine (#414)', () => {
     beforeEach(async () => {
         await app.stop();
         // The Machine actor answers `Workspace.removeMachine`'s revoke hop (#259); its socket port never runs here.
-        app = testActorApp([Chat, ChatPage, Workspace, PairingDirectory, AuditActor, defineMachineActor({ socket: { send: () => false, close: () => undefined } })]);
+        app = testActorApp([Chat, ChatPage, Workspace, PairingDirectory, AuditActor, AgentActor, defineMachineActor({ socket: { send: () => false, close: () => undefined } })]);
         await app.start();
     });
 
@@ -398,7 +399,7 @@ describe('machine (#414)', () => {
         const before = await chat.get();
         const { storage } = app;
         await app.stop();
-        app = testActorApp([Chat, ChatPage, Workspace, PairingDirectory, AuditActor], { storage });
+        app = testActorApp([Chat, ChatPage, Workspace, PairingDirectory, AuditActor, AgentActor], { storage });
         await app.start();
         expect(await chatAs(user).get()).toEqual(before);
     });

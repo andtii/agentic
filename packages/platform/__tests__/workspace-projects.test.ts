@@ -10,6 +10,7 @@
 import { PROJECTS_MAX, actorKey, projectFolderFor, projectFolderKey, type EnvironmentId, type MachineId, type Principal, type ProjectFeatureManifest, type ProjectId, type WorkspaceId } from '@agentic/core';
 import { inMemoryEnvironment, inMemoryHarness, type InMemoryDaemon, type PlatformSeat } from '@agentic/daemon-protocol/testing';
 import { AuditActor, auditKey } from '../src/audit/index';
+import { AgentActor } from '../src/agent/index';
 import { workspaceKey } from '../src/auth/index';
 import { Chat, ChatPage } from '../src/chat/index';
 import { defineMachineActor, machineKey, type MachineSocketPort } from '../src/machine/index';
@@ -70,7 +71,7 @@ const daemons: InMemoryDaemon[] = [];
 beforeEach(async () => {
     sockets = new FakeSockets();
     Machine = defineMachineActor({ socket: sockets });
-    app = testActorApp([Workspace, PairingDirectory, Chat, ChatPage, Machine, Registry, AuditActor]);
+    app = testActorApp([Workspace, PairingDirectory, Chat, ChatPage, Machine, Registry, AuditActor, AgentActor]);
     await app.start();
 });
 afterEach(async () => {
@@ -132,7 +133,7 @@ describe('Workspace projects (#332)', () => {
 
         const storage = app.storage;
         await app.stop();
-        app = testActorApp([Workspace, PairingDirectory, Chat, ChatPage, Machine, Registry, AuditActor], { storage });
+        app = testActorApp([Workspace, PairingDirectory, Chat, ChatPage, Machine, Registry, AuditActor, AgentActor], { storage });
         await app.start();
         expect(await ws().projects()).toEqual([changed]);
         expect((await ws().get()).lastProjectId).toBe(created.id);
@@ -207,7 +208,7 @@ describe('Workspace projects (#332)', () => {
         const storage = app.storage;
         await app.stop();
         await storage.save('Workspace', KEY, legacy, record.etag);
-        app = testActorApp([Workspace, PairingDirectory, Chat, ChatPage, Machine, Registry, AuditActor], { storage });
+        app = testActorApp([Workspace, PairingDirectory, Chat, ChatPage, Machine, Registry, AuditActor, AgentActor], { storage });
         await app.start();
         const m = await onlineMachine();
         expect((await ws().projects())[0]!.folders).toEqual({ [E1]: '/work/old' });
