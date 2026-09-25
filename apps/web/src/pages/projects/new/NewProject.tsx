@@ -8,14 +8,17 @@ import { component, signal, useHead } from 'sigx';
 import { useRoute, useRouter } from '@sigx/router';
 import type { ProjectPatch } from '@agentic/core';
 import { useActorDefs, useViewer } from '../../../actors/defs';
+import { defineTopbar } from '../../../components/topbar';
 import { dataMode } from '../../../data-mode';
 import { MOCK_PM_SKILLS } from '../../../mock/projects/settings';
 import { mockWorkdirEnvironments, useLiveWorkdirEnvironments } from '../../workdir/environments';
 import { ProjectsIndex } from '../index/ProjectsIndex';
-import { saveProjectWith } from '../LiveProjects';
+import { saveProjectWith } from '../live';
 import { mockLocate, useLiveLocate } from '../locate';
 import { projectPrefillOf } from '../model';
 import { NewProjectDialog } from './NewProjectDialog';
+
+defineTopbar('project-new', () => ({ crumb: 'New project' }));
 
 export const NewProject = component(() => {
     useHead({ title: 'New project' });

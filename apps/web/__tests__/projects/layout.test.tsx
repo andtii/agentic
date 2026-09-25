@@ -12,7 +12,7 @@ import { countsFor, countsFromChats, projectCounts } from '../../src/pages/proje
 import { projectMenu, projectMenuFor, type ProjectMenuItem } from '../../src/pages/projects/layout/menu';
 import { openProjectPicker, pickerMove, pickerSections, projectPicker } from '../../src/pages/projects/layout/ProjectPicker';
 import { createChatWith } from '../../src/pages/chat/LiveChats';
-import { saveProjectWith } from '../../src/pages/projects/LiveProjects';
+import { saveProjectWith } from '../../src/pages/projects/live';
 import { setText, text } from '../pages/helpers';
 import { mountRoute, tick } from '../pages/mount';
 import { USER, mountLive, startLive, until } from '../pages/live-harness';

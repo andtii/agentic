@@ -172,4 +172,4 @@ One slot per sub-issue of [#722](https://github.com/andtii/agentic/issues/722). 
 
 - #766: none — an e2e spec and media-query fixes; the per-route no-horizontal-scroll check repeats `mobile.spec.ts`'s and could become a shared e2e helper.
 
-- #767: —
+- #767: none — removing the old projects pages leaves nothing generic behind.

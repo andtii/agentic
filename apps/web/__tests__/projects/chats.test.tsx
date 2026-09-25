@@ -10,7 +10,7 @@ import { chatTasks, workingAgents } from '../../src/pages/chat/live';
 import { clientDefs } from '../../src/actors/client';
 import { chatKeyOf } from '../../src/actors/keys';
 import { projectHead } from '../../src/pages/projects/head';
-import { saveProjectWith } from '../../src/pages/projects/LiveProjects';
+import { saveProjectWith } from '../../src/pages/projects/live';
 import { taskChips } from '../../src/pages/projects/chats/ProjectChats';
 import { chatTaskSummaries, summaryOf } from '../../src/pages/projects/chats/tasks';
 import { chatDefaults, chatGroupOf, defaultsTail, groupChats, matchesSearch, suggestedProject, unassignedChats, type ProjectChatRow } from '../../src/pages/projects/chats/groups';

@@ -17,8 +17,7 @@ import { agentKeyOf, workspaceKeyOf } from '../../../../actors/keys';
 import { dataMode } from '../../../../data-mode';
 import { MOCK_PM_SKILLS } from '../../../../mock/projects/settings';
 import { AGENTS, PROJECTS } from '../../../../mock/workspace';
-import { saveProjectWith } from '../../LiveProjects';
-import { useProjects } from '../../live';
+import { saveProjectWith, useProjects } from '../../live';
 import { useMembersSource } from '../general/sources';
 import { personalityOfInstructions, type ManagerPatch, type PmAgent } from './model';
 

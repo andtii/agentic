@@ -865,7 +865,7 @@ The Plan actor wires `links.ts` in (exported from the package now). **Writes**: 
 
 #### #767 web: remove the old projects page code and dead mocks
 
-_not yet_
+The pre-redesign pages are gone: `pages/Projects.tsx` and `pages/projects/{ProjectsView,ProjectForm,LiveProjects}.tsx` (the #333 list and the one-page form described in §10 above are superseded by the index board, the New project dialog and the Settings tabs). What outlived them moved to its owners: `saveProjectWith` (`Workspace.upsertProject`, resolving to the id) is in `projects/live.ts` beside `useProjects`; the `project-new` crumb is registered by `new/NewProject.tsx` and the `project` crumb (the project's name, live from `projectHead`) by `overview/Overview.tsx`. `styles/pages/projects.css` keeps only the Find dialog's match list that Settings › Folders opens; the list and form rules are dropped (the tabs and the dialog scope their own in `styles/projects/settings.css`). The mock `PROJECTS` stay: the index, the layout and the settings read them.
 
 ## 11. Zero feedback loop
 

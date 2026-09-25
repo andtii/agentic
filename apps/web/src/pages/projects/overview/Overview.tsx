@@ -16,11 +16,13 @@ import { AgentTile, Button, Icon, ProjectSquare, StatusPill, type IconName } fro
 import { useActorDefs, useViewer } from '../../../actors/defs';
 import { Age } from '../../../components/Age';
 import { Page } from '../../../components/Page';
+import { defineTopbar } from '../../../components/topbar';
 import { dataMode } from '../../../data-mode';
 import { MOCK_PROJECT_OVERVIEW } from '../../../mock/projects/overview';
 import { AGENTS, USER } from '../../../mock/workspace';
 import { useAgentDirectory } from '../../chat/directory';
 import { featureViewsOf, type ProjectFeatureViews } from '../features/registry';
+import { projectMenuSource } from '../layout/menu';
 import type { ProjectPageProps } from '../layout/types';
 import { settingsHref } from '../settings/tabs';
 import { addFeatureHintOf, CHAT_STATE_PILL, EMPTY_OVERVIEW, folderLineOf, peopleOf, projectTagsOf, recentChatsOf, type AgentNames, type OverviewChat, type OverviewData, type OverviewMove } from './model';
@@ -33,6 +35,9 @@ export type OverviewViewProps =
     & Define.Prop<'views', (featureId: string) => ProjectFeatureViews | undefined>
     /** The chats card's total when it knows more chats than `data.chats` holds. */
     & Define.Prop<'chatCount', number>;
+
+// The project's home is the route's own crumb: `Projects › <project name>` (live, what `ProjectLayout` published).
+defineTopbar('project', (route) => ({ crumb: projectMenuSource(route)?.name }));
 
 const base = (p: ProjectRecord): string => `/projects/${p.id}`;
 

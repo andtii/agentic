@@ -21,7 +21,7 @@ import { useAgentDirectory } from '../../../chat/directory';
 import type { AgentIdentity } from '../../../chat/live';
 import { useWorkspaceReadiness } from '../../../plugins/readiness';
 import { mockWorkdirEnvironments, useLiveWorkdirEnvironments } from '../../../workdir/environments';
-import { saveProjectWith } from '../../LiveProjects';
+import { saveProjectWith } from '../../live';
 import { mockLocate, useLiveLocate, type LocateBackend } from '../../locate';
 import { connectorOptionsOf, type ProjectMachine } from '../../model';
 

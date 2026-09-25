@@ -11,7 +11,7 @@ import { MOCK_FEATURE_CATALOGUE } from '../../src/mock/projects/features';
 import { PROJECTS } from '../../src/mock/workspace';
 import { FeaturesView } from '../../src/pages/projects/settings/features/FeaturesView';
 import { applyFeaturesPatch, catalogueTiles, categoryChips, enabledEntries, featureEntriesOf, featurePatch, removePatch, slotLines, unmetNeeds } from '../../src/pages/projects/settings/features/model';
-import { saveProjectWith } from '../../src/pages/projects/LiveProjects';
+import { saveProjectWith } from '../../src/pages/projects/live';
 import { projectHead } from '../../src/pages/projects/head';
 import { actor } from '@sigx/actors';
 import { clientDefs } from '../../src/actors/client';
