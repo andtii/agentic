@@ -1,4 +1,5 @@
 /* Projects redesign (#722): the project Chats (#731) — board `ProjectChats`, docs/design/projects/HANDOFF.md → "Project chats". */
+@import '@agentic/ui/css/breakpoints';
 [data-project-chats] { display: flex; flex-direction: column; gap: var(--space-md); min-inline-size: 0; }
 
 [data-project-chats-head] { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-sm) var(--space-md); }
@@ -51,8 +52,8 @@
 [data-project-chats-move] { display: flex; flex-direction: column; gap: var(--space-sm); border: 0; padding: 0; margin: 0; }
 [data-move-suggested] { color: var(--ag-text-dim); }
 
-/* Narrow: the row stacks — state and age on top, then the chat, then who and the work. */
-@media (max-width: 720px) {
+/* Below 768 (the one breakpoint, #766): the row stacks — state and age on top, then the chat, then who and the work. */
+@media (--below-md) {
     [data-project-chat-cols] { display: none; }
     [data-project-chat-row] { grid-template-columns: minmax(0, 1fr) auto; }
     [data-project-chat-main] { grid-column: 1 / -1; grid-row: 2; }

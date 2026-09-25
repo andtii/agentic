@@ -861,7 +861,7 @@ The Plan actor wires `links.ts` in (exported from the package now). **Writes**: 
 
 #### #766 web: responsive pass and e2e for every project page
 
-_not yet_
+`apps/web/e2e/projects.spec.ts` runs at 400 / 1024 / 1280 on mock data: every project route (index, links, new, Overview, Chats, Work, a PR page, a work item, Requests, Plan list / board / graph, Code, each Settings tab) has no page-level horizontal scroll and throws nothing — the Plan board's columns and the links graph scroll inside their own box by design; the flows: `/projects` → a card → the sidebar's project sub-menu → Work → `pr:602` (on the phone the Overview's `All work →`, since a project page shows Back, not Menu); Plan list → Board → a card dragged (keyboard below 768) into another agent's column; Requests → `Accept as proposed`; the phone drawer from `/projects` and the Back link. Rails (Overview, PR board, Requests body, Features grid) are two columns at 1280 and one below; three-column grids (project cards, feature catalogue) are three, two below 1280, one below 768. Media queries in `styles/projects/**` use the one breakpoint (`--below-md`) and `--below-xl` for the rails: Chats' row stacked at 720 and Features' rail dropped at 1100 before. Gap left open (#923): on the phone a project page has no way to open its sub-menu (the drawer is behind Menu, which a detail route replaces with Back).
 
 #### #767 web: remove the old projects page code and dead mocks
 
