@@ -647,7 +647,16 @@ _not yet_
 
 #### #738 web: Work view — derived work items, groups, stage tracks, filters
 
-_not yet_
+`pages/projects/work/model.ts` `workItemsOf(tasks, pulls, planItems, features, now)` derives the rows (never stored):
+one per open or recently merged pull request (its task folded in, `pr:<n>`), one per task without one (`task:<id>`), and
+one per plan item no task carries yet that needs a person, is stuck or holds a live claim (`item:<n>`; a claimed item's
+task carries its `#n`). Stages are `workStagesFor` of the enabled features; named stages (`PR`, `Checks`, `Review`,
+`Merge`) are placed by name when the project has them. The owner is whoever acts next: conflicts, failing checks,
+threads and a green approved PR are your move unless the PR's autopilot does that job (rebase, fixChecks while attempts
+remain, answerThreads); running checks and a named reviewer are *waiting*; merged/completed within a week are *done*.
+Cancelled, closed and older done work is left out. Live, a task is the project's when its chat is (TaskIndex row
+`chatId` ∩ the project's chats), the stages come from `Registry.projectFeatures()`, and `usePulls` / `usePlanItems`
+return `[]` until the git PR store (G2) and the Plan store (PL1) exist.
 
 #### #739 web: work item page for non-Git work
 
