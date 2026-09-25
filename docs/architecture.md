@@ -609,7 +609,7 @@ _not yet_
 
 #### #729 web: /projects index — cards, move/agent pills, open-links strip, unassigned strip
 
-_not yet_
+`pages/projects/index/`: `ProjectsBoard` (presentational, both data sources) over `model.ts` (`ProjectCardData`, `cardPills`, `unassignedText`, `openLinksText`, `featureTag`). Heading with count and New project (the topbar keeps only the crumb), tabs Projects | Links N, open-links strip (only when a `links` source is passed — mock today, L1 later), a 3 / 2 / 1-column card grid (≥1280 / 768–1279 / below; `styles/projects/index-page.css`), the dashed unassigned strip → `/chats?project=none`, three skeleton cards while loading, the empty state. Pills: `N YOUR MOVE`, `N AGENTS ON IT`, `QUIET` only when both counts are known zero; a card without counts draws none. Live (`ProjectsIndex`): `Workspace.projects()` plus `Workspace.projectSummaries()` (#734) for each card's line (`N open chats · active …`) and the unassigned chats; your-move / agents-on-it counts and links wait for sources. Mock: `mock/projects/index.ts` overlays counts on the sample workspace's projects so each card opens a known project.
 
 #### #730 web: project Overview — Your move, recent chats, Schedules and People cards, feature card slot
 
