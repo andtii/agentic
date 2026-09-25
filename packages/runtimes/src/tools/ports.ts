@@ -180,5 +180,6 @@ export interface PlatformPorts {
     /** Absent where the session's project has no Plan (#751) — the `plan_*` tools then report it unavailable. */
     readonly plan?: import('./plan.js').PlanPort;
 
-    // slot #759 requests tool family port — replace this line
+    /** Absent where the session is in no project or the host has no Requests actor (#759) — the `requests_*` tools and `projects_request` then report it unavailable. */
+    readonly requests?: import('./requests.js').RequestsPort;
 }

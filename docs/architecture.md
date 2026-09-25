@@ -806,7 +806,9 @@ _not yet_
 
 #### #759 runtimes+mcp: requests_list/triage/resolve and projects_request tools
 
-_not yet_
+`packages/runtimes/src/tools/requests.ts`: the four `REQUEST_TOOLS` on `PLATFORM_TOOL_NAMES` over an injected `RequestsPort` — `PlatformPorts.requests`, absent where the session is in no project or the host has no Requests actor (the tools then say so). The port is the Requests actor (#758) under the agent's principal in the session's project: `board()` (the project, the caller and whether it is a member, the project manager, its `PmPolicy`, the incoming requests), `target(projectId)` (another project's policy and whether it has a manager), `triage`, `resolve` (`accept` | `decline` with a reason | `ask-for-more` with a question) and `send` (the port stamps the session's chat as `fromChat`); the actor enforces every rule again. `requests_list` is for any member; `requests_triage` and `requests_resolve` refuse any agent that is not the project manager. Triage fills `Triage.why` from `needsPersonReasons` under the policy (high or urgent always) and tells the manager whether a person decides; resolve refuses what needs a person, an accept without a triage or proposed item, and a decline of anything but a duplicate — asking for more is always the manager's. `projects_request` refuses its own project, a non-member, an unknown target or one without a manager, and answers the target's `pmSenderMode` (`allowed` → straight to triage, `ask` → a person there first).
+
+`packages/mcp/src/server/requests.ts`: the same four tools on the orchestration surface over `PlatformPort.requests` (`RequestsMcpPort`, every call names its project), gated by the `projects` scope (`scopeOfTool` maps the `requests` family to it). The external client acts in its user's name — a person — so it triages and resolves without the manager-only and policy checks; the actor's refusals come back as `isError` results. A host without the port declares none of them.
 
 #### #760 web: Settings › Project manager
 
