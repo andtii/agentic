@@ -54,7 +54,7 @@ const planId = z.string().min(1).optional().describe('One plan by id; absent: ev
 const handle = z.string().min(1).describe('A project member by handle, `lint` or `@lint`.');
 const bare = (h: string): string => h.replace(/^@/, '');
 /** One `after` entry: an item number of this project, or `project#n` for an item in another project (#881). */
-const afterEntry = z.union([z.number().int().min(1), z.string().regex(/^[\w.-]*#\d+$/, 'write an item number, #n or project#n')]).describe('An item number of this project (`9`), or `project#n` for an item in another project — it stays blocked until that item is done.');
+const afterEntry = z.union([z.number().int().min(1), z.string().regex(/^[\w.-]*#[1-9]\d*$/, 'write an item number, #n or project#n')]).describe('An item number of this project (`9`), or `project#n` for an item in another project — it stays blocked until that item is done.');
 
 /**
  * The plan tools (`PLAN_TOOLS` order) over `port`, made with the surface's gated `tool` factory. A host without a Plan

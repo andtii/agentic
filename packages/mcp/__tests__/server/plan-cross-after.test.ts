@@ -43,7 +43,7 @@ describe('plan_add with a cross-project after', () => {
 
     it('refuses an after entry that is neither an item number nor project#n', async () => {
         const { tool } = planAdd();
-        for (const bad of ['signalx', 'signalx#', 'signalx#x', 'a b#1', 0]) {
+        for (const bad of ['signalx', 'signalx#', 'signalx#x', 'a b#1', 'signalx#0', '#0', 0]) {
             expect(await valid(tool.input, { projectId: 'project_agentic', items: [{ title: 'A', after: [bad] }] }), String(bad)).toBe(false);
         }
     });
