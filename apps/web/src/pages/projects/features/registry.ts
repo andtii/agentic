@@ -13,7 +13,7 @@ import { PlanOverviewCard } from './plan/shared/parts';
 export interface ProjectFeatureViews {
     /** The sub-menu label; the manifest's `ui.section.label` when it has one, else the feature id. */
     readonly label?: string;
-    /** A route of its own under the project instead of `f/<feature>` (Plan: `plan`). */
+    /** A route of its own under the project instead of `f/<feature>` (Plan: `plan`, Git: `code`). */
     readonly path?: string;
     /** The feature's section page. */
     readonly Section?: ProjectPage;
@@ -22,7 +22,7 @@ export interface ProjectFeatureViews {
 }
 
 export const PROJECT_FEATURE_VIEWS: Readonly<Record<string, ProjectFeatureViews>> = {
-    'agentic.feature.git': { label: 'Code', Section: GitSection, OverviewCard: GitOverviewCard },
+    'agentic.feature.git': { label: 'Code', path: 'code', Section: GitSection, OverviewCard: GitOverviewCard },
 
     'agentic.feature.plan': { label: 'Plan', path: 'plan', Section: PlanList, OverviewCard: PlanOverviewCard },
 };

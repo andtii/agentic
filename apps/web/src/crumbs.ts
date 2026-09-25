@@ -31,6 +31,8 @@ export const CRUMBS: Record<string, { label: string; href: string }> = {
     'project-requests': { label: 'Projects', href: '/projects' },
     'project-plan': { label: 'Projects', href: '/projects' },
     'project-settings': { label: 'Projects', href: '/projects' },
+    'project-code': { label: 'Projects', href: '/projects' },
+    'project-git-legacy': { label: 'Projects', href: '/projects' },
     'project-feature': { label: 'Projects', href: '/projects' },
     agents: { label: 'Agents', href: '/agents' },
     agent: { label: 'Agents', href: '/agents' },

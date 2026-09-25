@@ -95,7 +95,7 @@ export const CHECKS_PILL: Readonly<Record<GitChecks, { readonly tone: 'live' | '
 };
 
 /** Where the Code section lives in a project. */
-export const gitSectionHref = (projectId: string): string => `/projects/${projectId}/f/${encodeURIComponent(GIT_FEATURE_ID)}`;
+export const gitSectionHref = (projectId: string): string => `/projects/${projectId}/code`;
 
 /** A pull request's work item page. */
 export const pullHref = (projectId: string, n: number): string => `/projects/${projectId}/work/pr:${n}`;

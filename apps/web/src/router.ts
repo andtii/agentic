@@ -17,7 +17,7 @@ import { ProjectWorkItem } from './pages/projects/work/WorkItemRoute';
 import { ProjectRequests } from './pages/projects/requests/Requests';
 import { ProjectPlan } from './pages/projects/features/plan/Plan';
 import { ProjectSettings } from './pages/projects/settings/SettingsLayout';
-import { ProjectFeatureSection } from './pages/projects/features/FeatureSection';
+import { ProjectCodeSection, ProjectFeatureSection } from './pages/projects/features/FeatureSection';
 import { Task } from './pages/Task';
 import { Session } from './pages/Session';
 import { SessionChanges } from './pages/SessionChanges';
@@ -52,6 +52,9 @@ export const routes: RouteRecordRaw[] = [
     { path: '/projects/:id/requests', name: 'project-requests', component: inProject(ProjectRequests, 'ProjectRequestsRoute') },
     { path: '/projects/:id/plan', name: 'project-plan', component: inProject(ProjectPlan, 'ProjectPlanRoute') },
     { path: '/projects/:id/settings/:tab', name: 'project-settings', component: inProject(ProjectSettings, 'ProjectSettingsRoute') },
+    // The git section's canonical route (#841); its old `f/agentic.feature.git` address redirects here, both before `f/:feature`.
+    { path: '/projects/:id/code', name: 'project-code', component: inProject(ProjectCodeSection, 'ProjectCodeRoute') },
+    { path: '/projects/:id/f/agentic.feature.git', name: 'project-git-legacy', redirect: (to) => `/projects/${String(to.params.id)}/code` },
     { path: '/projects/:id/f/:feature', name: 'project-feature', component: inProject(ProjectFeatureSection, 'ProjectFeatureRoute') },
     { path: '/agents', name: 'agents', component: Agents },
     { path: '/agents/:id', name: 'agent', component: Agent },
