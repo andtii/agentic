@@ -26,8 +26,8 @@ export interface OverviewChat {
     readonly id: string;
     readonly title: string;
     readonly state: OverviewChatState;
-    /** Who wrote the last line (`You` for the person) and the line itself. */
-    readonly lastBy: string;
+    /** Who wrote the last line (`You` for the person), when the line has a speaker, and the line itself. */
+    readonly lastBy?: string;
     readonly lastLine: string;
     /** Agent ids on the chat, in roster order; the person's tile always comes first. */
     readonly members: readonly string[];
@@ -39,7 +39,8 @@ export interface OverviewChat {
 export interface OverviewSchedule {
     readonly id: string;
     readonly title: string;
-    readonly agentId: string;
+    /** The agent that runs it; absent for a plain reminder. */
+    readonly agentId?: string;
     /** The next run as the schedules page words it (`tonight 02:00`). */
     readonly next: string;
 }
@@ -53,6 +54,13 @@ export interface OverviewData {
 }
 
 export const EMPTY_OVERVIEW: OverviewData = { moves: [], chats: [], schedules: [] };
+
+/** Which of the Overview's live cards are still waiting for their first read: those draw skeleton rows, never the empty line. */
+export interface OverviewLoading {
+    readonly moves?: boolean;
+    readonly chats?: boolean;
+    readonly schedules?: boolean;
+}
 
 /** The Chats card shows this many. */
 export const RECENT_CHATS = 5;
