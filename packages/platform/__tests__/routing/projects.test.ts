@@ -597,13 +597,12 @@ describe('a chat leaving its project (#623)', () => {
         delete (feature as { onChatReleased?: unknown }).onChatReleased;
     });
 
-    it("tells the project's plugins once per environment with a folder, audits what each said, and a throw never undoes the move", async () => {
+    it("tells the project's plugins once per environment with a folder, audits what each said, and a throw refuses the move until forced (#936)", async () => {
         await onlineMachine();
         const projectId = await project();
         const { chatId } = await workspace().createChat({ projectId });
-        await chat(chatId).setProject(null);
-        await until(() => released.length > 0 && audit.events.filter((e) => e.kind === 'project.chat-released').length >= 2, 'the release to be heard and audited');
-        expect((await chat(chatId).get()).projectId).toBeUndefined();
+        await expect(chat(chatId).setProject(null)).rejects.toThrow(/the daemon said no/);
+        expect((await chat(chatId).get()).projectId).toBe(projectId);
         // The machine reports both environments: the hook ran on each with the project's folder there.
         expect(released.map((r) => [r.environmentId, r.cwd, r.chatId, r.reason, r.project.id])).toEqual([
             [E1, '/work/agentic', chatId, 'project-changed', projectId],
@@ -614,6 +613,8 @@ describe('a chat leaving its project (#623)', () => {
             { chatId, projectId, pluginId: GIT, environmentId: E1, reason: 'project-changed', outcome: 'tidied /work/agentic' },
             { chatId, projectId, pluginId: GIT, environmentId: E2, reason: 'project-changed', error: 'the daemon said no' }
         ]);
+        await chat(chatId).setProject(null, { force: true });
+        expect((await chat(chatId).get()).projectId).toBeUndefined();
     });
 
     it('a member agent moving the chat still reaches the daemon as the workspace owner: owner-only ops are not refused', async () => {
@@ -648,7 +649,7 @@ describe('a chat leaving its project (#623)', () => {
         expect(audit.events.find((e) => e.kind === 'project.chat-released')?.data).toMatchObject({ environmentId: E1, error: expect.stringContaining('offline') });
     });
 
-    it('a throwing plugin is audited with its message; a chat still in the project, or a call for nothing, changes nothing', async () => {
+    it('a throwing plugin is audited with its message and refuses the move; a stray call while the chat is still in the project changes nothing', async () => {
         await onlineMachine();
         const projectId = await project({ folders: { [E2]: null } });
         feature.onChatReleased = async (input) => {
@@ -660,9 +661,8 @@ describe('a chat leaving its project (#623)', () => {
         await routing().chatReleased(chatId, projectId, 'project-changed');
         expect(released).toEqual([]);
         const other = await workspace().upsertProject({ name: 'Other', folders: {}, connectors: [], features: {} });
-        await chat(chatId).setProject(other.id);
-        await until(() => audit.events.some((e) => e.kind === 'project.chat-released'), 'the failed release to be audited');
-        expect((await chat(chatId).get()).projectId).toBe(other.id);
+        await expect(chat(chatId).setProject(other.id)).rejects.toThrow(/the daemon said no/);
+        expect((await chat(chatId).get()).projectId).toBe(projectId);
         expect(audit.events.find((e) => e.kind === 'project.chat-released')?.data).toEqual({ chatId, projectId, pluginId: GIT, environmentId: E1, reason: 'project-changed', error: 'the daemon said no' });
     });
 });

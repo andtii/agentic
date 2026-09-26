@@ -1939,24 +1939,32 @@ export function defineRoutingActor(ports: RoutingPorts) {
                 },
 
                 /**
-                 * A chat left project `projectId` (#623; `Chat.setProject`, one-way): every enabled feature plugin with
-                 * `onChatReleased` hears it once per environment the project has a folder on whose machine is online, with
-                 * that folder and its daemon. Best effort and after the fact: a chat still in the project is left alone
-                 * (so a stray call changes nothing), a throw never reaches the caller, and every call — or an offline
-                 * machine it could not reach — is audited `project.chat-released`.
+                 * A chat leaves project `projectId` (#623): every enabled feature plugin with `onChatReleased` hears it once
+                 * per environment the project has a folder on whose machine is online, with that folder and its daemon;
+                 * every call — or an offline machine it could not reach — is audited `project.chat-released`.
+                 *
+                 * `before: true` (#936) is `Chat.setProject` asking FIRST, awaited, while the chat is still in the project:
+                 * a chat no longer in it is left alone, and once every hook has run, any that threw fails the call (409)
+                 * with their messages, so the Chat can refuse the move. An offline machine does not fail it — nothing can
+                 * be tidied there, and the audit says so. Without it the call is after the fact and best effort: a chat
+                 * still in the project is left alone (so a stray call changes nothing) and a throw never reaches the caller.
                  */
-                async chatReleased(chatId: ChatId, projectId: ProjectId, reason: ProjectFeatureReleaseReason): Promise<void> {
+                async chatReleased(chatId: ChatId, projectId: ProjectId, reason: ProjectFeatureReleaseReason, options?: { readonly before?: boolean }): Promise<void> {
+                    const before = options?.before === true;
                     const hooked = Object.entries(projectFeatures).filter(([, p]) => p.onChatReleased);
                     if (!hooked.length) return;
                     const summary = await chat(chatId)
                         .get()
                         .catch(() => undefined);
-                    if (reason === 'project-changed' && (!summary || summary.projectId === projectId)) return;
+                    // Asked first, a chat that cannot be read is not released: the move must not go ahead as if it were.
+                    if (before && !summary) throw new ServerFnError(409, `the chat ${chatId} could not be read to release it`);
+                    if (before ? summary!.projectId !== projectId : reason === 'project-changed' && (!summary || summary.projectId === projectId)) return;
                     const project = await as(Workspace, workspaceKey(workspaceId))
                         .projects()
                         .then((all) => all.find((p) => p.id === projectId), () => undefined);
                     if (!project) return;
                     const at = now();
+                    const failures: string[] = [];
                     for (const id of enabledProjectFeatures(project)) {
                         const plugin = Object.hasOwn(projectFeatures, id) ? projectFeatures[id] : undefined;
                         if (!plugin?.onChatReleased) continue;
@@ -1984,6 +1992,7 @@ export function defineRoutingActor(ports: RoutingPorts) {
                                     outcome = await plugin.onChatReleased({ project, settings, chatId, reason, environmentId, cwd, fs: machineFs(machine(located.machine.machineId), environmentId, { now }) });
                                 } catch (e) {
                                     error = (e instanceof Error ? e.message : String(e)).slice(0, 500);
+                                    failures.push(`${id} on ${environmentId}: ${error}`);
                                 }
                                 if (outcome === undefined && error === undefined) continue;
                             }
@@ -1997,6 +2006,7 @@ export function defineRoutingActor(ports: RoutingPorts) {
                             }).catch(() => undefined);
                         }
                     }
+                    if (before && failures.length) throw new ServerFnError(409, failures.join('; ').slice(0, 1_000));
                 },
 
                 /**

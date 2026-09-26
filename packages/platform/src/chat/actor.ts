@@ -144,6 +144,15 @@ export interface ChatSummary {
     readonly archived?: true;
 }
 
+/** How long `setProject` waits for the project it leaves to release the chat (#936) before it refuses the move. */
+export const CHAT_RELEASE_TIMEOUT_MS = 30_000;
+
+/** What `setProject` takes besides the project (#936). */
+export interface SetProjectOptions {
+    /** Move even when the project being left could not release the chat (a hook threw or timed out) — the "move anyway" path. */
+    readonly force?: boolean;
+}
+
 /** A title is one line of at most this many characters; `rename` trims and rejects the rest. */
 export const MAX_TITLE_LENGTH = 120;
 
@@ -157,7 +166,20 @@ const principalOf = (ctx: ActorContext<ChatState>): Principal | null => (ctx.pri
 /** The slice of the Routing actor a removal reaches (`defineRoutingActor`, #399), one-way. */
 interface RoutingClient {
     endSession(chatId: ChatId, agentId: AgentId, reason: string, sessionId?: SessionId): Promise<void>;
-    chatReleased(chatId: ChatId, projectId: ProjectId, reason: 'project-changed'): Promise<void>;
+    chatReleased(chatId: ChatId, projectId: ProjectId, reason: 'project-changed', options?: { readonly before?: boolean }): Promise<void>;
+}
+
+/** Waits for a release (#936): `undefined` when it went through, else why not — its error, or that it timed out. */
+async function releaseWithin(release: Promise<void>, timeoutMs: number): Promise<string | undefined> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<string>((resolve) => {
+        timer = setTimeout(() => resolve(`the release did not finish within ${timeoutMs < 1_000 ? `${timeoutMs} ms` : `${Math.round(timeoutMs / 1000)} s`}`), timeoutMs);
+    });
+    try {
+        return await Promise.race([release.then(() => undefined, (e: unknown) => (e instanceof Error ? e.message : String(e))), timeout]);
+    } finally {
+        clearTimeout(timer);
+    }
 }
 
 /** Users and external clients post as the workspace user; an agent posts as itself. */
@@ -358,10 +380,13 @@ export interface ChatOptions {
      * as the caller — to end the session the chat bound to the leaving member
      * (`Routing.endSession`, #399), so removal ends the agent's session for
      * that chat (§6). Absent: the binding is dropped and the session lives on.
-     * `setProject` tells it, one-way, when the chat leaves a project
-     * (`Routing.chatReleased`, #623), so the project's feature plugins can tidy up.
+     * `setProject` asks it FIRST, awaited, when the chat leaves a project
+     * (`Routing.chatReleased` with `before`, #623 / #936), so the project's feature plugins can tidy up
+     * before the folder changes — and a plugin that fails refuses the move.
      */
     readonly routing?: () => AnyActorDefinition;
+    /** How long `setProject` waits for that release (#936); `CHAT_RELEASE_TIMEOUT_MS` when absent. */
+    readonly releaseTimeoutMs?: number;
     /**
      * Titles a chat from its first messages (#460, `createChatTitler`) for the runtimes that do not title their own
      * conversations: asked in the `title` task after the agent messages `TITLE_AT_AGENT_MESSAGES` name, while no
@@ -580,10 +605,13 @@ export function defineChatActor(ports: ChatOptions = {}) {
              * feature plugins. Written as a visible note in the thread (a user message carrying
              * `project`, activating nobody), so the fold keeps the last one. Users, external
              * clients and member agents (a non-member agent is 403); an unknown project is 400.
-             * Idempotent. Recorded as `chat.project-set`. Leaving a project tells the router
-             * (`Routing.chatReleased`, #623), so the project's feature plugins can tidy up.
+             * Idempotent. Recorded as `chat.project-set`. Leaving a project asks the router FIRST
+             * (`Routing.chatReleased` with `before`, #623 / #936), awaited for up to `releaseTimeoutMs`, so the
+             * project's feature plugins can tidy up (Git parks the chat's worktree) before the folder changes. A
+             * plugin that throws, or a release that times out, refuses the move with a 409 naming why and nothing
+             * is written; `{ force: true }` moves anyway.
              */
-            async setProject(projectId: ProjectId | null): Promise<ChatSummary> {
+            async setProject(projectId: ProjectId | null, options?: SetProjectOptions): Promise<ChatSummary> {
                 const principal = principalOf(ctx);
                 if (!principal) throw new Error('Chat.setProject: no principal');
                 if (principal.kind === 'agent' && !ctx.state.members[principal.agentId]) throw new ServerFnError(403, `Chat.setProject: ${principal.agentId} is not a member of this chat`);
@@ -597,11 +625,20 @@ export function defineChatActor(ports: ChatOptions = {}) {
                 }
                 const left = ctx.state.projectId ?? null;
                 if (left === projectId) return summaryOf(ctx);
+                const chatId = chatIdOfKey(ctx.key);
+                // The project it leaves hears it first (#936), so its feature plugins tidy up before the folder changes.
+                const routing = left !== null ? ports.routing?.() : undefined;
+                if (routing && left !== null) {
+                    const router = ctx.actor(routing, routingKey(workspaceId)) as unknown as RoutingClient;
+                    const failed = await releaseWithin(router.chatReleased(chatId, left, 'project-changed', { before: true }), ports.releaseTimeoutMs ?? CHAT_RELEASE_TIMEOUT_MS);
+                    if (failed !== undefined && options?.force !== true) {
+                        throw new ServerFnError(409, `Chat.setProject: the project this chat is in could not release it — ${failed}. Move anyway with { force: true }`);
+                    }
+                }
                 const text = projectId === null ? 'Project cleared' : `Project → ${name}`;
                 await archive(ctx);
                 const at = Date.now();
                 await appendEntry(ctx, { t: 'msg', id: createId('msg') as MessageId, author: { kind: 'user' }, parts: [{ type: 'text', text }], at, mentions: [], project: { id: projectId } });
-                const chatId = chatIdOfKey(ctx.key);
                 await recordAudit(ctx, workspaceId, {
                     key: `${ctx.key}:project:${ctx.state.seq - 1}`,
                     kind: 'chat.project-set',
@@ -610,12 +647,6 @@ export function defineChatActor(ports: ChatOptions = {}) {
                     summary: projectId === null ? `chat ${chatId} left its project` : `chat ${chatId} put in project ${name} (${projectId})`,
                     data: { chatId, projectId, ...(name !== undefined ? { name } : {}) }
                 });
-                // The project it left hears it (#623), one-way and best effort: its feature plugins tidy up after the chat.
-                const routing = left !== null ? ports.routing?.() : undefined;
-                if (routing && left !== null) {
-                    const router = ctx.actor(routing, routingKey(workspaceId)).with({ oneWay: true }) as unknown as RoutingClient;
-                    await router.chatReleased(chatId, left, 'project-changed').catch(() => undefined);
-                }
                 return summaryOf(ctx);
             },
 
