@@ -75,6 +75,8 @@ export function applyTaskEntry(state: TaskState, entry: unknown): void {
             });
             if (e.to === 'waiting' && e.wait) state.wait = e.wait;
             else delete state.wait;
+            // A new status: the activity line said what the task was on before it (#937).
+            delete state.activity;
             if (e.sessionId !== undefined) {
                 state.sessionId = e.sessionId;
                 state.sessionStopped = false;
@@ -122,6 +124,10 @@ export function applyTaskEntry(state: TaskState, entry: unknown): void {
                 state.notStopped = state.notStopped.filter((id) => id !== state.id);
                 state.cancel.stopped = state.notStopped.length === 0;
             }
+            return;
+        case 'note':
+            if (e.branch !== undefined) state.branch = e.branch;
+            if (e.activity !== undefined) state.activity = e.activity;
             return;
         case 'usage':
             state.usage = addUsage(state.usage, e.usage);

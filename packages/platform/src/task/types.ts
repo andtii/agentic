@@ -80,9 +80,22 @@ export interface TaskTree {
     readonly children: readonly TaskTree[];
 }
 
+/**
+ * `note(...)` (#937): what the task is on, beside its status — the branch its chat's worktree works on and a short
+ * current-activity line (the latest status line). A field left out keeps its value.
+ */
+export interface TaskNote {
+    readonly branch?: string;
+    readonly activity?: string;
+}
+
 /** `get()`: the AC-05 snapshot plus the delegation link and the stop bookkeeping. */
 export interface TaskView extends TaskSnapshot {
     readonly parentId?: TaskId;
+    /** The branch the task's chat worktree works on (#937). */
+    readonly branch?: string;
+    /** What the task is on now, one line (#937); cleared by every status change. */
+    readonly activity?: string;
     readonly notStopped: readonly TaskId[];
 }
 
@@ -131,6 +144,7 @@ export type TaskEntry =
           readonly notStopped: readonly TaskId[];
       }
     | { readonly t: 'session-stopped'; readonly at: number }
+    | { readonly t: 'note'; readonly at: number; readonly branch?: string; readonly activity?: string }
     | { readonly t: 'usage'; readonly at: number; readonly usage: Usage; readonly costUsd: number };
 
 export interface TaskState {
@@ -161,6 +175,10 @@ export interface TaskState {
     status: TaskStatus;
     wait?: WaitReason;
     sessionId?: SessionId;
+    /** The branch the task's chat worktree works on (#937), once the git feature gave it one. */
+    branch?: string;
+    /** A short current-activity line (#937): the latest status line; every transition clears it. */
+    activity?: string;
     /** The session driver confirmed the running work stopped (`sessionStopped()`), or nothing ever ran. */
     sessionStopped: boolean;
     startedAt?: number;

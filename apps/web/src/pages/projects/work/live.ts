@@ -81,13 +81,15 @@ export function usePlanItems(projectId: string | (() => string), deps?: PlanRead
 /** The project's tasks on mock data. */
 export const mockWorkTasks = (projectId: string): readonly WorkTask[] => MOCK_WORK[projectId]?.tasks ?? [];
 
-/** A TaskIndex row as a Work task. */
-export const workTaskOf = (row: Pick<TaskIndexRow, 'id' | 'objective' | 'status' | 'wait' | 'assignee' | 'updatedAt'>): WorkTask => ({
+/** A TaskIndex row as a Work task: with its worktree branch and current activity line when the row has them (#937). */
+export const workTaskOf = (row: Pick<TaskIndexRow, 'id' | 'objective' | 'status' | 'wait' | 'assignee' | 'updatedAt' | 'branch' | 'activity'>): WorkTask => ({
     id: row.id as TaskId,
     title: row.objective,
     status: row.status,
     ...(row.wait ? { wait: row.wait } : {}),
     assignee: row.assignee as AgentId,
+    ...(row.branch ? { branch: row.branch } : {}),
+    ...(row.activity ? { activity: row.activity } : {}),
     updatedAt: row.updatedAt
 });
 

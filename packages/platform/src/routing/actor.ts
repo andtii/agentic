@@ -459,6 +459,10 @@ export function defineRoutingActor(ports: RoutingPorts) {
                     await task(route.taskId).resolveWaiting(ROUTER, via, sessionId);
                 }
                 await task(route.taskId).reportWaiting(reason, ROUTER, sessionId);
+                // The status line rides on the index row (#937): what the Work view says the task waits on. Never a gate.
+                await task(route.taskId)
+                    .note({ activity: via })
+                    .catch(() => undefined);
             }
 
             /**
