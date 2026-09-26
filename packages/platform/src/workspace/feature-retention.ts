@@ -56,10 +56,11 @@ export function nextRemoved(removed: readonly RemovedFeature[] | undefined, base
     return [...kept, ...gone.map((featureId) => ({ projectId: record.id, featureId, settings: { ...base!.features[featureId] }, removedAt: at }))];
 }
 
-/** How long until the next kept feature runs out (at least `PURGE_MIN_DELAY_MS`, so a failed purge retries calmly), or `undefined` when none is kept. */
+/** How long until the next kept feature runs out, or `undefined` when none is kept. One already due (its purge failed) waits `PURGE_MIN_DELAY_MS`, so it retries calmly. */
 export function nextPurgeIn(removed: readonly RemovedFeature[] | undefined, at: number): number | undefined {
     if (!removed?.length) return undefined;
-    return Math.max(PURGE_MIN_DELAY_MS, Math.min(...removed.map((r) => r.removedAt + REMOVED_FEATURE_RETENTION_MS)) - at);
+    const left = Math.min(...removed.map((r) => r.removedAt + REMOVED_FEATURE_RETENTION_MS)) - at;
+    return left > 0 ? left : PURGE_MIN_DELAY_MS;
 }
 
 /**

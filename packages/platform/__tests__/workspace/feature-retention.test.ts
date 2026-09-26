@@ -13,7 +13,7 @@ import { planKey } from '../../src/plan/key';
 import { defineRegistry } from '../../src/registry/index';
 import { testActorApp, userPrincipal, type TestActorApp } from '../../src/testing/index';
 import { defineWorkspace, REMOVED_FEATURE_RETENTION_MS, type ActorRecordRef, type WorkspaceState } from '../../src/workspace/index';
-import { nextRemoved, purgeExpired, retainedSettings } from '../../src/workspace/feature-retention';
+import { nextPurgeIn, nextRemoved, PURGE_MIN_DELAY_MS, purgeExpired, retainedSettings } from '../../src/workspace/feature-retention';
 
 const WS = 'u1' as WorkspaceId;
 const owner = userPrincipal('u1');
@@ -137,5 +137,14 @@ describe('retention rules (#941)', () => {
         expect(refs).toEqual([]);
         const failed = await purgeExpired(removed, WS, [project({})], { async purge() { throw new Error('down'); } }, REMOVED_FEATURE_RETENTION_MS);
         expect(failed.kept).toEqual(removed);
+    });
+});
+
+describe('purge timing (#941)', () => {
+    it('arms for the exact expiry, and waits the retry delay only for one already due', () => {
+        const removed = [{ projectId: 'p1' as ProjectId, featureId: PLAN, settings: {}, removedAt: 0 }];
+        expect(nextPurgeIn(undefined, 0)).toBeUndefined();
+        expect(nextPurgeIn(removed, REMOVED_FEATURE_RETENTION_MS - 60_000)).toBe(60_000);
+        expect(nextPurgeIn(removed, REMOVED_FEATURE_RETENTION_MS)).toBe(PURGE_MIN_DELAY_MS);
     });
 });
