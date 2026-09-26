@@ -36,6 +36,13 @@ export function chatRedirect(path: string, chat: ChatHrefTarget, exists: Project
     return samePath(path, to) ? null : to;
 }
 
+/** The chat a route shows: `/chats/:id` or `/projects/:id/chats/:chatId`; `undefined` on any other route. */
+export function chatIdOfRoute(route: { readonly name?: string | symbol | null; readonly params: Record<string, string | string[] | undefined> }): string | undefined {
+    if (route.name === 'chat') return String(route.params['id'] ?? '');
+    if (route.name === 'project-chat') return String(route.params['chatId'] ?? '');
+    return undefined;
+}
+
 const decoded = (path: string): string => {
     try {
         return decodeURIComponent(path);

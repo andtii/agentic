@@ -1,6 +1,6 @@
 /** Where a chat opens (#929): inside its project when it has one that still exists, else `/chats/:id`. */
 import { describe, expect, it } from 'vitest';
-import { chatHref, chatRedirect, globalChatHref, projectChatHref } from '../../src/pages/chat/href';
+import { chatHref, chatIdOfRoute, chatRedirect, globalChatHref, projectChatHref } from '../../src/pages/chat/href';
 
 describe('chatHref (#929)', () => {
     it('opens a project’s chat inside the project', () => {
@@ -41,5 +41,13 @@ describe('chatRedirect (#929)', () => {
         expect(chatRedirect('/projects/p_agentic/chats/c4', { id: 'c4', projectId: 'p_docs' })).toBe('/projects/p_docs/chats/c4');
         expect(chatRedirect('/projects/p_agentic/chats/c4', { id: 'c4', projectId: null })).toBe('/chats/c4');
         expect(chatRedirect('/projects/p_agentic/chats/c4', { id: 'c4', projectId: 'p_gone' }, () => false)).toBe('/chats/c4');
+    });
+});
+
+describe('chatIdOfRoute (#929)', () => {
+    it('reads the chat of either chat route, nothing on another', () => {
+        expect(chatIdOfRoute({ name: 'chat', params: { id: 'c1' } })).toBe('c1');
+        expect(chatIdOfRoute({ name: 'project-chat', params: { id: 'p_agentic', chatId: 'c4' } })).toBe('c4');
+        expect(chatIdOfRoute({ name: 'project-chats', params: { id: 'p_agentic' } })).toBeUndefined();
     });
 });

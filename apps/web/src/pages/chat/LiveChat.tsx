@@ -58,7 +58,7 @@ import { ChatRequestsFrom, RequestCard, acceptedAt } from './entries/RequestCard
 import { closeContextDrawer, contextDrawer } from './context-drawer';
 import { useAgentDirectory } from './directory';
 import { openFeed, type FeedHandle } from './feeds';
-import { chatHref, chatRedirect } from './href';
+import { chatHref, chatIdOfRoute, chatRedirect } from './href';
 import { chatHead, chatSearchRequest, chatSettingsRequest, closeChatSearch, closeChatSettings, closeNewChat, newChatRequest, openNewChat } from './head';
 import { answerRequest, chatFailure, type InterruptionOfTurn, chatTasks, chatTitle, chatTranscript, chatWaitsOf, composeTranscript, detachedQuestions, entryTranscript, keepEntries, lastOf, membersOf, mentionsIn, notStoppedLine, queuedAgents, runActivation, stopTargets, waitingAgents, workingAgents, type SessionActorClient } from './live';
 import { LiveChatList, archiveChat, createChatWith } from './LiveChats';
@@ -142,7 +142,8 @@ export const LiveChat = component<{ id: string; projectId?: string }>(({ props }
     // once the chat and the projects are read, a page at another address replaces itself, the query kept.
     const redirect = (): string | null | undefined => {
         const s = summary.value;
-        if (!s || projects.loading) return undefined;
+        // Only while the route shows this chat: a page on its way out (another chat opened) never pulls the route back.
+        if (!s || projects.loading || chatIdOfRoute(route) !== props.id) return undefined;
         return chatRedirect(route.path, { id: props.id, projectId: s.projectId ?? null }, (p) => projects.byId(p) !== undefined);
     };
     onMounted(() => {

@@ -100,6 +100,14 @@ describe('a project’s chat inside the project (#929)', () => {
         expect(dom.querySelector('[data-page="chat"] > [data-chat-list]')).not.toBeNull();
     });
 
+    it('opening another chat from the list stays on that chat: the page on its way out never pulls the route back', async () => {
+        const { dom, router } = await mount('/chats/c1');
+        dom.querySelector<HTMLAnchorElement>('[data-chat-list] a[href="/chats/c3"]')!.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 }));
+        await until(() => router.currentRoute.path === '/chats/c3', 'the other chat');
+        for (let i = 0; i < 5; i++) await tick();
+        expect(router.currentRoute.path).toBe('/chats/c3');
+    });
+
     it('a chat opened under the wrong project moves to its own', async () => {
         const { router } = await mount('/projects/p_docs/chats/c4');
         await until(() => router.currentRoute.path === '/projects/p_agentic/chats/c4', 'the chat’s own project');

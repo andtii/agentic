@@ -13,7 +13,7 @@ import { ContextPanel } from './chat/ContextPanel';
 import { closeContextDrawer, contextDrawer, openContextDrawer } from './chat/context-drawer';
 import { dataMode } from '../data-mode';
 import { chatHead, openChatSettings, toggleChatSearch } from './chat/head';
-import { chatRedirect } from './chat/href';
+import { chatIdOfRoute, chatRedirect } from './chat/href';
 import { lookupOver } from './chat/live';
 import { LiveChat } from './chat/LiveChat';
 import { chatPullLinks } from './projects/work/pull/links';
@@ -106,7 +106,7 @@ export const ChatScreen = component<{ id: string; projectId?: string }>(({ props
     // the query kept, so the mention below is read on the page that stays.
     const redirect = (): string | null => {
         const chat = loadChat(props.id)?.chat;
-        return chat ? chatRedirect(route.path, { id: chat.id, projectId: chat.projectId ?? null }, (p) => projectNamed(p) !== undefined) : null;
+        return chat && chatIdOfRoute(route) === props.id ? chatRedirect(route.path, { id: chat.id, projectId: chat.projectId ?? null }, (p) => projectNamed(p) !== undefined) : null;
     };
     onMounted(() => {
         const to = redirect();
@@ -118,7 +118,7 @@ export const ChatScreen = component<{ id: string; projectId?: string }>(({ props
             () => queryOf(route.query.file),
             (value) => {
                 const m = mentionOfQuery(value);
-                if (!m) return;
+                if (!m || chatIdOfRoute(route) !== props.id) return;
                 mention.insert = { id: ++mentionSeq, text: `${fileToken(m.path)} ` };
                 void router.replace(route.path);
             },
