@@ -11,6 +11,8 @@ import type { MachineEntry } from '../ops/environments';
 import { effectiveWorkdir, rootsOn } from '../projects/model';
 import { WorkdirPicker } from '../workdir/WorkdirPicker';
 import { AcrossProjects } from './panels/AcrossProjects';
+import { ContextChips } from './panels/ContextChips';
+import type { ContextChip } from './project-context';
 import type { AcrossItem, Visitor } from '@agentic/platform';
 import { agentNamed, formatTime, type MockChatSummary } from '../../mock/workspace';
 import { stoppable, type AgentIdentity, type AgentLookup, type ChatTaskRow, type TimeText } from './live';
@@ -60,7 +62,11 @@ export type ContextPanelProps =
     /** Another project's manager visiting this chat (#762): its card carries its project chip and `project manager, visiting`. */
     & Define.Prop<'visitorOf', (agentId: string) => Visitor | undefined>
     /** The items this chat links across projects (#762), for the Across projects card. */
-    & Define.Prop<'across', readonly AcrossItem[]>;
+    & Define.Prop<'across', readonly AcrossItem[]>
+    /** The chat project's context chips (#940): one per enabled feature that adds a ref prefix. */
+    & Define.Prop<'chips', readonly ContextChip[]>
+    /** A context chip was pressed: its prefix goes into the composer. */
+    & Define.Event<'insertRef', string>;
 
 /** Which of a member's switchable rows is open (#453). */
 type OptionKey = 'model' | 'permissionMode';
@@ -299,6 +305,7 @@ export const ContextPanel = component<ContextPanelProps>(({ props, emit }) => {
                     </ul>
                 </section>
 
+                <ContextChips chips={props.chips ?? []} onInsert={(prefix: string) => emit('insertRef', prefix)} />
                 <AcrossProjects items={props.across ?? []} />
 
                 <section data-context-section aria-label="Tasks in this chat">

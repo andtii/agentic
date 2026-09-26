@@ -12,6 +12,10 @@
  * `onKeydown`): Enter or Tab picks the highlighted mention and does not
  * send, the arrows move, Escape dismisses. The popup lists at most
  * `MAX_MENTIONS`, prefix matches before substring ones (`filterMentions`).
+ * The same popup lists refs (#940): each of `refs` offers its items under its
+ * prefix — `#` a project's plan items, `pr:` its pull requests — and a picked
+ * one goes in as its text form (`#9 `, `pr:604 `), the one `parseRefs` reads
+ * (`suggestionsFor`).
  *
  * While a turn runs Send stays enabled only when the agent can be steered
  * (`steers`), and Cancel appears only when it can be cancelled
@@ -47,7 +51,8 @@ import { ErrorNote } from '../kit/ErrorNote.js';
 import { Icon } from '../kit/icons.js';
 import { formatBytes } from '../thread/text.js';
 import { aiComposerAnatomy } from './anatomy.js';
-import { filterMentions, type Mention } from './mentions.js';
+import type { Mention } from './mentions.js';
+import { SUGGEST_TRIGGER, suggestionsFor, type ComposerSuggestion, type RefSource } from './refs.js';
 
 const SCOPE = aiComposerAnatomy.scope;
 
@@ -84,6 +89,8 @@ export interface Recipient {
     readonly hue?: AgentHue;
     /** The role caption after the chip (`coordinator`). */
     readonly role?: string;
+    /** Another project's manager (#940): its project, drawn as a chip in the recipient's. */
+    readonly project?: string;
 }
 
 /** Text a host puts into the draft; a new `id` inserts again (the same text twice is two inserts). */
@@ -128,6 +135,8 @@ export type ComposerProps =
     & Define.Prop<'hint', string, false>
     /** Who can be mentioned with `@`. */
     & Define.Prop<'mentions', readonly Mention[], false>
+    /** Refs that can be linked, one source per prefix (`#` plan items, `pr:` pull requests). */
+    & Define.Prop<'refs', readonly RefSource[], false>
     /** The chips — the host's upload state for the files it took from `files`. */
     & Define.Prop<'attachments', readonly Attachment[], false>
     /** The picker's `accept` filter (`image/*,.pdf`); anything by default. */
@@ -138,8 +147,9 @@ export type ComposerProps =
     & Define.Prop<'minRows', number, false>
     & Define.Prop<'maxRows', number, false>;
 
-const mentionKey = (m: Mention): string => m.id;
-const mentionLabel = (m: Mention): string => m.label;
+const suggestionKey = (s: ComposerSuggestion): string => s.key;
+const suggestionLabel = (s: ComposerSuggestion): string => s.label;
+const suggestionInsert = ({ item, prefix, label }: { item?: ComposerSuggestion; prefix: string; label: string }): string => `${item ? item.insert : `${prefix}${label}`} `;
 
 export const Composer = component<ComposerProps>(({ props, emit, signal }) => {
     /** `query` is the mention token at the caret — the Combobox's `inputValue`. */
@@ -198,7 +208,7 @@ export const Composer = component<ComposerProps>(({ props, emit, signal }) => {
     };
 
     /** The popup's list, ranked and capped here — the Combobox shows it as given (`filter={false}`). */
-    const mentionItems = (): Mention[] => (props.mentions?.length ? filterMentions(props.mentions, st.query) : []);
+    const suggestionItems = (): ComposerSuggestion[] => (st.query ? suggestionsFor(st.query, props.mentions ?? [], props.refs ?? []) : []);
 
     const send = (): void => {
         const text = st.draft.trim();
@@ -266,6 +276,12 @@ export const Composer = component<ComposerProps>(({ props, emit, signal }) => {
                                 <AgentTile name={r.name} hue={r.hue} size={18} />
                                 <span>{r.name}</span>
                                 {r.role && <small>{r.role}</small>}
+                                {r.project && (
+                                    <small data-recipient-project="">
+                                        <Icon name="folder" size={12} />
+                                        {r.project}
+                                    </small>
+                                )}
                             </span>
                         ))}
                         {hint && (
@@ -293,7 +309,7 @@ export const Composer = component<ComposerProps>(({ props, emit, signal }) => {
                     </ul>
                 )}
                 <div data-scope={SCOPE} data-part="input">
-                    <Combobox.Root trigger="@" anchor={caretAnchor} items={mentionItems()} itemKey={mentionKey} itemLabel={mentionLabel} filter={false} model:inputValue={() => st.query}>
+                    <Combobox.Root trigger={SUGGEST_TRIGGER} anchor={caretAnchor} items={suggestionItems()} itemKey={suggestionKey} itemLabel={suggestionLabel} itemInsert={suggestionInsert} filter={false} model:inputValue={() => st.query}>
                         <Textarea.Root model={() => st.draft} minRows={props.minRows ?? 1} maxRows={props.maxRows ?? 8} disabled={props.disabled} name="message">
                             <Textarea.Label visuallyHidden>Message</Textarea.Label>
                             <Textarea.Textarea
