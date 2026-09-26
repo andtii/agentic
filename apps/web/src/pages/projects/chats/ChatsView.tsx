@@ -14,6 +14,7 @@ import { CHAT_GROUPS, GROUP_LABELS, chatDefaults, chatGroupOf, defaultsTail, gro
 import { featureViewsOf } from '../features/registry';
 import { chatHref } from '../../chat/href';
 import { newChatInProjectHref } from '../../chat/new-chat-prefill';
+import { MoveRefused, type MoveOptions } from './move';
 
 export type ChatsViewProps =
     & Define.Prop<'project', ProjectRecord, true>
@@ -27,8 +28,11 @@ export type ChatsViewProps =
     & Define.Prop<'age', (at: number) => string, true>
     & Define.Prop<'busy', boolean>
     & Define.Prop<'error', string>
-    /** "Move" in the dialog: these chats into this project (`Chat.setProject`); resolves when done, so the dialog closes. */
-    & Define.Prop<'onMove', (chatIds: readonly string[]) => Promise<void>, true>;
+    /**
+     * "Move" in the dialog: these chats into this project (`Chat.setProject`); resolves when done, so the dialog closes.
+     * A `MoveRefused` rejection (#947) shows its reason in the dialog with "Move anyway", which calls it again with `force`.
+     */
+    & Define.Prop<'onMove', (chatIds: readonly string[], options?: MoveOptions) => Promise<void>, true>;
 
 const PILLS: Readonly<Record<Exclude<ChatGroup, 'archived'>, { readonly tone: 'needs-you' | 'working' | 'muted'; readonly label: string; readonly hollow: boolean }>> = {
     'needs-you': { tone: 'needs-you', label: 'NEEDS YOU', hollow: false },
@@ -42,23 +46,31 @@ const chipHref = (projectId: string, w: WorkChip): string | null =>
 const chipLabel = (w: WorkChip): string => (w.kind === 'task' ? w.id : w.kind === 'pull' ? `#${w.number}` : `${w.count} tasks`);
 
 export const ChatsView = component<ChatsViewProps>(({ props }) => {
-    const st = signal({ q: '', open: { archived: false } as Record<string, boolean>, moving: false, pick: [] as string[] });
+    const st = signal({ q: '', open: { archived: false } as Record<string, boolean>, moving: false, pick: [] as string[], refused: null as MoveRefused | null });
     const collapsed = (g: ChatGroup): boolean => (g === 'archived' ? !st.open[g] : st.open[g] === false);
     const toggle = (g: ChatGroup): void => {
         st.open = { ...st.open, [g]: collapsed(g) };
     };
     const openMove = (): void => {
         st.pick = unassignedChats(props.chats, props.projects, props.project.id).filter((u) => u.suggested).map((u) => u.chat.id);
+        st.refused = null;
         st.moving = true;
     };
-    const move = async (): Promise<void> => {
-        if (!st.pick.length) return;
+    const run = async (ids: readonly string[], options?: MoveOptions): Promise<void> => {
+        st.refused = null;
         try {
-            await props.onMove([...st.pick]);
+            await props.onMove(ids, options);
             st.moving = false;
-        } catch {
-            // The page shows the error; the dialog stays open so the move can be retried.
+        } catch (e) {
+            // A refusal is shown in the dialog with "Move anyway"; any other error the page shows. The dialog stays open.
+            if (e instanceof MoveRefused) st.refused = e;
         }
+    };
+    const move = async (): Promise<void> => {
+        if (st.pick.length) await run([...st.pick]);
+    };
+    const moveAnyway = async (): Promise<void> => {
+        if (st.refused) await run(st.refused.chatIds, { force: true });
     };
 
     const row = (c: ProjectChatRow) => {
@@ -176,8 +188,14 @@ export const ChatsView = component<ChatsViewProps>(({ props }) => {
                         submitLabel={st.pick.length ? `Move ${st.pick.length}` : 'Move'}
                         busy={props.busy}
                         onSubmit={() => { void move(); }}
-                        onCancel={() => { st.moving = false; }}
+                        onCancel={() => { st.moving = false; st.refused = null; }}
                     >
+                        {st.refused ? (
+                            <div data-project-chats-refused="">
+                                <ErrorNote>{`Not moved: ${st.refused.reason}`}</ErrorNote>
+                                <Button intent="danger" disabled={props.busy} onClick={() => { void moveAnyway(); }}>Move anyway</Button>
+                            </div>
+                        ) : null}
                         <fieldset data-project-chats-move>
                             <legend>Chats in no project</legend>
                             {outside.map((u) => (
