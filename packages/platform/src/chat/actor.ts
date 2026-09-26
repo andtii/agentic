@@ -173,7 +173,7 @@ interface RoutingClient {
 async function releaseWithin(release: Promise<void>, timeoutMs: number): Promise<string | undefined> {
     let timer: ReturnType<typeof setTimeout> | undefined;
     const timeout = new Promise<string>((resolve) => {
-        timer = setTimeout(() => resolve(`the release did not finish within ${Math.round(timeoutMs / 1000)} s`), timeoutMs);
+        timer = setTimeout(() => resolve(`the release did not finish within ${timeoutMs < 1_000 ? `${timeoutMs} ms` : `${Math.round(timeoutMs / 1000)} s`}`), timeoutMs);
     });
     try {
         return await Promise.race([release.then(() => undefined, (e: unknown) => (e instanceof Error ? e.message : String(e))), timeout]);

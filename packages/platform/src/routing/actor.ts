@@ -1956,7 +1956,9 @@ export function defineRoutingActor(ports: RoutingPorts) {
                     const summary = await chat(chatId)
                         .get()
                         .catch(() => undefined);
-                    if (before ? summary?.projectId !== projectId : reason === 'project-changed' && (!summary || summary.projectId === projectId)) return;
+                    // Asked first, a chat that cannot be read is not released: the move must not go ahead as if it were.
+                    if (before && !summary) throw new ServerFnError(409, `the chat ${chatId} could not be read to release it`);
+                    if (before ? summary!.projectId !== projectId : reason === 'project-changed' && (!summary || summary.projectId === projectId)) return;
                     const project = await as(Workspace, workspaceKey(workspaceId))
                         .projects()
                         .then((all) => all.find((p) => p.id === projectId), () => undefined);
