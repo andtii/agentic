@@ -10,13 +10,18 @@
  * Leases: every call first expires the leases that ran out and then renews the calling agent's; a durable
  * reminder (`PLAN_LEASE_REMINDER`, one-shot, re-armed for the next lease end after every write) expires them with
  * nobody calling. Expiry puts the item back at the top of its assignee's queue and leaves the manager a notice.
- * Notices (lease ran out, touches overlap, handoffs) wait on the actor until their addressee takes them
- * (`takeNotices`, which the plan tools do on each call).
+ * Notices (lease ran out, touches overlap, handoffs) wake their addressee once the turn is saved (#938, `wake.ts`): a
+ * chat message addressed to an agent, an Inbox row for a person; one that reaches nobody waits on the actor until its
+ * addressee takes it (`takeNotices`, which the plan tools do on each call).
+ *
+ * The Plan feature's project settings are enforced here (#938, `settings.ts`): `claimLimit` (a member's own limit
+ * overriding it), `leaseMinutes`, `agentsMayTick`, and `starter` for a new plan given no phases. A merged pull request
+ * marks the items handed off from its task done (`pullMerged`, called by the Pulls actor).
  *
  * Every change is a line in the item's activity and a `plan.changed` / `plan.lease-expired` audit record with
  * its actor. Workers eviction rule: every mutation ends in `ctx.save()` inside the turn.
  */
-import { memberLimit, type AgentId, type Plan, type PlanActor, type PlanItem, type PlanItemState, type Principal, type ProjectId, type ProjectRecord, type Ref, type WorkspaceId } from '@agentic/core';
+import { type AgentId, type ChatId, type Plan, type PlanActor, type PlanItem, type PlanItemState, type Principal, type ProjectId, type ProjectRecord, type Ref, type TaskId, type WorkspaceId } from '@agentic/core';
 import { defineActor, type ActorContext, type ActorPolicy, type AnyActorDefinition } from '@sigx/actors';
 import { ServerFnError } from '@sigx/server';
 import { auditPort, type AuditPort } from '../audit/port.js';
@@ -53,6 +58,7 @@ import {
     expireLeases,
     handoff,
     nextFor,
+    pullMerged,
     nextLeaseEnd,
     openItems,
     planOf,
@@ -65,6 +71,7 @@ import {
     viewState,
     AFTER_MAX,
     type ClaimOptions,
+    type HandoffOptions,
     type OpenPlanItem,
     type Outcome,
     type PlanBook,
@@ -77,6 +84,8 @@ import {
     type StoredItem,
     type TouchesWarning
 } from './rules.js';
+import { planLimitOf, planSettings } from './settings.js';
+import { chatPlanWake, type PlanWakePort } from './wake.js';
 
 // ---------------------------------------------------------------------------
 // State and options
@@ -88,9 +97,12 @@ export interface PlanState extends PlanBook {
     leaseAlarm?: number;
 }
 
-/** Where the actor reads the project's manager, members and limits. */
+/** What the actor reads of a project: its manager, members and limits, and the Plan feature's settings. */
+export type PlanProjectInfo = Pick<ProjectRecord, 'id' | 'members'> & Partial<Pick<ProjectRecord, 'features'>>;
+
+/** Where the actor reads the project's manager, members, limits and Plan settings. */
 export interface PlanProjectPort {
-    project(ctx: ActorContext<PlanState>, workspaceId: WorkspaceId, projectId: ProjectId): Promise<Pick<ProjectRecord, 'id' | 'members'> | undefined>;
+    project(ctx: ActorContext<PlanState>, workspaceId: WorkspaceId, projectId: ProjectId): Promise<PlanProjectInfo | undefined>;
 }
 
 /** The production port: the project record on the Workspace root, over a hop. */
@@ -125,6 +137,8 @@ export interface PlanActorOptions {
     readonly allowAnonymous?: true;
     /** Where `plan.*` records go. Default: the workspace's Audit log. */
     readonly audit?: AuditPort;
+    /** How a notice wakes its addressee (#938). Default: `chatPlanWake()` — a chat message for an agent, an Inbox row for a person. */
+    readonly wake?: PlanWakePort;
 }
 
 /** The most item numbers one `itemStates` call reads. */
@@ -157,6 +171,26 @@ const principalActor = (p: Principal | null | undefined): PlanActor | null => {
 
 const byOf = (a: PlanActor | null): string => (a === null ? PLAN_BY : a.kind === 'agent' ? `agent:${a.agentId}` : `user:${a.userId}`);
 
+const labelOf = (a: PlanActor): string => (a.kind === 'agent' ? `agent:${a.agentId}` : `user:${a.userId}`);
+
+/** Over the wire nobody calls it: the Pulls actor reaches `pullMerged` through `ctx.actor`, which runs no policy. */
+const never: ActorPolicy = () => false;
+
+/** The call context for `project` (absent: no manager, no members, every default). */
+function planCallOf(project: PlanProjectInfo | undefined, at: number, actor: PlanActor | null): PlanCall {
+    const settings = planSettings(project);
+    return {
+        now: at,
+        actor,
+        manager: project?.members.coordinator ?? null,
+        members: project?.members.agentIds ?? [],
+        limitOf: (agentId: AgentId) => (project ? planLimitOf(project, agentId) : 1),
+        leaseMs: settings.leaseMs,
+        agentsMayTick: settings.agentsMayTick,
+        ...(settings.starter ? { starter: settings.starter } : {})
+    };
+}
+
 // ---------------------------------------------------------------------------
 // Definition
 
@@ -165,6 +199,7 @@ export function definePlanActor(options: PlanActorOptions = {}) {
     const audit = options.audit ?? auditPort();
     const projects = options.projects ?? workspacePlanProjects;
     const authorize: ActorPolicy | readonly ActorPolicy[] = options.authorize ?? sameWorkspace;
+    const wakePort = options.wake ?? chatPlanWake();
 
     type Ctx = ActorContext<PlanState>;
 
@@ -198,8 +233,62 @@ export function definePlanActor(options: PlanActorOptions = {}) {
         }
     };
 
-    /** Save, re-arm the lease reminder for the next lease end, then audit — all inside the turn. */
-    const commit = async (ctx: Ctx, changes: readonly PlanChange[], at: number): Promise<void> => {
+    /** What a turn remembers to wake its addressees: the first new notice, the caller, and the tasks on the items before. */
+    interface Turn {
+        readonly from: number;
+        readonly caller: PlanActor | null;
+        readonly callerTask?: TaskId;
+        readonly tasks: ReadonlyMap<number, TaskId>;
+    }
+    const turnOf = (ctx: Ctx, caller: PlanActor | null): Turn => {
+        const tasks = new Map<number, TaskId>();
+        for (const i of Object.values(ctx.state.items)) {
+            const t = i.claim?.taskId ?? i.handedOff?.taskId ?? i.finishedClaim?.taskId;
+            if (t !== undefined) tasks.set(i.id, t);
+        }
+        const p = ctx.principal as Principal | null;
+        return { from: ctx.state.nextNotice, caller, ...(p?.kind === 'agent' && p.taskId ? { callerTask: p.taskId } : {}), tasks };
+    };
+
+    /**
+     * Wake the addressees of the notices this turn left (#938), each once, the caller excepted (its plan tools take
+     * them in-band). Woken notices leave the actor. Never a gate: a failure leaves them waiting.
+     */
+    const wakeAddressees = async (ctx: Ctx, turn: Turn): Promise<void> => {
+        const s = ctx.state;
+        const fresh = s.notices.filter((n) => n.seq >= turn.from && !(turn.caller && labelOf(n.to) === labelOf(turn.caller)));
+        if (!fresh.length) return;
+        const byTo = new Map<string, PlanNotice[]>();
+        for (const n of fresh) byTo.set(labelOf(n.to), [...(byTo.get(labelOf(n.to)) ?? []), n]);
+        const woken = new Set<number>();
+        for (const notices of byTo.values()) {
+            const tasks: TaskId[] = [];
+            const chats: ChatId[] = [];
+            const add = <T,>(into: T[], v: T | undefined): void => {
+                if (v !== undefined && !into.includes(v)) into.push(v);
+            };
+            for (const n of notices) {
+                for (const id of [n.itemId, n.otherItemId]) {
+                    if (id === undefined) continue;
+                    const item = s.items[String(id)];
+                    add(tasks, item?.claim?.taskId ?? item?.handedOff?.taskId ?? turn.tasks.get(id));
+                    add(chats, item ? s.plans[item.planId]?.originChatId : undefined);
+                }
+            }
+            add(tasks, turn.callerTask);
+            try {
+                if (await wakePort.wake({ workspaceId: s.workspaceId, projectId: s.projectId, to: notices[0]!.to, notices, tasks, chats })) for (const n of notices) woken.add(n.seq);
+            } catch (error) {
+                console.warn(`[plan] waking ${labelOf(notices[0]!.to)} failed:`, error);
+            }
+        }
+        if (!woken.size) return;
+        s.notices = s.notices.filter((n) => !woken.has(n.seq));
+        await ctx.save();
+    };
+
+    /** Save, re-arm the lease reminder for the next lease end, audit, then wake the notices' addressees — all inside the turn. */
+    const commit = async (ctx: Ctx, changes: readonly PlanChange[], at: number, turn?: Turn): Promise<void> => {
         const s = ctx.state;
         const due = nextLeaseEnd(s);
         // Re-arm only when the next end moved earlier (or there is none left): a renewal moves it later, and a
@@ -215,6 +304,7 @@ export function definePlanActor(options: PlanActorOptions = {}) {
             else await ctx.reminders.set(PLAN_LEASE_REMINDER, { due: Math.max(0, due - at) });
         }
         await record(ctx, changes, at);
+        if (turn) await wakeAddressees(ctx, turn);
     };
 
     const toServerError = (error: unknown): never => {
@@ -225,6 +315,7 @@ export function definePlanActor(options: PlanActorOptions = {}) {
     const definition = defineActor({
         type: PLAN_TYPE,
         authorize,
+        methodAuthorize: { pullMerged: never },
         // The cross-project reads never wait behind a turn: a Plan actor mid-claim reads another that may be reading it.
         methodReentrancy: { itemStates: 'always', linkItems: 'always' },
         ...(options.allowAnonymous ? { allowAnonymous: true as const } : {}),
@@ -242,14 +333,7 @@ export function definePlanActor(options: PlanActorOptions = {}) {
             const callOf = async (actor: PlanActor | null): Promise<PlanCall> => {
                 const s = ctx.state;
                 const project = await projects.project(ctx, s.workspaceId, s.projectId).catch(() => undefined);
-                const members = project?.members;
-                return {
-                    now: now(),
-                    actor,
-                    manager: members?.coordinator ?? null,
-                    members: members?.agentIds ?? [],
-                    limitOf: (agentId: AgentId) => (project ? memberLimit(project, agentId) : 1)
-                };
+                return planCallOf(project, now(), actor);
             };
 
             /**
@@ -260,17 +344,23 @@ export function definePlanActor(options: PlanActorOptions = {}) {
                 requireKey();
                 const actor = principalActor(ctx.principal as Principal | null);
                 if (!actor) throw new ServerFnError(403, '[plan] a plan change needs an agent or a person');
+                return writeAs(actor, rule);
+            };
+
+            /** `write` as `actor` (`null`: the platform itself). */
+            const writeAs = async <T,>(actor: PlanActor | null, rule: (book: PlanBook, call: PlanCall) => Outcome<T>): Promise<T> => {
                 const call = await callOf(actor);
                 const s = ctx.state;
+                const turn = turnOf(ctx, actor);
                 const changes: PlanChange[] = [...expireLeases(s, call)];
                 renewLeases(s, call);
                 try {
                     const out = rule(s, call);
                     changes.push(...out.changes);
-                    await commit(ctx, changes, call.now);
+                    await commit(ctx, changes, call.now, turn);
                     return out.value;
                 } catch (error) {
-                    await commit(ctx, changes, call.now);
+                    await commit(ctx, changes, call.now, turn);
                     return toServerError(error);
                 }
             };
@@ -278,8 +368,10 @@ export function definePlanActor(options: PlanActorOptions = {}) {
             /** A read also expires and renews: an agent reading its plan is still on its items. */
             const read = async <T>(fn: (book: PlanBook, call: PlanCall) => T): Promise<T> => {
                 requireKey();
-                const call = await callOf(principalActor(ctx.principal as Principal | null));
+                const actor = principalActor(ctx.principal as Principal | null);
+                const call = await callOf(actor);
                 const s = ctx.state;
+                const turn = turnOf(ctx, actor);
                 const changes = expireLeases(s, call);
                 const renewed = renewLeases(s, call);
                 try {
@@ -287,7 +379,7 @@ export function definePlanActor(options: PlanActorOptions = {}) {
                 } catch (error) {
                     return toServerError(error);
                 } finally {
-                    if (changes.length || renewed) await commit(ctx, changes, call.now);
+                    if (changes.length || renewed) await commit(ctx, changes, call.now, turn);
                 }
             };
 
@@ -425,9 +517,22 @@ export function definePlanActor(options: PlanActorOptions = {}) {
                     return viewOf(await write((b, c) => addRef(b, c, itemId, ref)));
                 },
 
-                /** Release an item with a note: to the top of `to`'s queue, or `null` to the open pool. */
-                async handoff(itemId: number, to: PlanActor | null, note: string): Promise<PlanItem> {
-                    return viewOf(await write((b, c) => handoff(b, c, itemId, to === null ? null : checkActor(to), note)));
+                /**
+                 * Release an item with a note: to the top of `to`'s queue, or `null` to the open pool. `handoffOptions.taskId`
+                 * is the task it is handed off from (default the claim's): when that task's pull request merges, it is done.
+                 */
+                async handoff(itemId: number, to: PlanActor | null, note: string, handoffOptions?: HandoffOptions): Promise<PlanItem> {
+                    return viewOf(await write((b, c) => handoff(b, c, itemId, to === null ? null : checkActor(to), note, handoffOptions ?? {})));
+                },
+
+                /**
+                 * A pull request of the project merged (#938): the items handed off from its task, or naming it among
+                 * their refs, are done. The Pulls actor's hop only (`methodAuthorize: never` over the wire).
+                 */
+                async pullMerged(pr: { readonly number: number; readonly taskId?: TaskId }): Promise<number[]> {
+                    requireKey();
+                    const done = await writeAs(null, (b, c) => pullMerged(b, c, pr));
+                    return done.map((i) => i.id);
                 },
 
                 /** Renew the calling agent's leases (any plan call does too). Returns how many it holds. */
@@ -499,11 +604,12 @@ export function definePlanActor(options: PlanActorOptions = {}) {
             if (name !== PLAN_LEASE_REMINDER || parsePlanKey(ctx.key) === null) return;
             const s = ctx.state;
             const project = await projects.project(ctx, s.workspaceId, s.projectId).catch(() => undefined);
-            const call: PlanCall = { now: now(), actor: null, manager: project?.members.coordinator ?? null, members: project?.members.agentIds ?? [], limitOf: () => 1 };
+            const call = planCallOf(project, now(), null);
+            const turn = turnOf(ctx, null);
             const changes = expireLeases(s, call);
             // Force a re-arm: the reminder that fired is spent.
             delete s.leaseAlarm;
-            await commit(ctx, changes, call.now);
+            await commit(ctx, changes, call.now, turn);
         }
     });
     self = definition as unknown as AnyActorDefinition;

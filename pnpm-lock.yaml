@@ -484,6 +484,9 @@ importers:
       '@agentic/memory':
         specifier: workspace:*
         version: link:../memory
+      '@agentic/plugins-plan':
+        specifier: workspace:*
+        version: link:../plugins-plan
       '@agentic/runtimes':
         specifier: workspace:*
         version: link:../runtimes

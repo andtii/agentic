@@ -22,6 +22,7 @@
     "@agentic/core": "workspace:*",
     "@agentic/daemon-protocol": "workspace:*",
     "@agentic/memory": "workspace:*",
+    "@agentic/plugins-plan": "workspace:*",
     "@agentic/runtimes": "workspace:*",
     "@aigntiq/conduit": "catalog:",
     "@sigx/actors": "catalog:",

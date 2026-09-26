@@ -270,14 +270,14 @@ export const planListInput = z.object({
     mine: z.boolean().optional().describe('Only items assigned to or claimed by you.')
 });
 export const planNextInput = z.object({ plan: planId });
-export const planClaimInput = z.object({ item: itemNo, leaseMinutes: z.number().int().min(1).max(240).optional().describe('How long the lease runs before it needs renewing (default 30). Any plan_* call renews it.') });
+export const planClaimInput = z.object({ item: itemNo, leaseMinutes: z.number().int().min(1).max(240).optional().describe('How long the lease runs before it needs renewing (default: the project’s lease, 30 unless set). Any plan_* call renews it.') });
 export const planAssignInput = z.object({ item: itemNo, to: handle, index: z.number().int().min(0).optional().describe('Position in their queue, 0 first; absent: the end.') });
 export const planUpdateInput = z.object({
     item: itemNo,
     check: z.array(z.number().int().min(0)).optional().describe('Done-when lines to tick, 0-based.'),
     uncheck: z.array(z.number().int().min(0)).optional().describe('Done-when lines to untick, 0-based.'),
     note: z.string().min(1).optional().describe('A note for the item’s History; refs in the shared syntax (`#9`, `pr:604`, `path/file.ts:38-41`) are linked.'),
-    state: z.enum(['ready', 'needs-you', 'blocked', 'done', 'stuck']).optional().describe('A new state. `done` needs every done-when ticked; use plan_claim to start an item.'),
+    state: z.enum(['ready', 'needs-you', 'blocked', 'done', 'stuck']).optional().describe('A new state. `done` needs every done-when ticked, and the project letting agents tick; use plan_claim to start an item.'),
     after: z
         .array(z.union([z.number().int().min(1), z.string().min(1).max(300)]))
         .max(50)
@@ -343,7 +343,7 @@ export function planTools(port: PlanPort | undefined) {
         }),
         defineTool({
             name: CLAIM,
-            description: 'Start an item: you hold it with a lease (default 30 minutes) that every plan_* call renews. Refused while it waits on unfinished items, is someone else’s, or you already hold your limit.',
+            description: 'Start an item: you hold it with a lease (the project’s, 30 minutes unless set) that every plan_* call renews. Refused while it waits on unfinished items, is someone else’s, or you already hold your limit.',
             input: planClaimInput,
             annotations: WRITE,
             execute: async (input, ctx) => {
@@ -373,7 +373,7 @@ export function planTools(port: PlanPort | undefined) {
         }),
         defineTool({
             name: UPDATE,
-            description: 'Tick or untick done-when lines, add a note to the item’s History, change its state, or (project manager only) replace what it waits on with `after` — including `project#n` items of other projects. `done` needs every done-when ticked; otherwise a person marks it done.',
+            description: 'Tick or untick done-when lines, add a note to the item’s History, change its state, or (project manager only) replace what it waits on with `after` — including `project#n` items of other projects. `done` needs every done-when ticked; otherwise a person marks it done. Where the project does not let agents tick, a person ticks and marks it done: add a note or set needs-you to ask.',
             input: planUpdateInput,
             annotations: WRITE,
             execute: async (input, ctx) => {
@@ -430,7 +430,7 @@ export function planTools(port: PlanPort | undefined) {
         }),
         defineTool({
             name: HANDOFF,
-            description: 'Release an item you hold, with a note, to another member (`to`) or back to whoever assigned it. The note and the item’s refs go with it.',
+            description: 'Release an item you hold, with a note, to another member (`to`) or back to whoever assigned it; they are told at once. The note and the item’s refs go with it. Hand off once your pull request is open: when it merges, the item is marked done.',
             input: planHandoffInput,
             annotations: WRITE,
             execute: async (input, ctx) => {

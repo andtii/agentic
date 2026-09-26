@@ -91,6 +91,11 @@ export interface StoredItem {
      * item was marked done still finds the item by its task (`mergedPlanItems`). Cleared when the item is reopened.
      */
     finishedClaim?: { agentId: AgentId; taskId: TaskId; at: number };
+    /**
+     * The task an item was handed off from (#938): when that task's pull request merges, the item is done
+     * (`pullMerged`). Kept until the item is done (it becomes `finishedClaim`) or reopened.
+     */
+    handedOff?: { agentId: AgentId; taskId: TaskId; at: number };
     after: number[];
     touches: string[];
     refs: Ref[];
@@ -197,8 +202,20 @@ export interface PlanCall {
     readonly manager: AgentId | null;
     /** The project's agent members. */
     readonly members: readonly AgentId[];
-    /** How many items `agentId` may work on at once (`memberLimit`). */
+    /** How many items `agentId` may work on at once (`memberLimit`, else the project's `claimLimit`). */
     readonly limitOf: (agentId: AgentId) => number;
+    /** The project's lease (`leaseMinutes`), for a claim that names none; default `PLAN_LEASE_DEFAULT_MS`. */
+    readonly leaseMs?: number;
+    /** Whether agents may tick done-when lines and mark an item done (`agentsMayTick`); default true. */
+    readonly agentsMayTick?: boolean;
+    /** The template a new plan without phases starts from (`starter`). */
+    readonly starter?: PlanStarter;
+}
+
+/** A starter plan: phases of item titles (`@agentic/plugins-plan`'s `PlanTemplate`). */
+export interface PlanStarter {
+    readonly title: string;
+    readonly phases: readonly { readonly title: string; readonly items: readonly string[] }[];
 }
 
 /** One change, for History. */
@@ -396,7 +413,9 @@ function tell(book: PlanBook, notice: Omit<PlanNotice, 'seq'>): void {
 
 function finish(book: PlanBook, item: StoredItem, call: PlanCall, how: string): PlanChange {
     if (item.claim?.taskId !== undefined) item.finishedClaim = { agentId: item.claim.agentId, taskId: item.claim.taskId, at: call.now };
+    else if (item.handedOff) item.finishedClaim = { ...item.handedOff, at: call.now };
     delete item.claim;
+    delete item.handedOff;
     dequeue(book, item.id);
     item.state = 'done';
     note(item, call.now, call.actor, how);
@@ -463,7 +482,9 @@ export function createPlan(book: PlanBook, call: PlanCall, input: PlanCreateInpu
     const title = text(input.title, 'a plan title', TITLE_MAX);
     const description = optionalText(input.description, 'a plan description', TEXT_MAX);
     const originChatId = optionalText(input.originChatId, 'originChatId', 200) as ChatId | undefined;
-    const phases = list(input.phases, 'phases', PHASES_MAX, (p) => p as { title: string; items?: readonly PlanItemInput[] });
+    // A plan given no phases starts from the project's starter template, when it names one (#938).
+    const seeded = input.phases === undefined && call.starter ? call.starter.phases.map((p) => ({ title: p.title, items: p.items.map((title) => ({ title })) })) : input.phases;
+    const phases = list(seeded, 'phases', PHASES_MAX, (p) => p as { title: string; items?: readonly PlanItemInput[] });
     const plan: StoredPlan = {
         id: `plan-${book.nextPlan}`,
         title,
@@ -650,7 +671,7 @@ export function claim(book: PlanBook, call: PlanCall, itemId: number, options: C
     if (actor.kind !== 'agent') fail('forbidden', 'only an agent claims an item; a person assigns it');
     const agentId = (actor as { agentId: AgentId }).agentId;
     const item = itemOf(book, itemId);
-    const leaseMs = options.leaseMs ?? PLAN_LEASE_DEFAULT_MS;
+    const leaseMs = options.leaseMs ?? call.leaseMs ?? PLAN_LEASE_DEFAULT_MS;
     if (!Number.isSafeInteger(leaseMs) || leaseMs < LEASE_MIN_MS || leaseMs > LEASE_MAX_MS) fail('invalid', `leaseMs must be between ${LEASE_MIN_MS} and ${LEASE_MAX_MS}`);
     if (options.taskId !== undefined && (typeof options.taskId !== 'string' || !options.taskId.trim() || options.taskId.length > 200)) fail('invalid', 'taskId must be a task id');
     const refusal = claimRefusal(book, call, agentId, item);
@@ -688,11 +709,19 @@ export function claim(book: PlanBook, call: PlanCall, itemId: number, options: C
     };
 }
 
+/** What `handoff` takes besides the target and the note. */
+export interface HandoffOptions {
+    /** The task the item is handed off from (the caller's); default the claim's. Its merge marks the item done. */
+    readonly taskId?: TaskId;
+}
+
 /**
  * Release an item with a note: to `to`'s queue top, or (`to` null) to the open pool. The claimer, the assignee
- * or a manager may; `to` is told.
+ * or a manager may. `to` is told; when someone else moves it (a person dragging it on the board, the manager), the
+ * note goes to its current owner — the agent working it, else its assignee — too (#938). The task it is handed off
+ * from is kept: when that task's pull request merges, the item is done (`pullMerged`).
  */
-export function handoff(book: PlanBook, call: PlanCall, itemId: number, to: PlanActor | null, noteText: string): Outcome<StoredItem> {
+export function handoff(book: PlanBook, call: PlanCall, itemId: number, to: PlanActor | null, noteText: string, options: HandoffOptions = {}): Outcome<StoredItem> {
     const actor = requireActor(call);
     const item = itemOf(book, itemId);
     if (item.state === 'done') fail('done', `#${item.id} is done`);
@@ -701,21 +730,52 @@ export function handoff(book: PlanBook, call: PlanCall, itemId: number, to: Plan
     if (!isManager(call) && !sameActor(holder, actor) && !sameActor(item.assignee, actor)) fail('forbidden', `only whoever holds #${item.id}, its assignee or the project manager may hand it off`);
     const target = to === null ? null : checkActor(to);
     if (target?.kind === 'agent' && !call.members.includes(target.agentId)) fail('invalid', `@${target.agentId} is not a member of this project`);
+    if (options.taskId !== undefined && (typeof options.taskId !== 'string' || !options.taskId.trim() || options.taskId.length > 200)) fail('invalid', 'taskId must be a task id');
+    const owner = holder ?? item.assignee;
+    // The task the work was done in: the caller's own when it is an agent that holds or owns the item, else the claim's.
+    const fromAgent = holder ?? (item.assignee?.kind === 'agent' ? item.assignee : undefined);
+    const taskId = (sameActor(fromAgent, actor) ? options.taskId : undefined) ?? (holder ? item.claim!.taskId : undefined);
+    if (fromAgent?.kind === 'agent' && taskId !== undefined) item.handedOff = { agentId: fromAgent.agentId, taskId, at: call.now };
     delete item.claim;
     if (item.state === 'claimed') item.state = 'ready';
+    const whereTo = target ? who(target) : 'the open pool';
     if (target) {
         item.assignee = target;
         item.assignedBy = actor;
         enqueue(book, target, item.id, 0);
-        tell(book, { at: call.now, to: target, kind: 'handoff', itemId: item.id, text: `${who(actor)} handed #${item.id} to you: ${line}` });
+        if (!sameActor(target, actor)) tell(book, { at: call.now, to: target, kind: 'handoff', itemId: item.id, text: `${who(actor)} handed #${item.id} to you: ${line}` });
     } else {
         dequeue(book, item.id);
         delete item.assignee;
         delete item.assignedBy;
         if (call.manager !== null && !sameActor(actor, agentActor(call.manager))) tell(book, { at: call.now, to: agentActor(call.manager), kind: 'handoff', itemId: item.id, text: `${who(actor)} released #${item.id} to the open pool: ${line}` });
     }
-    note(item, call.now, actor, `handed off to ${target ? who(target) : 'the open pool'}: ${line}`);
-    return { value: item, changes: [{ op: 'handed-off', actor, planId: item.planId, itemId: item.id, summary: `#${item.id} handed off to ${target ? who(target) : 'the open pool'}: ${item.title}` }] };
+    // Taken off its owner by someone else: the owner gets the note (the board's "the handoff note went to its owner").
+    const toManager = target === null && call.manager !== null && sameActor(owner, agentActor(call.manager));
+    if (owner && !sameActor(owner, actor) && !sameActor(owner, target ?? undefined) && !toManager) {
+        tell(book, { at: call.now, to: owner, kind: 'handoff', itemId: item.id, text: `${who(actor)} moved #${item.id} from you to ${whereTo}: ${line}` });
+    }
+    note(item, call.now, actor, `handed off to ${whereTo}: ${line}`);
+    return { value: item, changes: [{ op: 'handed-off', actor, planId: item.planId, itemId: item.id, summary: `#${item.id} handed off to ${whereTo}: ${item.title}` }] };
+}
+
+/**
+ * A pull request merged (#938): every item handed off from the PR's task, or handed off naming the PR among its refs
+ * (`pr:n`), is done. Run by the platform (the Pulls actor's merge), never by a caller.
+ */
+export function pullMerged(book: PlanBook, call: PlanCall, pr: { readonly number: number; readonly taskId?: TaskId }): Outcome<StoredItem[]> {
+    if (!Number.isSafeInteger(pr?.number) || pr.number < 1) fail('invalid', 'a pull request is named by its number');
+    const done: StoredItem[] = [];
+    const changes: PlanChange[] = [];
+    for (const item of all(book)) {
+        if (item.state === 'done' || !item.handedOff) continue;
+        const byTask = pr.taskId !== undefined && item.handedOff.taskId === pr.taskId;
+        const byRef = item.refs.some((r) => r.kind === 'pr' && r.n === pr.number);
+        if (!byTask && !byRef) continue;
+        changes.push(finish(book, item, call, `pull request #${pr.number} merged`));
+        done.push(item);
+    }
+    return { value: done, changes };
 }
 
 // ---------------------------------------------------------------------------
@@ -725,7 +785,10 @@ export interface PlanItemPatch {
     /** Tick (or untick) done-when lines by index. */
     readonly tick?: readonly { readonly index: number; readonly checked: boolean }[];
     readonly note?: string;
-    /** `needs-you` / `stuck` release the claim and wait at the top of the queue; `ready` returns it; `done` is a person's. */
+    /**
+     * `needs-you` / `stuck` release the claim and wait at the top of the queue; `ready` returns it; `done` is a
+     * person's, or an agent's once every done-when line is ticked where the project lets agents tick (#938).
+     */
     readonly state?: 'ready' | 'needs-you' | 'stuck' | 'done';
     /** The task carrying the item out (the claimer's). */
     readonly taskId?: TaskId;
@@ -747,7 +810,14 @@ export function update(book: PlanBook, call: PlanCall, itemId: number, patch: Pl
     });
     const state = patch.state;
     if (state !== undefined && !(['ready', 'needs-you', 'stuck', 'done'] as const).includes(state)) fail('invalid', 'state is ready, needs-you, stuck or done');
-    if (state === 'done' && actor.kind !== 'user') fail('forbidden', `only a person marks #${item.id} done; tick its done-when lines instead`);
+    // Where agents may not tick (`agentsMayTick` off), an agent asks and a person ticks (#938).
+    const agentsMayTick = call.agentsMayTick !== false;
+    if (ticks.length && actor.kind === 'agent' && !agentsMayTick) fail('forbidden', `in this project a person ticks done-when lines; add a note or set #${item.id} to needs-you to ask one`);
+    if (state === 'done' && actor.kind !== 'user') {
+        if (!agentsMayTick) fail('forbidden', `in this project only a person marks #${item.id} done; add a note or set it to needs-you to ask one`);
+        const after = item.doneWhen.map((d, i) => ticks.findLast((t) => t.index === i)?.checked ?? d.checked);
+        if (!planDoneWhenMet(after.map((checked, i) => ({ ...item.doneWhen[i]!, checked })))) fail('forbidden', `#${item.id} is done when every done-when line is ticked; tick them all first, or ask a person to mark it done`);
+    }
     if (patch.taskId !== undefined) {
         if (!holder || !sameActor(holder, actor)) fail('forbidden', 'only the agent working the item sets its task');
         if (typeof patch.taskId !== 'string' || !patch.taskId.trim() || patch.taskId.length > 200) fail('invalid', 'taskId must be a task id');
@@ -773,6 +843,7 @@ export function update(book: PlanBook, call: PlanCall, itemId: number, patch: Pl
         const agent = item.claim?.agentId;
         delete item.claim;
         delete item.finishedClaim;
+        if (was === 'done') delete item.handedOff;
         item.state = state;
         if (was === 'done' && item.assignee) enqueue(book, item.assignee, item.id, 0);
         else if (agent !== undefined && item.assignee) enqueue(book, item.assignee, item.id, 0);
