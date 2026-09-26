@@ -11,24 +11,26 @@ import { planItems, type PlanItem, type PlanPhase } from '@agentic/core';
 import { Button, EmptyState, Icon, ItemGlyph, SearchField, Segmented } from '@agentic/ui';
 import { formatAge } from '../../../../../mock/workspace';
 import type { ProjectPageProps } from '../../../layout/types';
-import { actorLook, actorName, planNow, planViewer, usePlanStore } from '../shared/data';
-import { ActorTile, Bar, PlanHeader } from '../shared/parts';
+import { dataMode } from '../../../../../data-mode';
+import { planNow, usePlanIdentity, usePlanStore, type PlanIdentity } from '../shared/data';
+import { ActorTile, Bar, PlanHeader, usePlanNav } from '../shared/parts';
+import { useLivePins } from '../shared/pins';
 import {
     PLAN_FILTERS, crewCounts, crewOf, defaultItem, filterPhases, itemMeta, lastActivityAt, ownerStatus, phaseProgress, planOf,
     type PlanDoc, type PlanFilter
 } from '../shared/model';
 import { ItemDetail } from './ItemDetail';
 
-const CrewStrip = (doc: PlanDoc, members: ProjectPageProps['project']['members']) => (
+const CrewStrip = (doc: PlanDoc, members: ProjectPageProps['project']['members'], identity: PlanIdentity) => (
     <section data-plan-crew="" aria-label="Crew">
         <span data-plan-crew-label="">Crew</span>
         <ul>
-            {crewOf(doc.plan, members, planViewer()).map((e) => {
-                const look = actorLook(e.actor);
+            {crewOf(doc.plan, members, identity.me()).map((e) => {
+                const look = identity.look(e.actor);
                 const counts = crewCounts(e);
                 return (
                     <li data-plan-crew-member={look.name}>
-                        {ActorTile(e.actor, 20)}
+                        {ActorTile(e.actor, 20, identity.look)}
                         <span data-plan-crew-name="">{look.name}</span>
                         {e.manager ? <span data-plan-crew-role="">project manager</span> : null}
                         {counts.length
@@ -45,6 +47,9 @@ export const PlanList = component<ProjectPageProps>(({ props }) => {
     const route = useRoute();
     const store = usePlanStore(() => props.project.id);
     const writes = store.writes;
+    const identity = usePlanIdentity();
+    const nav = usePlanNav('list', () => props.project.id, store);
+    const pins = dataMode() === 'live' ? useLivePins(() => props.project) : undefined;
     // `picked`: undefined → `?item=` or the default item; null → the panel is closed.
     const st = signal({ q: '', filter: 'all' as string, open: {} as Record<number, boolean>, picked: undefined as number | null | undefined });
 
@@ -52,7 +57,7 @@ export const PlanList = component<ProjectPageProps>(({ props }) => {
         narrowed || (st.open[phase.n] ?? phaseProgress(phase).done < phase.items.length);
 
     const Row = (item: PlanItem, all: readonly PlanItem[], doc: PlanDoc, now: number, selected: boolean) => {
-        const meta = itemMeta(item, all, actorName, doc.runs?.[item.id]);
+        const meta = itemMeta(item, all, identity.name, doc.runs?.[item.id]);
         const owner = ownerStatus(item);
         const at = lastActivityAt(item);
         return (
@@ -67,9 +72,9 @@ export const PlanList = component<ProjectPageProps>(({ props }) => {
                             : null}
                     </span>
                     <span data-plan-item-owner="" data-assigned={item.assignee ? 'true' : 'false'}>
-                        {item.assignee ? ActorTile(item.assignee, 22) : <span data-plan-nobody="" aria-hidden="true" />}
+                        {item.assignee ? ActorTile(item.assignee, 22, identity.look) : <span data-plan-nobody="" aria-hidden="true" />}
                         <span data-plan-owner-text="">
-                            {item.assignee ? <span data-plan-owner-name="">{actorName(item.assignee)}</span> : null}
+                            {item.assignee ? <span data-plan-owner-name="">{identity.name(item.assignee)}</span> : null}
                             <span data-plan-owner-status="" data-plan-tone={owner.tone}>{owner.text}</span>
                         </span>
                     </span>
@@ -81,7 +86,7 @@ export const PlanList = component<ProjectPageProps>(({ props }) => {
     };
 
     const Note = () => (store.note() ? <p data-plan-note="" role="alert">{store.note()}</p> : null);
-    const newPlan = (): void => { if (writes) void writes.newPlan('Untitled plan 1'); };
+    const newPlan = (): void => nav.create?.();
 
     return () => {
         const docs = store.docs();
@@ -104,7 +109,7 @@ export const PlanList = component<ProjectPageProps>(({ props }) => {
         const all = planItems(doc.plan);
         const filter = st.filter as PlanFilter;
         const narrowed = st.q.trim() !== '' || filter !== 'all';
-        const phases = filterPhases(doc.plan, st.q, filter, planViewer());
+        const phases = filterPhases(doc.plan, st.q, filter, identity.me());
         const queried = Number(route.query.item);
         const pickedId = st.picked === undefined ? (all.some((i) => i.id === queried) ? queried : defaultItem(doc.plan)?.id) : st.picked;
         const picked = pickedId === null || pickedId === undefined ? undefined : all.find((i) => i.id === pickedId);
@@ -114,11 +119,13 @@ export const PlanList = component<ProjectPageProps>(({ props }) => {
                     projectId={props.project.id}
                     doc={doc}
                     view="list"
-                    several={docs.length > 1}
+                    plans={docs.map((d) => d.plan)}
+                    onSelectPlan={nav.select}
+                    {...(nav.create ? { onNewPlan: nav.create } : {})}
                     {...(writes ? { onAdd: async (title: string) => (await writes.addItem(doc.plan, title)) !== undefined } : {})}
                 />
                 {Note()}
-                {CrewStrip(doc, props.project.members)}
+                {CrewStrip(doc, props.project.members, identity)}
                 <div data-plan-body="">
                     <div data-plan-items="">
                         <div data-plan-toolbar="">
@@ -151,7 +158,7 @@ export const PlanList = component<ProjectPageProps>(({ props }) => {
                             : <p data-plan-none="">No items match.</p>}
                     </div>
                     {picked
-                        ? <ItemDetail key={picked.id} projectId={props.project.id} doc={doc} item={picked} items={all} now={now} onPick={(n) => { st.picked = n; }} onClose={() => { st.picked = null; }}
+                        ? <ItemDetail key={picked.id} projectId={props.project.id} doc={doc} item={picked} items={all} now={now} identity={identity} {...(pins ? { pins } : {})} onPick={(n) => { st.picked = n; }} onClose={() => { st.picked = null; }}
                             {...(writes
                                 ? {
                                     onTick: (index: number, checked: boolean) => void writes.tick(picked.id, index, checked),
