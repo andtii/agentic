@@ -86,8 +86,13 @@ export const ChatList = component<ChatListProps>(({ props, emit }) => {
     const projectFilter = (): string => (st.project && st.project !== ALL_PROJECTS ? st.project : '');
     // `?project=none` (#934, the projects index's "Show" on chats outside any project) opens on "No project".
     const route = useRoute();
+    // Only a change of the query moves the filter: a choice made in the Select stands while the query stays.
+    let lastQuery: string | undefined;
     const stopQuery = effect(() => {
-        if (queryOf(route.query.project) === NO_PROJECT) st.project = NO_PROJECT;
+        const q = queryOf(route.query.project);
+        if (q === lastQuery) return;
+        lastQuery = q;
+        if (q === NO_PROJECT) st.project = NO_PROJECT;
     });
     onUnmounted(stopQuery);
     // Collapsed group keys on `/chats` (#732): a project id, or `NO_PROJECT_KEY`.

@@ -591,6 +591,7 @@ export function defineWorkspace(options: WorkspaceOptions = {}) {
                 const lines = new Map<ProjectId, Line>(projectIds.map((id) => [id, { openChats: 0, archivedChats: 0 }]));
                 // Every chat's project (#934): a task belongs to its chat's project, archived chat or not.
                 const projectOfChat = new Map<string, ProjectId>();
+                const unreadChats = new Set<string>();
                 const taskRows = orUnknown(() => ctx.actor(TaskIndex, taskIndexKey(workspaceId)).list());
                 await eachLimited(chatIds, SUMMARY_CONCURRENCY, async (chatId) => {
                     const chat = ctx.actor(Chat, actorKey(workspaceId, 'chat', chatId));
@@ -604,6 +605,7 @@ export function defineWorkspace(options: WorkspaceOptions = {}) {
                         const newest = page.entries.at(-1)?.entry as { at?: unknown } | undefined;
                         if (typeof newest?.at === 'number') at = newest.at;
                     } catch {
+                        unreadChats.add(chatId);
                         return;
                     }
                     const line = (projectId !== undefined ? lines.get(projectId) : undefined) ?? unassigned;
@@ -616,7 +618,9 @@ export function defineWorkspace(options: WorkspaceOptions = {}) {
                     line.openChats += 1;
                     if (at !== undefined && (line.lastActivityAt === undefined || at > line.lastActivityAt)) line.lastActivityAt = at;
                 });
-                const rows = await taskRows;
+                // A task of a chat that could not be read has no known project: then no task count is complete.
+                const read = await taskRows;
+                const rows = read && !read.some((r) => r.chatId !== undefined && unreadChats.has(r.chatId)) ? read : undefined;
                 const tasksOf = new Map<ProjectId, TaskIndexRow[]>();
                 let unassignedTasks = 0;
                 for (const row of rows ?? []) {
