@@ -98,13 +98,13 @@ describe('#931: accepting a request links the items across projects', () => {
         expect(((await item(AG, 1)) as { afterRefs?: unknown }).afterRefs).toEqual([]);
     });
 
-    it("another project's manager accepting: the request is accepted, the requester's plan is not its to change", async () => {
+    it("another project's manager accepting: the request is accepted and, the item naming the requester's (#943), it waits on it", async () => {
         await requesterPlan();
         await requests(agentP(FORGE)).send({ fromProject: AG, title: 'x', body: 'b', refs: ['agentic#2'] });
         const nova = requests(agentP(NOVA));
         await nova.triage('req_1', triage);
         const accepted = await nova.resolve('req_1', { action: 'accept' });
         expect(accepted).toMatchObject({ state: 'accepted', resultItem: 1, acceptedBy: { kind: 'agent', agentId: NOVA } });
-        expect(((await item(AG, 2)) as { afterRefs?: unknown }).afterRefs).toEqual([]);
+        expect(((await item(AG, 2)) as { afterRefs?: unknown }).afterRefs).toEqual([{ projectId: SX, n: 1 }]);
     });
 });

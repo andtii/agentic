@@ -306,7 +306,7 @@ export const ContextPanel = component<ContextPanelProps>(({ props, emit }) => {
                 </section>
 
                 <ContextChips chips={props.chips ?? []} onInsert={(prefix: string) => emit('insertRef', prefix)} />
-                <AcrossProjects items={props.across ?? []} />
+                <AcrossProjects items={props.across ?? []} agentName={(id) => lookup(id).name} />
 
                 <section data-context-section aria-label="Tasks in this chat">
                     <header data-context-head>
