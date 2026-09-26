@@ -45,6 +45,8 @@ export const ProjectManager = component<ProjectPageProps>(({ props }) => {
     const policyOfProject = (p: ProjectRecord) => p.pm?.policy ?? PM_POLICY_DEFAULT;
     const pol = signal({ ...policyDraftOf(policyOfProject(props.project)), adding: '', addingWho: {} as Record<string, boolean>, attempted: false });
     const ed = signal({ ...managerDraftOf(null), editing: false, attempted: false, busy: false, error: '', saved: false });
+    // Member picks belong to the project picked: another pick starts from none (they may share agents).
+    watch(() => pol.adding, () => { pol.addingWho = {}; });
     watch(() => props.project.id, () => {
         Object.assign(pol, { ...policyDraftOf(policyOfProject(props.project)), adding: '', addingWho: {}, attempted: false });
         Object.assign(ed, { editing: false, attempted: false, error: '', saved: false });
