@@ -406,11 +406,11 @@ export function defineRequestsActor(options: RequestsActorOptions = {}) {
                 }
                 if (!opened?.url) return;
                 request.issueUrl = opened.url;
-                await ctx.save();
                 try {
+                    await ctx.save();
                     await ctx.actor(PlanRef, planKey(s.workspaceId, s.projectId)).ref(itemN, { kind: 'url', url: opened.url });
                 } catch {
-                    // The issue is open and the request names it; only the item's ref is missing.
+                    // The issue is open; the request is accepted either way (a failed save or ref leaves only the link missing).
                 }
             };
 
