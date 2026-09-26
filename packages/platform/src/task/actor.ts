@@ -28,7 +28,18 @@ import { IllegalTransitionError, TaskLimitError, TaskStateError } from './errors
 import { indexTask } from './index-port.js';
 import { TASK_TYPE, taskKey } from './key.js';
 import { checkConcurrency, checkDepth, splitBudget, type Spent } from './limits.js';
-import type { CancelOptions, DelegateSpec, StopReport, TaskEntry, TaskInit, TaskOutcome, TaskState, TaskTree, TaskView } from './types.js';
+import type { CancelOptions, DelegateSpec, StopReport, TaskEntry, TaskInit, TaskNote, TaskOutcome, TaskState, TaskTree, TaskView } from './types.js';
+
+/** The longest activity line a task keeps (#937); a longer one is cut with an ellipsis. */
+export const TASK_ACTIVITY_MAX = 140;
+/** The longest branch name `note` accepts (#937). */
+export const TASK_BRANCH_MAX = 255;
+
+/** An activity line as the row shows it: one line, trimmed, at most `TASK_ACTIVITY_MAX` characters. */
+function activityLine(text: string): string {
+    const line = text.replace(/\s+/g, ' ').trim();
+    return line.length > TASK_ACTIVITY_MAX ? `${line.slice(0, TASK_ACTIVITY_MAX - 1)}…` : line;
+}
 
 /** How long `cancel` waits for acknowledgements by default (COL-12). */
 export const DEFAULT_STOP_TIMEOUT_MS = 10_000;
@@ -52,6 +63,12 @@ export type TaskMethods = {
     /** Create a child under the limits and move this task to `waiting {child}`. Returns the child's id. */
     delegate(spec: DelegateSpec): Promise<TaskId>;
     recordUsage(usage: Usage, costUsd?: number): Promise<TaskView>;
+    /**
+     * What the task is on (#937): the branch its chat worktree works on, and a short current-activity line (the
+     * latest status line). Written to the TaskIndex row too. No transition; an unchanged note writes nothing, and a
+     * settled task keeps no activity.
+     */
+    note(note: TaskNote): Promise<TaskView>;
     /** The session driver's word that the running work has stopped. */
     sessionStopped(): Promise<void>;
     get(): TaskView;
@@ -126,6 +143,8 @@ function toView(s: TaskState): TaskView {
         status: s.status,
         ...(s.wait ? { wait: s.wait } : {}),
         ...(s.sessionId !== undefined ? { sessionId: s.sessionId } : {}),
+        ...(s.branch !== undefined ? { branch: s.branch } : {}),
+        ...(s.activity !== undefined ? { activity: s.activity } : {}),
         children: s.children,
         ...(s.result ? { result: s.result } : {}),
         ...(s.error ? { error: s.error } : {}),
@@ -426,6 +445,26 @@ const options: ActorOptions<TaskState, TaskMethods, TaskStreams> & { applyEntry(
                 await commit(ctx, { t: 'usage', at: now, usage, costUsd });
                 const budget = checkBudget(s.constraints, spentOf(s, now));
                 if (!budget.ok) await overBudget(budget, 'system:budget');
+                return view();
+            },
+            async note(note) {
+                requireCreated();
+                const branch = note?.branch;
+                if (branch !== undefined && (typeof branch !== 'string' || !branch.trim() || /\s/.test(branch.trim()) || branch.trim().length > TASK_BRANCH_MAX)) {
+                    throw new ServerFnError(400, `task ${s.id}: branch must be a branch name`);
+                }
+                if (note?.activity !== undefined && typeof note.activity !== 'string') throw new ServerFnError(400, `task ${s.id}: activity must be text`);
+                const nextBranch = branch?.trim();
+                // A settled task is on nothing any more: its activity line is not kept.
+                const nextActivity = note?.activity !== undefined && !isTerminal(s.status) ? activityLine(note.activity) : undefined;
+                const entry = {
+                    ...(nextBranch !== undefined && nextBranch !== s.branch ? { branch: nextBranch } : {}),
+                    ...(nextActivity && nextActivity !== s.activity ? { activity: nextActivity } : {})
+                };
+                if (entry.branch === undefined && entry.activity === undefined) return view();
+                const at = Date.now();
+                await commit(ctx, { t: 'note', at, ...entry });
+                await indexTask(ctx, s.workspaceId, ctx.snapshot(), at);
                 return view();
             },
             async sessionStopped() {

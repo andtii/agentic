@@ -7,12 +7,13 @@
  *   plugin's `secret:github-token` grant.
  * - `pullsPlacement`: the router's `placed` hook — a task placed in a project with Git on watches the repo its
  *   `origin` names (`Pulls.watch`, once per repo), and a chat with a worktree of its own links its branch to the task
- *   (`Pulls.linkBranch`), so the PR the agent opens from it waits the task and completes it on merge.
+ *   (`Pulls.linkBranch`), so the PR the agent opens from it waits the task and completes it on merge. The branch is
+ *   recorded on the task too (`Task.note`, #937), so its index row carries it before any PR exists.
  * - `pullsAutopilot`: the actor's autopilot port (#820) — turns in the PR's chat and Inbox rows from the platform's
  *   `chatAutopilotPort`, the merge from `githubPullMerger`: a squash through the git feature's `PullProvider.merge`
  *   with the same per-project token (#915), only ever after the approval rule `ask on merge` was answered yes (`Pulls.answerMerge`).
  */
-import { asPrincipal, chatAutopilotPort, projectPullToken, pullsKey, tokenPullSources, userPrincipal, type AutopilotPort, type PullLink, type PullsAutopilotPort, type PullsRepo, type PullSourcePort, type PullsView, type ProjectPlacement } from '@agentic/platform';
+import { asPrincipal, chatAutopilotPort, projectPullToken, pullsKey, TaskActor, taskKey, tokenPullSources, userPrincipal, type AutopilotPort, type PullLink, type PullsAutopilotPort, type PullsRepo, type PullSourcePort, type PullsView, type ProjectPlacement } from '@agentic/platform';
 import { configDefaults, enabledProjectFeatures, type ProjectId, type WorkspaceId } from '@agentic/core';
 import { chatWorktreeFor, gitProjectSettings, GIT_FEATURE_ID, GITHUB_TOKEN_SECRET } from '@agentic/plugins-git';
 import { createGitHubPullProvider, pullRepoOfOrigin } from '@agentic/plugins-git/provider';
@@ -91,19 +92,24 @@ export function pullsPlacement(pulls: () => AnyActorDefinition): (placement: Pro
     return async ({ workspaceId, project, taskId, chatId, cwd }) => {
         if (!enabledProjectFeatures(project).includes(GIT_FEATURE_ID)) return;
         const settings: Readonly<Record<string, unknown>> = { ...configDefaults(gitProjectSettings), ...project.features[GIT_FEATURE_ID] };
+        const context = asPrincipal(userPrincipal(workspaceId, workspaceId));
+        let branch: string | undefined;
+        if (chatId && settings['worktreePerChat'] === true && cwd !== undefined) {
+            try {
+                ({ branch } = chatWorktreeFor(settings, { chatId, cwd, projectName: project.name }));
+            } catch {
+                // a template that cannot expand parked the task already; nothing to record or link
+            }
+        }
+        // The task carries its branch (#937): Work's "branch X · no PR yet" and the Code card read it off the index row.
+        if (branch !== undefined) await actor(TaskActor, taskKey(workspaceId, taskId)).with({ context }).note({ branch }).catch(() => undefined);
         const origin = settings['origin'];
         const ref = typeof origin === 'string' ? pullRepoOfOrigin(origin) : undefined;
         if (!ref) return;
-        const client = actor(pulls(), pullsKey(workspaceId, project.id)).with({ context: asPrincipal(userPrincipal(workspaceId, workspaceId)) }) as unknown as PullsClient;
+        const client = actor(pulls(), pullsKey(workspaceId, project.id)).with({ context }) as unknown as PullsClient;
         const view = await client.get();
         if (view.repo?.provider !== ref.provider || view.repo.repo !== ref.repo) await client.watch(ref);
-        if (!chatId || settings['worktreePerChat'] !== true || cwd === undefined) return;
-        let branch: string;
-        try {
-            ({ branch } = chatWorktreeFor(settings, { chatId, cwd, projectName: project.name }));
-        } catch {
-            return; // a template that cannot expand parked the task already; nothing to link
-        }
+        if (branch === undefined || !chatId) return;
         await client.linkBranch(branch, { chatId, taskId });
     };
 }

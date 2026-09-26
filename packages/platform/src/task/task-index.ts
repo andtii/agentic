@@ -50,6 +50,10 @@ export interface TaskIndexRow {
     readonly depth: number;
     readonly environmentId?: EnvironmentId;
     readonly sessionId?: SessionId;
+    /** The branch the task's chat worktree works on (#937). */
+    readonly branch?: string;
+    /** What the task is on now, one line (#937): the latest status line. */
+    readonly activity?: string;
     readonly createdAt: number;
     readonly updatedAt: number;
     /** The Task's transition count when the row was written — the forward-only clock. */
@@ -101,6 +105,8 @@ export function taskIndexRowOf(s: TaskState, at: number): TaskIndexRow {
         depth: s.depth,
         ...(s.environmentId !== undefined ? { environmentId: s.environmentId } : {}),
         ...(s.sessionId !== undefined ? { sessionId: s.sessionId } : {}),
+        ...(s.branch !== undefined ? { branch: s.branch } : {}),
+        ...(s.activity !== undefined ? { activity: s.activity } : {}),
         createdAt,
         updatedAt: at,
         n: s.transitions.length
