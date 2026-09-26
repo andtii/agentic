@@ -13,7 +13,10 @@
  * Pull requests join the list only when the next move is yours (PRJ-10,
  * #745): ready to merge, a review asked of you, conflicts to decide, or
  * autopilot stopped — as `PullCard`'s `home` item (`MERGE`, "Squash and
- * merge"), the same card and state as in the chat and on the task node.
+ * merge"), the same card and state as in the chat and on the task node. With
+ * `pullSurface="notification"` (#951) the same PRs are Inbox rows instead:
+ * `PullCard`'s `notification` surface (`agentic#603 needs you` and why), the
+ * headline linked to the PR page, no merge button.
  */
 import { component } from 'sigx';
 import type { Decision } from '@sigx/ai-agent';
@@ -183,8 +186,16 @@ const PullRowView = component<{ pull: PullRequest; needs: PullNeeds }>(({ props,
     );
 });
 
+/** How "Needs you" draws a pull request: Home's item (`MERGE`, "Squash and merge") or an Inbox notification row. */
+export type PullRowSurface = 'home' | 'notification';
+
+/** A PR as an Inbox row (#951): `PullCard`'s `notification` surface, the headline linked to the PR page. */
+export const PullNoticeRow = component<{ pull: PullRequest; needs: PullNeeds }>(({ props }) => () => (
+    <PullCard pull={props.pull} surface="notification" me={props.needs.me} href={props.needs.href?.(props.pull)} />
+));
+
 /** The section: heading with the open count, the rows, or the inbox empty state. */
-export const NeedsYou = component<{ source: NeedsSource; pulls?: PullNeeds }>(({ props }) => {
+export const NeedsYou = component<{ source: NeedsSource; pulls?: PullNeeds; pullSurface?: PullRowSurface }>(({ props }) => {
     const rows = props.source.useRows();
     const pulls = props.pulls?.usePulls();
     return () => {
@@ -198,7 +209,7 @@ export const NeedsYou = component<{ source: NeedsSource; pulls?: PullNeeds }>(({
                     ? (
                         <div data-needs-list>
                             {sorted.map((row) => <div key={row.id} data-needs-row><NeedsRowView row={row} source={props.source} /></div>)}
-                            {needs ? prs.map((pr) => <div key={`pr:${pr.repo}#${pr.number}`} data-needs-row data-needs-pull={String(pr.number)}><PullRowView pull={pr} needs={needs} /></div>) : null}
+                            {needs ? prs.map((pr) => <div key={`pr:${pr.repo}#${pr.number}`} data-needs-row data-needs-pull={String(pr.number)}>{props.pullSurface === 'notification' ? <PullNoticeRow pull={pr} needs={needs} /> : <PullRowView pull={pr} needs={needs} />}</div>) : null}
                         </div>
                     )
                     : <EmptyState variant="inbox" />}
