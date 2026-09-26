@@ -49,6 +49,13 @@
  * its words unchanged. A file ref is pinned through the session's machine
  * (`fs` `pin`, #752) when its daemon has the `pin` feature, else stored
  * unpinned. After each call the agent's notices go to the session's chat.
+ *
+ * Requests (#930, PRJ-15): `requests` is the Requests actor of the session's project (the same project as `plan`)
+ * under the agent's principal, mapped by `createRequestsPort`; a send goes to the target project's actor, from the
+ * session's project and chat. The actor enforces every rule and its refusals come back as tool errors. A `chat_post`
+ * that mentions another project's manager brings it in first, as a visitor (`bringInVisitors`, as a person's send
+ * does) — added by the workspace's user, since `Chat.addAgent` admits a person, and only a manager the visiting
+ * rule names.
  */
 
 import { actorKey, chatFileUri, createId, isTerminal, MODEL_IMAGE_TYPES, parseChatFileUri, projectFolderPlaces, type AgentId, type ChatFile, type ChatFileStore, type ChatId, type EnvironmentId, type FileRef, type FsResult, type MachineId, type MemoryEntry, type MemoryStore, type MessageId, type Principal, type ProjectId, type PromptPart, type SessionId, type TaskId, type TaskStatus, type WorkspaceAnswer, type WorkspaceId } from '@agentic/core';
@@ -58,7 +65,7 @@ import { isServerFnError } from '@sigx/server';
 
 import { AgentActor, agentKey, agentMemoryScope } from '../agent/index.js';
 import { asPrincipal, mintAgentPrincipal, userPrincipal, workspaceKey } from '../auth/index.js';
-import { Chat } from '../chat/index.js';
+import { bringInVisitors, Chat } from '../chat/index.js';
 import type { MachineView } from '../machine/actor.js';
 import { ToolCallError } from '../machine/ports.js';
 import { machineKey } from '../machine/state.js';
@@ -69,6 +76,9 @@ import { planKey } from '../plan/key.js';
 import { createPlanPort, type PlanActorClient } from '../plan/port.js';
 import type { PlanNotice } from '../plan/rules.js';
 import { answerText, type RequestResolvedEvent } from '../policy/requests.js';
+import type { defineRequestsActor } from '../requests/actor.js';
+import { requestsKey } from '../requests/key.js';
+import { createRequestsPort, type RequestsActorClient } from '../requests/port.js';
 import type { DetachedInput, PlatformInputRequest, PlatformRequestRef } from '../session/actor.js';
 import { checkDepth, TaskActor, taskKey, type TaskOutcome, type TaskView } from '../task/index.js';
 import type { SessionMemory } from '../task/driver.js';
@@ -106,6 +116,13 @@ interface SessionAskClient {
  */
 let planStore: ReturnType<typeof definePlanActor> | undefined;
 const PlanStore = () => (planStore ??= definePlanActor());
+
+/**
+ * The Requests actor as a client handle (#930), made on first use like the Plan's — and imported then too: its module
+ * builds a Plan handle at load, which a static import here would run before `plan/actor` has finished loading.
+ */
+let requestsStore: ReturnType<typeof defineRequestsActor> | undefined;
+const RequestsStore = async () => (requestsStore ??= (await import('../requests/actor.js')).defineRequestsActor());
 
 /** The slice of the Machine actor `plan_ref` pins a file ref through (#752). */
 interface PinMachineClient {
@@ -482,35 +499,89 @@ export function createActorToolPorts(options: ActorToolPortsOptions): PlatformPo
         }
     };
 
+    const workspaceUser = () => asPrincipal(userPrincipal(workspaceId, workspaceId));
+    /** The session's project: the current task's, else the chat's — looked up on every call, as a chat can move mid-session. */
+    async function projectOf(): Promise<ProjectId | undefined> {
+        const { taskId } = principalNow();
+        if (taskId) {
+            const view = await task(taskId)
+                .get()
+                .catch(() => undefined);
+            if (view?.projectId !== undefined) return view.projectId;
+        }
+        if (!chatId) return undefined;
+        const summary = await as(Chat, agentChatKey(workspaceId, chatId))
+            .get()
+            .catch(() => undefined);
+        return summary?.projectId;
+    }
+    /** The workspace's projects, read as its user (the root admits its owner only). */
+    const workspaceProjects = () => actor(Workspace, workspaceKey(workspaceId)).with({ context: workspaceUser() }).projects();
+
     const plan = planPort();
+    const requests = requestsPort();
+
+    /** The `requests_*` / `projects_request` port (#930): the Requests actors under the agent, from the session's project. */
+    function requestsPort(): PlatformPorts['requests'] {
+        const port = createRequestsPort({
+            me: agentId,
+            async scope() {
+                const projectId = await projectOf();
+                if (projectId === undefined) throw new ToolCallError('unsupported', 'requests: this session is in no project, and requests belong to a project');
+                const projects = await workspaceProjects();
+                let chat: { id: ChatId; title?: string } | undefined;
+                if (chatId) {
+                    const title = await as(Chat, agentChatKey(workspaceId, chatId))
+                        .get()
+                        .then((s) => s.title, () => undefined);
+                    chat = { id: chatId, ...(title ? { title } : {}) };
+                }
+                return { projectId, projects, ...(chat ? { chat } : {}) };
+            },
+            requests: async (projectId) => as(await RequestsStore(), requestsKey(workspaceId, projectId)) as unknown as RequestsActorClient
+        });
+        const wrap =
+            <A extends unknown[], R>(fn: (...args: A) => Promise<R>) =>
+            async (...args: A): Promise<R> => {
+                try {
+                    return await fn(...args);
+                } catch (e) {
+                    throw asPlanToolError(e);
+                }
+            };
+        return { board: wrap(port.board), target: wrap(port.target), triage: wrap(port.triage), resolve: wrap(port.resolve), send: wrap(port.send) };
+    }
+
+    /**
+     * Bring in the other projects' managers `mentions` names that are not members yet (#930), as a person's send does:
+     * the visiting rule decides who, and the workspace's user adds them (`Chat.addAgent` admits a person). Best effort.
+     */
+    async function bringInMentioned(chatId: ChatId, mentions: readonly AgentId[]): Promise<void> {
+        if (mentions.length === 0) return;
+        try {
+            const summary = await as(Chat, agentChatKey(workspaceId, chatId)).get();
+            if (!summary.projectId) return;
+            const members = Object.keys(summary.members);
+            if (mentions.every((id) => members.includes(id))) return;
+            const owner = actor(Chat, agentChatKey(workspaceId, chatId)).with({ context: workspaceUser() });
+            await bringInVisitors(owner, mentions, members, await workspaceProjects(), summary.projectId);
+        } catch {
+            // The post goes on: a mention that could not bring its manager in is said in `notActivated`.
+        }
+    }
 
     /**
      * The `plan_*` port (#816): the Plan actor of the session's project under the agent. The project is the current
      * task's, else the chat's, looked up on every call — a chat can be moved into a project mid-session.
      */
     function planPort(): PlanPort {
-        const workspaceUser = () => asPrincipal(userPrincipal(workspaceId, workspaceId));
-        async function projectOf(): Promise<ProjectId | undefined> {
-            const { taskId } = principalNow();
-            if (taskId) {
-                const view = await task(taskId)
-                    .get()
-                    .catch(() => undefined);
-                if (view?.projectId !== undefined) return view.projectId;
-            }
-            if (!chatId) return undefined;
-            const summary = await as(Chat, agentChatKey(workspaceId, chatId))
-                .get()
-                .catch(() => undefined);
-            return summary?.projectId;
-        }
         const port = createPlanPort({
             me: agentId,
             taskId: () => principalNow().taskId,
             async scope() {
                 const projectId = await projectOf();
                 if (projectId === undefined) throw new ToolCallError('unsupported', 'plan: this session is in no project, and a plan belongs to a project');
-                const project = (await actor(Workspace, workspaceKey(workspaceId)).with({ context: workspaceUser() }).projects()).find((p) => p.id === projectId);
+                const project = (await workspaceProjects()).find((p) => p.id === projectId);
                 if (!project) throw new ToolCallError('unsupported', `plan: project ${projectId} no longer exists`);
                 const names = new Map<AgentId, string>();
                 await Promise.all(
@@ -610,6 +681,7 @@ export function createActorToolPorts(options: ActorToolPortsOptions): PlatformPo
         ...(files ? { files } : {}),
         ...(usage ? { usage } : {}),
         ...(pulls ? { pulls } : {}),
+        requests,
         projects,
         plan,
         memory: {
@@ -634,6 +706,7 @@ export function createActorToolPorts(options: ActorToolPortsOptions): PlatformPo
                 }
                 const input: string | PromptPart[] = attached.length === 0 ? post.text : [...(post.text ? [{ type: 'text' as const, text: post.text }] : []), ...attached];
                 const { taskId } = principalNow();
+                await bringInMentioned(chatId, post.mentions);
                 const result = await as(Chat, agentChatKey(workspaceId, chatId)).post(input, post.mentions, taskId ? { taskId } : {});
                 return { messageId: result.messageId, ...(await activateMentions(chatId, result.messageId, post, result.activated)) };
             },
