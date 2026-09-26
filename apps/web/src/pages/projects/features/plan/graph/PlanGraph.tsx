@@ -93,7 +93,7 @@ export const PlanGraph = component<ProjectPageProps>(({ props }) => {
         }
         const plan: Plan = { id: `plan_new_${st.created.length + 1}`, projectId: props.project.id, title: `Untitled plan ${st.created.length + 1}`, phases: [] };
         st.created = [...st.created, plan];
-        st.planId = plan.id;
+        select(plan.id);
     };
     /** Picking a plan follows `?plan=`, as on the list and the board. */
     const select = (id: string): void => {
@@ -102,7 +102,8 @@ export const PlanGraph = component<ProjectPageProps>(({ props }) => {
     };
     return () => {
         const list = plans();
-        const current = list.find((p) => p.id === (st.planId ?? route.query.plan)) ?? list[0];
+        // The URL names the plan (back / forward follow it); the local pick only covers the moment before the push lands.
+        const current = list.find((p) => p.id === route.query.plan) ?? list.find((p) => p.id === st.planId) ?? list[0];
         return (
             <section aria-label="Plan graph" data-plan-graph="">
                 <header data-plan-graph-head="">
