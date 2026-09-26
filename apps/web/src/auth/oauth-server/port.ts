@@ -14,6 +14,12 @@
  * and the Plan actor admits a person or an agent, never a client. A claim is
  * the one call made as the agent it names — a member of the project — since
  * only an agent claims for itself.
+ *
+ * The request tools (#930) run as the workspace's user as well, behind the
+ * same `projects` scope: a person lists, sends and resolves. Triage is the
+ * manager's alone in the Requests actor, so a triage is made as the target
+ * project's manager (`pm.agentId`, else its coordinator) — the way a claim is
+ * made as its agent — and that project's policy decides what goes to a person.
  */
 import { createId, pathWithin, projectFolderPlaces, type AgentId, type EnvironmentDescriptor, type MachineId, type Plan, type Principal, type ProjectId, type ProjectRecord, type SessionId, type TaskContract, type TaskId, type WorkspaceId, type WorkspaceSource } from '@agentic/core';
 import type { ExternalPrincipal, PlatformPort, TaskSummary, TaskTreeNode } from '@agentic/mcp';
@@ -27,6 +33,11 @@ import {
     agentKey,
     asPrincipal,
     definePlanActor,
+    defineRequestsActor,
+    actorResolution,
+    projectManagerOf,
+    requestsKey,
+    type RequestsActorClient,
     mintAgentPrincipal,
     planAdd,
     planHandoffTarget,
@@ -86,6 +97,9 @@ const summary = (t: TaskView): TaskSummary => ({
 
 /** The Plan actor as a client handle (#816): only its `type` addresses the object; the host runs the registry's own. */
 const PlanStore = definePlanActor();
+
+/** The Requests actor as a client handle (#930), like the Plan's. */
+const RequestsStore = defineRequestsActor();
 
 const tree = (t: TaskTree): TaskTreeNode => ({ taskId: t.id, status: t.status, assignee: t.assignee, objective: t.objective, depth: t.depth, ...(t.wait !== undefined ? { wait: t.wait } : {}), children: t.children.map(tree) });
 
@@ -163,6 +177,9 @@ export function createActorPlatformPort(principal: ExternalPrincipal, options: A
         const client = as(PlanStore, planKey(workspaceId, projectId), driver) as unknown as PlanActorClient;
         return { client, project, people: { project, names, users: [driver.kind === 'user' ? driver.userId : workspaceId] } };
     }
+
+    /** A project's Requests actor as `who` (default: the workspace's user). */
+    const requestsOf = (projectId: ProjectId, who: Principal = driver) => as(RequestsStore, requestsKey(workspaceId, projectId), who) as unknown as RequestsActorClient;
 
     const inPlan = (plans: readonly Plan[], planId: string | undefined): readonly Plan[] => (planId === undefined ? plans : plans.filter((p) => p.id === planId));
 
@@ -385,6 +402,26 @@ export function createActorPlatformPort(principal: ExternalPrincipal, options: A
                 const target = to !== undefined ? resolvePlanMember(people, to) : planHandoffTarget(people, (await client.list()).plans, item, undefined);
                 return client.handoff(item, target, note);
             }
+        },
+        requests: {
+            list: async (projectId, state) => (await requestsOf(projectId).incoming()).filter((r) => state === undefined || r.state === state),
+            async triage(projectId, requestId, triage) {
+                const project = (await workspace().projects()).find((p) => p.id === projectId);
+                if (!project) throw new ServerFnError(404, `no project ${projectId} in this workspace`);
+                const manager = projectManagerOf(project);
+                if (!manager) throw new ServerFnError(409, `project ${projectId} has no project manager to triage its requests`);
+                // Triage is the manager's: made as that agent, in a session named for this client (as a claim is).
+                return requestsOf(projectId, mintAgentPrincipal({ workspaceId, agentId: manager, sessionId: `mcp_${clientId}` as SessionId })).triage(requestId, triage);
+            },
+            resolve: (projectId, requestId, resolution) => requestsOf(projectId).resolve(requestId, actorResolution(resolution)),
+            send: (input) =>
+                requestsOf(input.toProject).send({
+                    fromProject: input.fromProject,
+                    ...(input.fromChat !== undefined ? { fromChat: input.fromChat } : {}),
+                    title: input.title,
+                    body: input.body,
+                    refs: input.refs
+                })
         },
         usage: {
             // The tool gate already checked the `usage` scope; the machines are read as the workspace driver, so a client granted
