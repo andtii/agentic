@@ -12,9 +12,11 @@
  * - `pullsAutopilot`: the actor's autopilot port (#820) — turns in the PR's chat and Inbox rows from the platform's
  *   `chatAutopilotPort`, the merge from `githubPullMerger`: a squash through the git feature's `PullProvider.merge`
  *   with the same per-project token (#915), only ever after the approval rule `ask on merge` was answered yes (`Pulls.answerMerge`).
+ * - `githubRequestIssues`: the Requests actor's issue port (#932) — an accept with "open GitHub issue" opens it in the
+ *   repo the project's git `origin` names, through `PullProvider.openIssue` with the same per-project token.
  */
-import { asPrincipal, chatAutopilotPort, projectPullToken, pullsKey, TaskActor, taskKey, tokenPullSources, userPrincipal, type AutopilotPort, type PullLink, type PullsAutopilotPort, type PullsRepo, type PullSourcePort, type PullsView, type ProjectPlacement } from '@agentic/platform';
-import { configDefaults, enabledProjectFeatures, type ProjectId, type WorkspaceId } from '@agentic/core';
+import { asPrincipal, chatAutopilotPort, projectPullToken, pullsKey, TaskActor, taskKey, tokenPullSources, userPrincipal, workspaceKey, type AutopilotPort, type RequestIssuePort, type PullLink, type PullsAutopilotPort, type PullsRepo, type PullSourcePort, type PullsView, type ProjectPlacement } from '@agentic/platform';
+import { configDefaults, enabledProjectFeatures, type ProjectId, type ProjectRecord, type WorkspaceId } from '@agentic/core';
 import { chatWorktreeFor, gitProjectSettings, GIT_FEATURE_ID, GITHUB_TOKEN_SECRET } from '@agentic/plugins-git';
 import { createGitHubPullProvider, pullRepoOfOrigin } from '@agentic/plugins-git/provider';
 import { actor, type AnyActorDefinition } from '@sigx/actors';
@@ -58,6 +60,29 @@ export function githubPullMerger(actors: PullCredentialActors, ref: AutopilotRef
         const provider = createGitHubPullProvider({ token: secret, ...(fetchImpl ? { fetch: fetchImpl } : {}) });
         const out = await provider.merge(pr.repo, pr.number, 'squash', { subject: `${pr.title} (#${pr.number})` });
         return { merged: out.merged, ...(out.message ? { reason: out.message } : {}) };
+    };
+}
+
+/**
+ * The Requests actor's issue port (#932): the issue opens in the GitHub repo the project's git `origin` names, with the
+ * project's GitHub credential (#840). A project without Git on, a non-GitHub origin, or no token → `null` (nothing opened).
+ */
+export function githubRequestIssues(actors: PullCredentialActors, fetchImpl?: typeof fetch): RequestIssuePort {
+    const token = gitPullToken(actors);
+    return {
+        async open({ workspaceId, projectId, title, body }) {
+            const context = asPrincipal(userPrincipal(workspaceId, workspaceId));
+            const workspace = actor(actors.workspace(), workspaceKey(workspaceId)).with({ context }) as unknown as { projects(): Promise<readonly ProjectRecord[]> };
+            const project = (await workspace.projects()).find((p) => p.id === projectId);
+            if (!project || !enabledProjectFeatures(project).includes(GIT_FEATURE_ID)) return null;
+            const origin = { ...configDefaults(gitProjectSettings), ...project.features[GIT_FEATURE_ID] }['origin'];
+            const ref = typeof origin === 'string' ? pullRepoOfOrigin(origin) : undefined;
+            if (ref?.provider !== 'github') return null;
+            const secret = await token({ workspaceId, projectId, provider: ref.provider, repo: ref.repo });
+            if (!secret) return null;
+            const issue = await createGitHubPullProvider({ token: secret, ...(fetchImpl ? { fetch: fetchImpl } : {}) }).openIssue(ref.repo, title, body);
+            return { url: issue.url, number: issue.number };
+        }
     };
 }
 

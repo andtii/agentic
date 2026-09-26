@@ -7,6 +7,7 @@
  * - `summary.ts`: the manager's weekly summary on Home (`pmSummaryTrigger`) and the merge notices to requesters
  *   (`pullMergeNotices`, the Pulls actor's `merged` hook) (#763, #868).
  * - `port.ts`: the actor as the request tools' `RequestsPort` (#930).
+ * - `issue.ts`: `RequestIssuePort` — the GitHub issue an accept with `openIssue` opens (#932).
  */
 export * from './key.js';
 /** The pure rules, namespaced: their names (`receive`, `triage`, …) are too plain for the package surface. */
