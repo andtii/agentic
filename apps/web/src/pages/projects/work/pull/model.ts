@@ -11,7 +11,7 @@ export interface PullLinked {
     /** The task's objective, beside its id. */
     readonly taskTitle?: string;
     /** The issue the work is for: its number and how the Linked box names it (`agentic#47 mobile pass`). */
-    readonly issue?: { readonly number: number; readonly label: string };
+    readonly issue?: { readonly number: number; readonly label: string; readonly href?: string };
     readonly chatTitle?: string;
     /** Where the PR's agent runs: machine / runtime / account. */
     readonly environment?: { readonly machine: string; readonly runtime: string; readonly account: string };
@@ -193,6 +193,27 @@ export interface PullActions {
     stopAutopilot(): Promise<unknown>;
     resumeAutopilot(): Promise<unknown>;
     answerMerge(approve: boolean): Promise<unknown>;
+    /** Your own Squash and merge (`Pulls.merge`, #892): rejects with the actor's refusal. */
+    merge(): Promise<unknown>;
+}
+
+/** `Closes #47`, `fixes #47`, `#47` — the first issue a text names. */
+function issueNumberIn(text: string | undefined): number | undefined {
+    if (!text) return undefined;
+    const m = /(?:^|[\s(])#(\d+)\b/.exec(text);
+    return m ? Number(m[1]) : undefined;
+}
+
+/**
+ * The issue a live PR is for (#935): the first `#N` in its title, else in its task's objective, else the issue number
+ * its head branch starts with (`935-pr-live`). Labelled `agentic#935`, linked to the provider's issue on GitHub.
+ */
+export function pullIssueOf(pr: Pick<PullRequest, 'provider' | 'repo' | 'title' | 'head' | 'number'>, taskTitle?: string): PullLinked['issue'] {
+    const branch = /^(\d+)-/.exec(pr.head);
+    const n = issueNumberIn(pr.title) ?? issueNumberIn(taskTitle) ?? (branch ? Number(branch[1]) : undefined);
+    if (n === undefined || n === pr.number) return undefined;
+    const label = `${pr.repo.slice(pr.repo.lastIndexOf('/') + 1)}#${n}`;
+    return { number: n, label, ...(pr.provider === 'github' ? { href: `https://github.com/${pr.repo}/issues/${n}` } : {}) };
 }
 
 /** The PR a route's number names. */

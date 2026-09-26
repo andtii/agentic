@@ -1,20 +1,21 @@
 /**
  * `/projects/:id/work/pr:<n>` — a pull request (#744, PRJ-08/09): on mock data the fixtures in `mock/projects/pull.ts`,
  * live the project's `Pulls.get` view (the PR by number) with names from the agent directory, its controls wired to the
- * Pulls actor's autopilot methods (#858). `PullView` renders both.
+ * Pulls actor's autopilot methods (#858) and its `merge` (#935); Linked names the task and chat live and the issue the
+ * PR is for. `PullView` renders both.
  */
 import { component, type Define } from 'sigx';
 import { actor } from '@sigx/actors';
 import { useActorState } from '@sigx/actors/app';
 import { EmptyState } from '@agentic/ui';
 import { useActorDefs, useViewer } from '../../../../actors/defs';
-import { pullsKeyOf } from '../../../../actors/keys';
+import { chatKeyOf, pullsKeyOf, taskKeyOf } from '../../../../actors/keys';
 import { dataMode } from '../../../../data-mode';
 import { MOCK_PULLS } from '../../../../mock/projects/pull';
 import { AGENTS, MOCK_NOW } from '../../../../mock/workspace';
 import { useAgentDirectory } from '../../../chat/directory';
 import type { ProjectPageProps } from '../../layout/types';
-import { findPull, type PullActions, type PullPageData } from './model';
+import { findPull, pullIssueOf, type PullActions, type PullLinked, type PullPageData } from './model';
 import { PullView, type PullAgent } from './PullView';
 import { PullsSignIn } from './PullsSignIn';
 
@@ -47,15 +48,35 @@ const LivePull = component<PullProps>(({ props }) => {
         takeOver: () => write(() => pulls().takeOver(props.number)),
         stopAutopilot: () => write(() => pulls().stopAutopilot(props.number)),
         resumeAutopilot: () => write(() => pulls().resumeAutopilot(props.number)),
-        answerMerge: (approve) => write(() => pulls().answerMerge(props.number, approve))
+        answerMerge: (approve) => write(() => pulls().answerMerge(props.number, approve)),
+        merge: () => write(() => pulls().merge(props.number))
     };
+    const prOf = () => view.value?.pulls.find((p) => p.number === props.number);
+    // Linked, live (#935): the task's objective and the chat's title, each read while the PR names it.
+    const task = useActorState(defs.TaskActor, () => {
+        const id = prOf()?.taskId;
+        return viewer.workspaceId && id ? ([taskKeyOf(viewer.workspaceId, id), 'get'] as const) : false;
+    }, { live: true });
+    const chat = useActorState(defs.Chat, () => {
+        const id = prOf()?.chatId;
+        return viewer.workspaceId && id ? ([chatKeyOf(viewer.workspaceId, id), 'get'] as const) : false;
+    }, { live: true });
     return () => {
         const pr = view.value?.pulls.find((p) => p.number === props.number);
         // No credential for the repo (#915): say how to sign in, not that the PR does not exist.
         const signIn = <PullsSignIn projectId={props.project.id} readiness={view.value?.readiness} />;
         if (!pr) return view.loading ? null : view.value?.readiness === 'needs-sign-in' ? signIn : missing(props.number, 'The project has not read a pull request by that number.');
         const env = pr.autopilot ? directory.lookup(pr.autopilot.agentId).environment : undefined;
-        const data: PullPageData = { pr, ...(env && env.machine !== '—' ? { linked: { environment: env } } : {}) };
+        const taskTitle = pr.taskId && task.value?.id === pr.taskId ? task.value.objective : undefined;
+        const chatTitle = pr.chatId ? chat.value?.title : undefined;
+        const issue = pullIssueOf(pr, taskTitle);
+        const linked: PullLinked = {
+            ...(taskTitle ? { taskTitle } : {}),
+            ...(chatTitle ? { chatTitle } : {}),
+            ...(issue ? { issue } : {}),
+            ...(env && env.machine !== '—' ? { environment: env } : {})
+        };
+        const data: PullPageData = { pr, ...(Object.keys(linked).length ? { linked } : {}) };
         const run = view.value?.runs?.[String(pr.number)];
         return (
             <>

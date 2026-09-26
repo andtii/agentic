@@ -666,12 +666,14 @@ export function createActorToolPorts(options: ActorToolPortsOptions): PlatformPo
                       throw e;
                   }
                   const pr = view.pulls.find((p) => p.number === number);
-                  const note = pr ? undefined : (view.error ?? (view.repo ? 'not read yet; it is read on the next poll' : "the project's repo is not watched yet; the report is kept for when it is"));
+                  // Read (#935): the PR record itself, so the chat renders it as the live PR card (`isPullRequest`) and
+                  // follows it from the Pulls actor by repo and number.
+                  if (pr) return { ...pr };
+                  const note = view.error ?? (view.repo ? 'not read yet; it is read on the next poll' : "the project's repo is not watched yet; the report is kept for when it is");
                   return {
                       number,
-                      ...(view.repo ? { repo: view.repo.repo } : {}),
-                      ...(pr ? { state: pr.state, title: pr.title, url: pr.url } : {}),
-                      ...(note ? { note } : {})
+                      ...(view.repo ? { provider: view.repo.provider, repo: view.repo.repo } : {}),
+                      note
                   };
               }
           }

@@ -4,7 +4,8 @@
  * 380px rail — Autopilot switches, Merge (every blocker in one sentence, `Squash and merge`, the approval note),
  * Linked items. One view for mock and live data: `Pull` feeds it. Live, `actions` are the Pulls actor's autopilot
  * methods (#858) — the switches → `setAutopilot`, Take over / Stop autopilot / Resume, and Approve / Decline while the
- * autopilot asks to merge — and `run` says where the run stands. Without `actions` (mock) they edit a local copy;
+ * autopilot asks to merge, and Squash and merge → `merge` (#935), its refusal said under the button — and `run` says
+ * where the run stands. Without `actions` (mock) they edit a local copy;
  * `readOnly` disables them.
  */
 import { component, signal, type Define } from 'sigx';
@@ -37,12 +38,14 @@ export type PullViewProps =
 
 const PROVIDER_LABEL: Readonly<Record<string, string>> = { github: 'GitHub' };
 const LATER = 'Arrives with the git feature’s autopilot controls';
+/** Live, the merge is yours: your click is the approval. */
+const LIVE_MERGE_NOTE = 'Squash merges as you';
 
 export const PullView = component<PullViewProps>(({ props }) => {
     // Without `actions` (mock), Take over / Stop and the switches edit a copy taken at setup (`Pull` keys the view by
     // PR number, so another PR gets a fresh copy); live and read-only render the PR's own autopilot.
     const initial = props.data.pr.autopilot;
-    const st = signal({ autopilot: (initial ? { ...initial } : null) as Autopilot | null, stopped: '' as '' | 'you' | 'stopped', asked: false, busy: false, error: '' });
+    const st = signal({ autopilot: (initial ? { ...initial } : null) as Autopilot | null, stopped: '' as '' | 'you' | 'stopped', asked: false, busy: false, error: '', merging: false, mergeError: '' });
     const own = (): boolean => !!props.actions || !!props.readOnly;
     // Live, a copy per read: a switch's model writes into what it is given, never into the actor's view.
     const autopilot = (): Autopilot | undefined => {
@@ -98,6 +101,26 @@ export const PullView = component<PullViewProps>(({ props }) => {
         return !p ? '' : p === 'taken-over' ? 'you' : p === 'off' ? 'stopped' : 'other';
     };
     const disabled = (): boolean => !!props.readOnly || st.busy;
+    /** Live: your own merge through `Pulls.merge` (#935), its refusal under the button; mock: the approval ask. */
+    const merge = (): void => {
+        if (!props.actions) {
+            st.asked = true;
+            return;
+        }
+        if (st.busy) return;
+        st.merging = true;
+        st.mergeError = '';
+        void act(async (x) => {
+            try {
+                await x.merge();
+            } catch (error) {
+                st.mergeError = error instanceof Error ? error.message : String(error);
+            } finally {
+                st.merging = false;
+            }
+        });
+    };
+    const mergeError = () => (st.mergeError ? <p data-pull-merge-error="" role="alert">{st.mergeError}</p> : null);
 
     const person = (id: string): PullAgent => (id === 'you' ? { name: 'You' } : (props.agentOf(id) ?? { name: id }));
     const tile = (id: string, size: 18 | 20 = 20) => {
@@ -281,8 +304,17 @@ export const PullView = component<PullViewProps>(({ props }) => {
                 {pr.state === 'open'
                     ? (
                         <>
-                            <Button label="Squash and merge" name="merge" icon="commit" block disabled={!ready || props.readOnly || !!props.actions || st.asked} onClick={() => { st.asked = true; }} />
-                            <p data-pull-approval="">{st.asked ? 'Asked for approval: rule ask on merge' : APPROVAL_NOTE}</p>
+                            <Button
+                                label="Squash and merge"
+                                name="merge"
+                                icon="commit"
+                                block
+                                loading={!!props.actions && st.merging}
+                                disabled={!ready || disabled() || (!props.actions && st.asked)}
+                                onClick={merge}
+                            />
+                            {props.actions ? mergeError() : null}
+                            <p data-pull-approval="">{props.actions ? LIVE_MERGE_NOTE : st.asked ? 'Asked for approval: rule ask on merge' : APPROVAL_NOTE}</p>
                         </>
                     )
                     : null}
@@ -298,7 +330,7 @@ export const PullView = component<PullViewProps>(({ props }) => {
                 <dl>
                     <dt>Task</dt>
                     <dd data-link="task">{pr.taskId ? <><Link to={`/tasks/${pr.taskId}`}>{pr.taskId}</Link>{linked?.taskTitle ? <span data-task-title="">{linked.taskTitle}</span> : null}</> : <span data-none="">No task</span>}</dd>
-                    {linked?.issue ? <><dt>Issue</dt><dd data-link="issue">{linked.issue.label}</dd></> : null}
+                    {linked?.issue ? <><dt>Issue</dt><dd data-link="issue">{linked.issue.href ? <a href={linked.issue.href} target="_blank" rel="noreferrer">{linked.issue.label}</a> : linked.issue.label}</dd></> : null}
                     <dt>Chat</dt>
                     <dd data-link="chat">{pr.chatId ? <Link to={chatHref({ id: pr.chatId, projectId: props.projectId })}>{linked?.chatTitle ?? pr.chatId}</Link> : <span data-none="">No chat</span>}</dd>
                     <dt>Session</dt>
