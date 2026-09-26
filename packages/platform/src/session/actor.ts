@@ -41,6 +41,9 @@ import { correctionOf, instructionProposals, lastUserText, learningAccess, learn
 import type { AnswerFollowUp, OpenedSession, SessionOpenSpec, SessionPorts } from './ports.js';
 import { applySessionEntry, optionsOf, specOptions, bytesOf, type DetachedAnswer, currentTaskId, cursorAfter, EMPTY_TURN_EVENTS, jsonBytes, eventsAfter, findEvent, initialSessionState, isWholeEvent, knownEvents, PAGE_BYTES, parseSessionKey, platformCursor, requestById, RETAINED_PAGES, WINDOW_BYTES, type CorrectionRecord, type LearningRecord, type SessionEntry, type SessionPatch, type SessionState } from './state.js';
 import { SessionPage, sessionPageKey } from './page.js';
+import { shouldNoteActivity, toolActivity, type ActivityMark } from './activity.js';
+import { TaskActor } from '../task/actor.js';
+import { taskKey } from '../task/key.js';
 import { appendEntry, boundTranscript, createTranscriptStore } from './store.js';
 
 const V = WIRE_PROTOCOL_VERSION;
@@ -288,8 +291,11 @@ export function defineSessionActor(ports: SessionPorts) {
     const answerAttempts = ports.answerRetry?.attempts ?? ANSWER_ATTEMPTS;
     /** The live runtime session per activation, by actor key. Never outlives the activation that opened it. */
     const lives = new Map<string, Live>();
+    /** The last activity note per actor key (#955) — the throttle; in memory, so a new activation notes its first call. */
+    const activityMarks = new Map<string, ActivityMark>();
 
     async function dispose(key: string): Promise<void> {
+        activityMarks.delete(key);
         const live = lives.get(key);
         if (!live) return;
         lives.delete(key);
@@ -503,6 +509,26 @@ export function defineSessionActor(ports: SessionPorts) {
                 ...(ev.ruleId ? { ruleId: ev.ruleId } : {})
             }
         });
+    }
+
+    /**
+     * A tool call of a task's turn, once durable (#955): one short line on that task (`Task.note({ activity })`),
+     * one-way and throttled per session. `taskId` is the turn's, read by the caller before any fold; `undefined` (a
+     * turn the runtime started itself, #510) notes nothing. Never a gate on the turn.
+     */
+    async function noteActivity(c: ActorContext<SessionState>, ev: AgentEvent, taskId: TaskId | undefined): Promise<void> {
+        if (ev.type !== 'tool-call' || taskId === undefined) return;
+        const parsed = parseSessionKey(c.key);
+        if (!parsed) return;
+        const at = now();
+        if (!shouldNoteActivity(activityMarks.get(c.key), taskId, at)) return;
+        try {
+            await c.actor(TaskActor, taskKey(parsed.workspaceId, taskId)).with({ oneWay: true }).note({ activity: toolActivity(ev) });
+            // Marked once sent: a note that failed to go is tried again on the next call.
+            activityMarks.set(c.key, { taskId, at });
+        } catch {
+            // The status line is never a gate on the work.
+        }
     }
 
     /** One-way to the workspace's Inbox when the app wired one; a refusal or an absent inbox never fails the turn. */
@@ -1339,6 +1365,7 @@ export function defineSessionActor(ports: SessionPorts) {
                                 const runningTask = s.running?.implicit ? undefined : s.running?.taskId ?? s.spec?.taskId;
                                 await appendEvent(ctx, ev);
                                 const verdict = await recordUsage(ctx, ev, runningTask);
+                                await noteActivity(ctx, ev, runningTask);
                                 // Over budget on the daemon path: the cancel travels the CommandSink like any other command.
                                 if (verdict && !verdict.ok && s.running) await dispatch({ v: V, commandId: newCommandId('cancel'), type: 'cancel' });
                                 if (ev.type === 'turn-end' && runningTurn !== undefined && runningTurn === ev.turnId) await finishTurn(ctx, runningTurn, runningTask);
@@ -1544,7 +1571,11 @@ export function defineSessionActor(ports: SessionPorts) {
                         }
                         const ev = next.value;
                         await ctx.turn((c) => appendEvent(c, ev));
-                        const verdict = await ctx.turn((c) => recordUsage(c, ev, taskId));
+                        const verdict = await ctx.turn(async (c) => {
+                            const v = await recordUsage(c, ev, taskId);
+                            await noteActivity(c, ev, taskId);
+                            return v;
+                        });
                         // Over budget: the task has already failed itself; the turn stops here and no child starts (COL-11, OPS-08).
                         if (verdict && !verdict.ok && !signal.aborted) await ctx.turn((c) => cancelLocal(c, live, verdict.error));
                         if (ev.type === 'turn-end' && ev.turnId === turnId) {
