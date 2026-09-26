@@ -14,7 +14,11 @@
  *   personality shapes the reply; its policy (`pmPolicyOf`), never its personality, decides what needs a person.
  * - **accept** adds the proposed item to the project's Plan over a hop (the first plan, or a `Requests` plan it
  *   creates; the item's phase, else the first phase with open work), assigns it when the triage names an assignee,
- *   and links it as `resultItem`. The Plan checks the caller again: only the manager and people add items.
+ *   and links it as `resultItem`. The Plan checks the caller again: only the manager and people add items. The
+ *   requester's items the request names (`agentic#16` among its refs) then wait on the new item through a real
+ *   cross-project `after` (#931), so Links shows the pair and they stay blocked until it is done — best effort, as
+ *   the caller: the requester's Plan decides whether it may (a person may; another project's manager agent may not).
+ *   Who accepted is kept on the request (`acceptedBy`) for the requester's chat divider.
  *
  * - **replies** (#839): the manager's triage reply, the result of an accept, a decline's reason and a question for
  *   the sender are posted into the request's `fromChat` through `RequestReplyPort` (`reply.ts`), as the caller.
@@ -22,13 +26,14 @@
  * Every transition is a `request.changed` audit record with its actor. Workers eviction rule: every mutation ends in
  * `ctx.save()` inside the turn.
  */
-import type { AgentId, Plan, PlanActor, Principal, ProjectId, ProjectRecord, TaskContract, TaskId, WorkspaceId } from '@agentic/core';
+import type { AgentId, Plan, PlanActor, PlanItem, Principal, ProjectId, ProjectRecord, Ref, TaskContract, TaskId, WorkspaceId } from '@agentic/core';
 import { defineActor, type ActorClient, type ActorContext, type ActorPolicy, type AnyActorDefinition } from '@sigx/actors';
 import { ServerFnError } from '@sigx/server';
 import { auditPort, type AuditPort } from '../audit/port.js';
 import { sameWorkspace, workspaceKey } from '../auth/index.js';
 import { definePlanActor } from '../plan/actor.js';
 import { planKey } from '../plan/key.js';
+import { resolveProject } from '../plan/links.js';
 import { PlanRuleError, type PlanItemInput } from '../plan/rules.js';
 import { TaskActor } from '../task/actor.js';
 import { taskKey } from '../task/key.js';
@@ -164,6 +169,9 @@ interface RequestsPeer {
     from(projectId: ProjectId): Promise<RequestView[]>;
     noteSent(to: ProjectId): Promise<void>;
 }
+
+/** A plan item as the Plan actor's views carry it: with its waits on other projects. */
+type PlanItemWithRefs = PlanItem & { readonly afterRefs?: readonly { readonly projectId: ProjectId; readonly n: number }[] };
 
 const newestFirst = (a: StoredRequest, b: StoredRequest) => b.updatedAt - a.updatedAt || Number(b.id.slice(4)) - Number(a.id.slice(4));
 
@@ -321,6 +329,49 @@ export function defineRequestsActor(options: RequestsActorOptions = {}) {
                 return itemId;
             };
 
+            /** The most requester items one accept links to the new item. */
+            const LINK_MAX = 8;
+
+            /**
+             * Make the requester's items the request names (`project#n` refs resolving to `fromProject`) wait on
+             * `this#resultItem` (#931): each keeps what it already waits on. Best effort, item by item — the request is
+             * accepted either way, and a refusal (the caller may not change that plan, the item is done) skips the item.
+             */
+            const linkRequester = async (request: StoredRequest, resultItem: number, all: readonly Pick<ProjectRecord, 'id' | 'name'>[]): Promise<void> => {
+                const s = ctx.state;
+                const infos = all.map((p) => ({ id: p.id, name: p.name }));
+                const waiting = [
+                    ...new Set(
+                        request.refs.flatMap((ref) => (ref.kind === 'project-item' && resolveProject(ref.project, infos) === request.fromProject ? [ref.n] : []))
+                    )
+                ].slice(0, LINK_MAX);
+                if (!waiting.length) return;
+                const plan = ctx.actor(PlanRef, planKey(s.workspaceId, request.fromProject));
+                let items: Map<number, PlanItemWithRefs>;
+                try {
+                    const { plans } = await plan.list();
+                    items = new Map(plans.flatMap((p) => p.phases.flatMap((ph) => ph.items.map((i) => [i.id, i as PlanItemWithRefs] as const))));
+                } catch {
+                    return;
+                }
+                for (const n of waiting) {
+                    const item = items.get(n);
+                    if (!item || item.state === 'done') continue;
+                    const cross = item.afterRefs ?? [];
+                    if (cross.some((a) => a.projectId === s.projectId && a.n === resultItem)) continue;
+                    const after: (number | Ref)[] = [
+                        ...item.after,
+                        ...cross.map((a): Ref => ({ kind: 'project-item', project: a.projectId, n: a.n })),
+                        { kind: 'project-item', project: s.projectId, n: resultItem }
+                    ];
+                    try {
+                        await plan.after(n, after);
+                    } catch {
+                        // Not this caller's to change, or it changed meanwhile: the request stays accepted.
+                    }
+                }
+            };
+
             /** Requests this project sent, from each project it sent to (one that cannot be read is skipped). */
             const sentRequests = async (): Promise<RequestView[]> => {
                 const s = ctx.state;
@@ -374,7 +425,7 @@ export function defineRequestsActor(options: RequestsActorOptions = {}) {
                     requireKey();
                     requireIdle(id);
                     const actor = callerActor();
-                    const { project, call } = await context(actor);
+                    const { all, project, call } = await context(actor);
                     requireIdle(id);
                     let accept: AcceptPlan | null;
                     try {
@@ -401,7 +452,10 @@ export function defineRequestsActor(options: RequestsActorOptions = {}) {
                     } catch (error) {
                         return toServerError(error);
                     }
+                    // Who accepted, for the requester's divider ("you accepted in SignalX"); `record` saves it.
+                    if (resultItem !== undefined) (out.value as StoredRequest & { acceptedBy?: PlanActor }).acceptedBy = { ...actor };
                     await record(out.change, out.value, actor, at);
+                    if (resultItem !== undefined) await linkRequester(out.value, resultItem, all);
                     await reply(out.change, out.value, project.name);
                     return requestView(out.value);
                 },

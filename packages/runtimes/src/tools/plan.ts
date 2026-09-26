@@ -42,6 +42,11 @@ export interface PlanUpdateInput {
     readonly uncheck?: readonly number[];
     readonly note?: string;
     readonly state?: Exclude<PlanItemState, 'claimed'>;
+    /**
+     * Replace what the item waits on (#931): item numbers of this project, or `project#n` for an item in another
+     * project. The project manager's (and people's); the tool sets it through `PlanPort.after`, not `update`.
+     */
+    readonly after?: readonly (number | string)[];
 }
 
 export interface NewPlanItem {
@@ -74,6 +79,11 @@ export interface PlanPort {
     /** Put `item` in the queue of the member `to` (a handle), at `index` (default: the end). */
     assign(item: number, to: string, index: number | undefined, call: ToolCall): Promise<PlanItem>;
     update(input: PlanUpdateInput, call: ToolCall): Promise<PlanItem>;
+    /**
+     * Replace everything `item` waits on (#931): numbers or `#n` for this project's items, `project#n` for another
+     * project's. Optional: a host without it answers `plan_update` with `after` as unavailable.
+     */
+    after?(item: number, after: readonly (number | string)[], call: ToolCall): Promise<PlanItem>;
     /** Attach `ref`; a file ref comes back pinned to a commit. */
     ref(item: number, ref: Ref, call: ToolCall): Promise<Ref>;
     add(input: PlanAddInput, call: ToolCall): Promise<readonly PlanItem[]>;
@@ -219,7 +229,7 @@ export function planClaimRefusal(board: PlanBoard, n: number, now: number = Date
 }
 
 /** The refusal for a people-only tool (`plan_assign`, `plan_add`) when the caller is not the project manager. */
-export function planManagerRefusal(board: PlanBoard, tool: 'plan_assign' | 'plan_add'): string | undefined {
+export function planManagerRefusal(board: PlanBoard, tool: 'plan_assign' | 'plan_add' | 'plan_update with after'): string | undefined {
     if (board.manager !== undefined && board.manager === board.me) return undefined;
     const pm = board.manager !== undefined ? handleOf(board, agent(board.manager)) : undefined;
     return `${tool} is for the project manager and people, and you are not this project's manager. ${pm ? `Ask ${pm}` : 'Ask a person'} in the chat instead.`;
@@ -232,6 +242,12 @@ export function planApplyChecks(item: PlanItem, check: readonly number[] = [], u
     }
     return item.doneWhen.map((d, i) => ({ text: d.text, checked: check.includes(i) ? true : uncheck.includes(i) ? false : d.checked }));
 }
+
+/** What an item waits on, in the ref syntax: `#9`, and `signalx#14` for another project's (`afterRefs`, by id). */
+const afterText = (item: PlanItem): string[] => [
+    ...item.after.map((n) => `#${n}`),
+    ...((item as PlanItem & { afterRefs?: readonly { projectId: string; n: number }[] }).afterRefs ?? []).map((a) => `${a.projectId}#${a.n}`)
+];
 
 const ticked = (d: readonly PlanDoneWhen[]): string => `${d.filter((x) => x.checked).length} of ${d.length} done-when ticked`;
 
@@ -261,7 +277,12 @@ export const planUpdateInput = z.object({
     check: z.array(z.number().int().min(0)).optional().describe('Done-when lines to tick, 0-based.'),
     uncheck: z.array(z.number().int().min(0)).optional().describe('Done-when lines to untick, 0-based.'),
     note: z.string().min(1).optional().describe('A note for the item’s History; refs in the shared syntax (`#9`, `pr:604`, `path/file.ts:38-41`) are linked.'),
-    state: z.enum(['ready', 'needs-you', 'blocked', 'done', 'stuck']).optional().describe('A new state. `done` needs every done-when ticked; use plan_claim to start an item.')
+    state: z.enum(['ready', 'needs-you', 'blocked', 'done', 'stuck']).optional().describe('A new state. `done` needs every done-when ticked; use plan_claim to start an item.'),
+    after: z
+        .array(z.union([z.number().int().min(1), z.string().min(1).max(300)]))
+        .max(50)
+        .optional()
+        .describe('Replace what the item waits on (project manager only): item numbers of this project (`9` or `#9`), or `project#n` for an item in another project — it stays blocked until each is done. `[]` clears it; list what it already waits on to keep it.')
 });
 export const planRefInput = z.object({ item: itemNo, ref: z.string().min(1).describe('One ref: `#9`, `signalx#14`, `@lint`, `path/file.ts:38-41`, `pr:604`, `4f2a9c1`, `chat:msg-42`, `doc:architecture.md#7` or a URL.') });
 export const planAddInput = z.object({
@@ -352,18 +373,26 @@ export function planTools(port: PlanPort | undefined) {
         }),
         defineTool({
             name: UPDATE,
-            description: 'Tick or untick done-when lines, add a note to the item’s History, or change its state. `done` needs every done-when ticked; otherwise a person marks it done.',
+            description: 'Tick or untick done-when lines, add a note to the item’s History, change its state, or (project manager only) replace what it waits on with `after` — including `project#n` items of other projects. `done` needs every done-when ticked; otherwise a person marks it done.',
             input: planUpdateInput,
             annotations: WRITE,
             execute: async (input, ctx) => {
                 const p = need(port, UPDATE);
                 const board = await p.board(call(ctx));
                 const { item } = find(board, input.item);
-                if (!input.check?.length && !input.uncheck?.length && input.note === undefined && input.state === undefined) throw new PlanRefusal(`nothing to change on #${item.id}: pass check, uncheck, note or state.`);
-                const after = planApplyChecks(item, input.check, input.uncheck);
-                if (input.state === 'done' && !planDoneWhenMet(after)) throw new PlanRefusal(`#${item.id} has ${ticked(after)}; tick them all first, or ask a person to mark it done.`);
+                const patching = !!input.check?.length || !!input.uncheck?.length || input.note !== undefined || input.state !== undefined;
+                if (!patching && input.after === undefined) throw new PlanRefusal(`nothing to change on #${item.id}: pass check, uncheck, note, state or after.`);
+                const ticks = planApplyChecks(item, input.check, input.uncheck);
+                if (input.state === 'done' && !planDoneWhenMet(ticks)) throw new PlanRefusal(`#${item.id} has ${ticked(ticks)}; tick them all first, or ask a person to mark it done.`);
+                if (input.after !== undefined) {
+                    const refusal = planManagerRefusal(board, 'plan_update with after');
+                    if (refusal) throw new PlanRefusal(refusal);
+                    if (!p.after) throw new PlanRefusal(`changing what an item waits on is not available here; ask a person to set it on #${item.id}.`);
+                    const linked = await p.after(input.item, input.after, call(ctx));
+                    if (!patching) return { item: linked.id, state: linked.state, after: afterText(linked) };
+                }
                 const updated = await p.update({ item: input.item, ...(input.check ? { check: input.check } : {}), ...(input.uncheck ? { uncheck: input.uncheck } : {}), ...(input.note !== undefined ? { note: input.note } : {}), ...(input.state !== undefined ? { state: input.state } : {}) }, call(ctx));
-                return { item: updated.id, state: updated.state, doneWhen: ticked(updated.doneWhen) };
+                return { item: updated.id, state: updated.state, doneWhen: ticked(updated.doneWhen), ...(input.after !== undefined ? { after: afterText(updated) } : {}) };
             }
         }),
         defineTool({
