@@ -3,11 +3,12 @@
  * `AgentActor.get()` of `project.pm.agentId` (#784), its changes `Workspace.updateProjectManager` (a new config
  * version), a project without one gets it through `upsertProject({ pm })`; the other projects come from
  * `Workspace.projects()`, the agents' names from the chat directory. The policy saves through the settings tabs'
- * `useTabSave` (`upsertProject({ pmPolicy })`). On mock data the manager is the project's coordinator (or its
+ * `useTabSave` (`upsertProject({ pmPolicy })`). The skill picker lists every skill the workspace's agents carry (#942;
+ * there is no skill registry yet), read once per roster. On mock data the manager is the project's coordinator (or its
  * `pm.agentId`) with the first preset, and a change lands in `mockManagerSaves` and the page's copy.
  * `dataMode()` is fixed for an app, so each hook takes one branch for the life of the page.
  */
-import { signal, watch } from 'sigx';
+import { signal, useData, watch } from 'sigx';
 import { actor } from '@sigx/actors';
 import { useActorState } from '@sigx/actors/app';
 import { PM_PERSONALITIES, type ProjectId, type ProjectManagerSpec, type ProjectRecord } from '@agentic/core';
@@ -19,14 +20,14 @@ import { MOCK_PM_SKILLS } from '../../../../mock/projects/settings';
 import { AGENTS, PROJECTS } from '../../../../mock/workspace';
 import { saveProjectWith, useProjects } from '../../live';
 import { useMembersSource } from '../general/sources';
-import { personalityOfInstructions, type ManagerPatch, type PmAgent } from './model';
+import { personalityOfInstructions, skillCatalogOf, type ManagerPatch, type PmAgent } from './model';
 
 export interface ManagerSource {
     /** The project's manager; `null` when it has none (or the read has not landed). */
     agent(): PmAgent | null;
     readonly loading: boolean;
-    /** Every project in the workspace, for the sender rules. */
-    projects(): readonly Pick<ProjectRecord, 'id' | 'name'>[];
+    /** Every project in the workspace, for the sender rules (with its members, which a rule can name). */
+    projects(): readonly Pick<ProjectRecord, 'id' | 'name' | 'members'>[];
     nameOf(agentId: string): string;
     skillOptions(): readonly { readonly value: string; readonly label?: string }[];
     /** Change the manager: only the fields named. */
@@ -100,6 +101,25 @@ function useLiveSource(project: () => ProjectRecord): ManagerSource {
         },
         { live: true }
     );
+    // The workspace's skills: what its agents carry (the roster from the live Workspace index).
+    const index = useActorState(defs.Workspace, () => viewer.workspaceId && ([workspaceKeyOf(viewer.workspaceId), 'get'] as const), { live: true });
+    const skills = useData(
+        () => {
+            const ws = viewer.workspaceId;
+            const ids = index.value?.agents;
+            return ws && ids ? (['workspace-skills', ws, ...ids] as const) : false;
+        },
+        async (key): Promise<string[][]> => {
+            const [, ws, ...ids] = key as readonly [string, string, ...string[]];
+            return Promise.all(ids.map(async (id) => {
+                try {
+                    return ((await actor(defs.AgentActor, agentKeyOf(ws, id)).get()).config.skills ?? []).map((s) => s.id);
+                } catch {
+                    return [];
+                }
+            }));
+        }
+    );
     const ws = (): string => {
         const id = viewer.workspaceId;
         if (!id) throw new Error('Sign in to change the project.');
@@ -112,7 +132,10 @@ function useLiveSource(project: () => ProjectRecord): ManagerSource {
         },
         projects: () => projects.list(),
         nameOf: (id) => members.agents().find((a) => a.id === id)?.name ?? id,
-        skillOptions: () => [],
+        skillOptions: () => {
+            const a = project().pm?.agentId && view.value ? pmAgentOf(view.value) : null;
+            return skillCatalogOf(skills.value ?? [], a?.skills ?? []);
+        },
         async update(patch) {
             await actor(defs.Workspace, workspaceKeyOf(ws())).updateProjectManager(project().id as ProjectId, patch);
         },

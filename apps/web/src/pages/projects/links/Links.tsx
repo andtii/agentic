@@ -6,11 +6,11 @@
  * Its trail is `crumbs.ts`'s.
  *
  * Mock data draws `MOCK_PROJECT_LINKS`; live, every project's `Plan.linkItems()` through `workspaceLinks` (#881,
- * ./live.ts), with the agents' names from the directory.
+ * ./live.ts), read live (#942), with the agents' names from the directory; skeleton lanes until the first read lands.
  */
 import { component, signal, useHead, type Define, type JSXElement } from 'sigx';
 import { Link } from '@sigx/router';
-import { AgentTile, EmptyState, Icon, ItemGlyph } from '@agentic/ui';
+import { AgentTile, CardSkeleton, EmptyState, Icon, ItemGlyph } from '@agentic/ui';
 import { useActorDefs, useViewer } from '../../../actors/defs';
 import { dataMode } from '../../../data-mode';
 import { MOCK_PROJECT_LINKS } from '../../../mock/projects/links';
@@ -164,7 +164,18 @@ const LEGEND: readonly { readonly state: 'claimed' | 'ready' | 'blocked'; readon
     { state: 'blocked', text: 'waiting on another item' }
 ];
 
-export type LinksBoardProps = Define.Prop<'data', LinksData, true>;
+export type LinksBoardProps =
+    & Define.Prop<'data', LinksData, true>
+    /** The first read has not landed: skeleton lanes stand in for the graph, not the empty state (#942). */
+    & Define.Prop<'loading', boolean>;
+
+/** Three lane-shaped skeletons, announced once. */
+const LinksSkeleton = () => (
+    <div data-links-skeleton="" aria-busy="true" role="status" style="display: flex; flex-direction: column; gap: var(--space-md)">
+        <span data-visually-hidden="">Loading links</span>
+        {[0, 1, 2].map(() => <CardSkeleton lines={1} label="" />)}
+    </div>
+);
 
 /** The page body over any data source: head with the toggle, graph (or chains), legend, chain panel. */
 export const LinksBoard = component<LinksBoardProps>(({ props }) => {
@@ -175,6 +186,7 @@ export const LinksBoard = component<LinksBoardProps>(({ props }) => {
         const selected = milestones.find((m) => m.ref === st.selected)?.ref ?? milestones[0]?.ref;
         const openCount = linkCount(props.data.open);
         const empty = linkCount(view) === 0;
+        const loading = !!props.loading && empty;
         return (
             <section data-page="projects-links" data-projects-links="" aria-label="Links across projects">
                 <nav data-projects-tabs="" aria-label="Projects views">
@@ -197,7 +209,7 @@ export const LinksBoard = component<LinksBoardProps>(({ props }) => {
                         ))}
                     </div>
                 </div>
-                {empty ? (
+                {loading ? <LinksSkeleton /> : empty ? (
                     <EmptyState
                         variant="generic"
                         title={st.which === 'open' ? 'No open links across projects' : 'No done links yet'}
@@ -243,7 +255,7 @@ const LiveProjectLinks = component(() => {
         const a = directory.lookup(id);
         return { name: a.name, hue: a.hue };
     };
-    return () => <LinksBoard data={liveLinksData(links.graphs(), names)} />;
+    return () => <LinksBoard data={liveLinksData(links.graphs(), names)} loading={viewer.pending || projects.loading || links.loading} />;
 }, { name: 'LiveProjectLinks' });
 
 /** `/projects/links`. */

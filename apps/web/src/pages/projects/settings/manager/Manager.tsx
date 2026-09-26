@@ -9,7 +9,7 @@ import { component, signal, watch } from 'sigx';
 import { PM_PERSONALITIES, PM_POLICY_DEFAULT, type ProjectRecord } from '@agentic/core';
 import { RadioGroup } from '@sigx/zero';
 import { Field } from '@sigx/zero-daisyui/components';
-import { Button, ChipInput, ErrorNote, SelectField, Switch, TextField, TextareaField } from '@agentic/ui';
+import { Button, CardSkeleton, ChipInput, ErrorNote, SelectField, Switch, TextField, TextareaField } from '@agentic/ui';
 import type { ProjectPageProps } from '../../layout/types';
 import { CUSTOM_PERSONALITY, PERSONALITY_SAMPLES } from '../../new/model';
 import { useTabSave } from '../general/sources';
@@ -28,6 +28,7 @@ import {
     policyOf,
     removeSenderProject,
     runtimeNote,
+    senderMembers,
     validateManagerDraft,
     validatePolicyDraft,
     whoLabel,
@@ -42,10 +43,10 @@ export const ProjectManager = component<ProjectPageProps>(({ props }) => {
     const source = useManagerSource(() => props.project);
     const save = useTabSave();
     const policyOfProject = (p: ProjectRecord) => p.pm?.policy ?? PM_POLICY_DEFAULT;
-    const pol = signal({ ...policyDraftOf(policyOfProject(props.project)), adding: '', attempted: false });
+    const pol = signal({ ...policyDraftOf(policyOfProject(props.project)), adding: '', addingWho: {} as Record<string, boolean>, attempted: false });
     const ed = signal({ ...managerDraftOf(null), editing: false, attempted: false, busy: false, error: '', saved: false });
     watch(() => props.project.id, () => {
-        Object.assign(pol, { ...policyDraftOf(policyOfProject(props.project)), adding: '', attempted: false });
+        Object.assign(pol, { ...policyDraftOf(policyOfProject(props.project)), adding: '', addingWho: {}, attempted: false });
         Object.assign(ed, { editing: false, attempted: false, error: '', saved: false });
     });
 
@@ -125,7 +126,7 @@ export const ProjectManager = component<ProjectPageProps>(({ props }) => {
         return (
             <section data-pm-card="agent" aria-label="Project manager">
                 <h3>Project manager</h3>
-                {source.loading && !agent ? <p data-pm-empty="">Loading the project manager…</p> : agent ? (
+                {source.loading && !agent ? <CardSkeleton lines={3} label="Loading the project manager" /> : agent ? (
                     <>
                         <div data-pm-agent={agent.id}>
                             <span data-pm-avatar aria-hidden="true">{initials(agent.name)}</span>
@@ -161,6 +162,14 @@ export const ProjectManager = component<ProjectPageProps>(({ props }) => {
         const nameOfProject = (id: string): string => source.projects().find((p) => p.id === id)?.name ?? id;
         const named = pol.senders.filter((r) => r.project !== '*');
         const addable = source.projects().filter((p) => p.id !== props.project.id && !pol.senders.some((r) => r.project === p.id));
+        // The members a new rule can name (#942): none picked lets any member of the project send.
+        const members = pol.adding ? senderMembers(source.projects().find((p) => p.id === pol.adding), source.nameOf) : [];
+        const add = (): void => {
+            const picked = members.filter((m) => pol.addingWho[m.id]).map((m) => m.id);
+            addSenderProject(pol, pol.adding, picked);
+            pol.adding = '';
+            pol.addingWho = {};
+        };
         return (
             <section data-pm-card="senders" aria-label="Who can send requests">
                 <h3>Who can send requests</h3>
@@ -184,7 +193,19 @@ export const ProjectManager = component<ProjectPageProps>(({ props }) => {
                 {addable.length ? (
                     <div data-pm-sender-add="">
                         <SelectField model={() => pol.adding} name="pm-sender-add" label="Let a project send straight to triage" placeholder="Pick a project" options={addable.map((p) => ({ value: p.id, label: p.name }))} />
-                        <Button intent="default" disabled={!pol.adding} onClick={() => { addSenderProject(pol, pol.adding); pol.adding = ''; }}>Add</Button>
+                        {members.length ? (
+                            <fieldset data-pm-sender-who-pick="">
+                                <legend>Only these members</legend>
+                                <span data-pm-row-hint>{`None picked: any member of ${nameOfProject(pol.adding)}.`}</span>
+                                {members.map((m) => (
+                                    <div data-pm-sender-member={m.id}>
+                                        <span data-pm-row-label>{m.name}</span>
+                                        <Switch model={[pol.addingWho, m.id]} label={`${m.name} may send`} hideLabel name={`pm-sender-member-${m.id}`} />
+                                    </div>
+                                ))}
+                            </fieldset>
+                        ) : null}
+                        <Button intent="default" disabled={!pol.adding} onClick={add}>Add</Button>
                     </div>
                 ) : null}
             </section>

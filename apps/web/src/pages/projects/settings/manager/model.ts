@@ -5,7 +5,7 @@
  * policy — who may send requests, keeping you in the loop, what the manager may do without asking — is a `PmPolicy`
  * saved as `ProjectPatch.pmPolicy` through `upsertProject`. Pure: the mock and live pages render the same view.
  */
-import { PM_PERSONALITIES, PM_PERSONALITY_MAX, type PmAutonomy, type PmPersonality, type PmPolicy, type PmPriorityCap, type PmSenderRule, type ProjectId, type ProjectManagerSpec } from '@agentic/core';
+import { PM_PERSONALITIES, PM_PERSONALITY_MAX, type AgentId, type PlanActor, type PmAutonomy, type PmPersonality, type PmPolicy, type PmPriorityCap, type PmSenderRule, type ProjectId, type ProjectManagerSpec } from '@agentic/core';
 import { CUSTOM_PERSONALITY, PERSONALITY_SAMPLES } from '../../new/model';
 
 /** The project's manager agent as the page shows it. */
@@ -168,11 +168,30 @@ export function policyOf(d: PolicyDraft): PmPolicy {
     };
 }
 
-/** Add a rule letting any member of `projectId` send straight to triage (before the `'*'` rule); no-op when it has one. */
-export function addSenderProject(d: PolicyDraft, projectId: string): void {
+/**
+ * Add a rule letting `projectId` send straight to triage (before the `'*'` rule): any of its members, or — when
+ * `agentIds` names some (#942) — only those senders ("Atlas, Forge, Lint"). No-op when the project has a rule.
+ */
+export function addSenderProject(d: PolicyDraft, projectId: string, agentIds: readonly string[] = []): void {
     if (!projectId || projectId === '*' || d.senders.some((r) => r.project === projectId)) return;
+    const named = [...new Set(agentIds.filter(Boolean))];
+    const who: PmSenderRule['who'] = named.length ? named.map((agentId): PlanActor => ({ kind: 'agent', agentId: agentId as AgentId })) : 'any-member';
     d.allowed = { ...d.allowed, [projectId]: true };
-    d.senders = [...d.senders.filter((r) => r.project !== '*'), { project: projectId as ProjectId, who: 'any-member', mode: 'allowed' }, ...d.senders.filter((r) => r.project === '*')];
+    d.senders = [...d.senders.filter((r) => r.project !== '*'), { project: projectId as ProjectId, who, mode: 'allowed' }, ...d.senders.filter((r) => r.project === '*')];
+}
+
+/** The agents a sender rule for `project` can name: its members, by name, in roster order. */
+export function senderMembers(project: { readonly members: { readonly agentIds: readonly string[] } } | undefined, nameOf: (id: string) => string): { id: string; name: string }[] {
+    return [...new Set(project?.members.agentIds ?? [])].map((id) => ({ id, name: nameOf(id) }));
+}
+
+/**
+ * The skill picker's catalogue (#942): every skill the workspace's agents carry, then the manager's own (so a saved
+ * pick stays selectable), each once, alphabetical.
+ */
+export function skillCatalogOf(agentSkills: readonly (readonly string[])[], current: readonly string[] = []): { value: string; label: string }[] {
+    const ids = [...new Set([...agentSkills.flat(), ...current].map((s) => s.trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+    return ids.map((value) => ({ value, label: value }));
 }
 
 /** Drop a named project's rule: its members then fall under any other project. */

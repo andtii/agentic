@@ -11,6 +11,7 @@ import type { ProjectRecord } from '@agentic/core';
 import { useActorDefs, useViewer, type ActorDefs } from '../../../actors/defs';
 import { planKeyOf, requestsKeyOf } from '../../../actors/keys';
 import { Page } from '../../../components/Page';
+import { useWorkspaceZone } from '../../../time';
 import { useAgentDirectory } from '../../chat/directory';
 import { useProjects } from '../live';
 import { acceptResolution, failureNote, liveEntries, phasesOf } from './live';
@@ -29,6 +30,7 @@ export const LiveRequests = component<Define.Prop<'project', ProjectRecord, true
     const sent = useActorState(defs.Requests, () => viewer.workspaceId && ([requestsKeyOf(viewer.workspaceId, props.project.id), 'sent'] as const), { live: true });
     const linked = useActorState(defs.Requests, () => viewer.workspaceId && ([requestsKeyOf(viewer.workspaceId, props.project.id), 'linked'] as const), { live: true });
     const plans = useActorState(defs.Plan, () => viewer.workspaceId && ([planKeyOf(viewer.workspaceId, props.project.id), 'list'] as const), { live: true });
+    const zone = useWorkspaceZone(defs, viewer);
     const st = signal({ note: '' });
 
     const names: ActorNames = (id) => {
@@ -59,6 +61,8 @@ export const LiveRequests = component<Define.Prop<'project', ProjectRecord, true
     return () => {
         const error = incoming.error ?? sent.error ?? linked.error;
         const entries = liveEntries({ incoming: incoming.value ?? [], sent: sent.value ?? [], linked: linked.value ?? [] }, projectName, manager());
+        // Skeleton rows until the first read of each box lands, not the empty state (#942).
+        const loading = !error && [incoming, sent, linked].some((r) => r.loading && r.value == null);
         const note = st.note || (error ? failureNote('read the requests', error) : '');
         return (
             <Page title="Requests" page="project-requests">
@@ -70,6 +74,8 @@ export const LiveRequests = component<Define.Prop<'project', ProjectRecord, true
                     you="you"
                     phases={phasesOf(plans.value?.plans)}
                     now={Date.now()}
+                    zone={zone()}
+                    loading={loading}
                     {...(note ? { note } : {})}
                     onAccept={(id: string, edit?: AcceptEdit) => void onAccept(id, edit)}
                     onAskForMore={(id: string, question: string) => void run('ask for more', (c) => c.resolve(id, { action: 'ask', question: question.trim() }))}

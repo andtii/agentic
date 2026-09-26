@@ -29,6 +29,8 @@ export interface RequestEntry {
     readonly area?: string;
     /** Needs you: to let it in (the sender rules held it back) or to decide on the triage (#831). */
     readonly needs?: 'admit' | 'decision';
+    /** Why it waits on a person when the manager's triage does not say (#942): the sender rule that held it back, or no manager. */
+    readonly why?: string;
 }
 
 /** A name and hue for an actor id; the caller's directory. */
@@ -100,6 +102,15 @@ export function githubRepoOf(p: Pick<ProjectRecord, 'features'>): string | undef
         if (m) return `${m[1]}/${m[2]}`;
     }
     return undefined;
+}
+
+/**
+ * The `why you:` line (#942): the triage's own reason, else the entry's (a request let in or with no manager), else —
+ * for one held back with no reason recorded — the sender rule. `undefined` when nothing sent it to a person.
+ */
+export function whyYou(e: RequestEntry): string | undefined {
+    if (e.request.state !== 'needs-you') return undefined;
+    return e.request.triage?.why || e.why || (e.needs === 'admit' ? "the sender's project asks you first" : undefined);
 }
 
 // ---- the edit-first form -------------------------------------------------------------------------------------------
