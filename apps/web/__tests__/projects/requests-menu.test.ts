@@ -16,9 +16,9 @@ describe('Requests needs-you badge (#944)', () => {
     });
 
     it('draws no badge at 0 or when the count is absent', () => {
-        expect(requestsOf(projectMenu(managed, { requests: 0 }))?.badge).toBeUndefined();
-        expect(requestsOf(projectMenu(managed))?.badge).toBeUndefined();
-        expect(requestsOf(projectMenu(managed, { requests: 0 }))).not.toHaveProperty('badge');
+        const plain = { href: '/projects/p1/requests', label: 'Requests', icon: 'delegate' };
+        expect(requestsOf(projectMenu(managed, { requests: 0 }))).toEqual(plain);
+        expect(requestsOf(projectMenu(managed))).toEqual(plain);
     });
 
     it('draws no Requests item without a manager, whatever the count', () => {
