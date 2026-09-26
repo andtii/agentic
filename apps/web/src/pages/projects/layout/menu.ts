@@ -5,7 +5,7 @@
  * draws it (`NavItem.children`). Mock mode reads the sample workspace; live mode what `ProjectLayout` published.
  *
  * Counts (#728, `counts.ts`): Chats carries `count`, Work carries the `needs-you` `badge` when something there waits
- * on the person and its `count` otherwise, a feature section its own `count` when its manifest's section badge is
+ * on the person and its `count` otherwise, Requests the `needs-you` `badge` of the requests waiting on a person (#944), a feature section its own `count` when its manifest's section badge is
  * `open-items`. The first block's label is the project's
  * name — the switcher #727 draws, which opens the picker (`ProjectPicker.tsx`).
  *
@@ -62,11 +62,12 @@ export function projectMenuCounts(id: string): ProjectMenuCounts | undefined {
 export function projectMenu(src: ProjectHead, counts: ProjectMenuCounts = {}): readonly NavGroup[] {
     const base = `/projects/${src.id}`;
     const needsYou = counts.needsYou ?? 0;
+    const requests = counts.requests ?? 0;
     const core: ProjectMenuItem[] = [
         { href: base, label: 'Overview', icon: 'home' },
         { href: `${base}/chats`, label: 'Chats', icon: 'chats', ...counted(counts.chats) },
         { href: `${base}/work`, label: 'Work', icon: 'check', ...(needsYou > 0 ? { badge: needsYou } : counted(counts.work)) },
-        ...(src.manager ? [{ href: `${base}/requests`, label: 'Requests', icon: 'delegate' as const }] : [])
+        ...(src.manager ? [{ href: `${base}/requests`, label: 'Requests', icon: 'delegate' as const, ...(requests > 0 ? { badge: requests } : {}) }] : [])
     ];
     const features: ProjectMenuItem[] = (src.features ?? []).flatMap((id) => {
         const section = featureSectionOf(id);
