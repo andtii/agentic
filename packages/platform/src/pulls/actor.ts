@@ -34,6 +34,8 @@ import { ServerFnError } from '@sigx/server';
 import { principalLabel } from '../agent/index.js';
 import { auditPort, type AuditPort } from '../audit/port.js';
 import { sameWorkspace } from '../auth/index.js';
+import { definePlanActor } from '../plan/actor.js';
+import { planKey } from '../plan/key.js';
 import { TaskActor } from '../task/actor.js';
 import { taskKey } from '../task/key.js';
 import { parsePullsKey, PULLS_TYPE } from './key.js';
@@ -172,6 +174,19 @@ export interface PullsActorOptions {
     readonly merged?: PullMergedPort;
     /** The workspace's Inbox (`defineInbox`), where a PR that became your move is told (#818). Absent → nothing is sent. */
     readonly inbox?: () => AnyActorDefinition;
+    /**
+     * The Plan actor told of a merge (#938: the items handed off from the PR's task are done), before `merged`.
+     * Default: the project's Plan actor by type (the host runs the app's own); `null` → not told.
+     */
+    readonly plan?: (() => AnyActorDefinition) | null;
+}
+
+/** Only its `type` matters for a hop: the host runs the app's own Plan definition. */
+let planRef: AnyActorDefinition | undefined;
+const planByType = (): AnyActorDefinition => (planRef ??= definePlanActor() as unknown as AnyActorDefinition);
+
+interface PlanMergeClient {
+    pullMerged(pr: { readonly number: number; readonly taskId?: TaskId }): Promise<number[]>;
 }
 
 /** The switches `setAutopilot` takes: core's `Autopilot` without what the run fills. */
@@ -358,6 +373,15 @@ export function definePullsActor(options: PullsActorOptions) {
 
     /** The merge hook, once per PR (it rides on the audit's once): a failure is logged, never retried. */
     const noticeMerge = async (ctx: Ctx, pr: PullRequest): Promise<void> => {
+        // The plan first (#938): an item handed off from the PR's task is done before the requesters hear of it.
+        const planDef = options.plan === null ? undefined : (options.plan ?? planByType)();
+        if (planDef) {
+            try {
+                await (ctx.actor(planDef, planKey(ctx.state.workspaceId, ctx.state.projectId)) as unknown as PlanMergeClient).pullMerged({ number: pr.number, ...(pr.taskId !== undefined ? { taskId: pr.taskId } : {}) });
+            } catch (error) {
+                console.warn(`[pulls] marking the plan items of #${pr.number} done failed:`, error);
+            }
+        }
         if (!options.merged) return;
         try {
             await options.merged.merged({ actor: (def, key) => ctx.actor(def, key) }, { workspaceId: ctx.state.workspaceId, projectId: ctx.state.projectId, pr });

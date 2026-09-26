@@ -9,10 +9,11 @@
  * ran out, touches overlap, handoff) are taken and handed to `deliver`. A file ref is pinned through `pin` when the
  * host can, and stored unpinned otherwise.
  */
-import { formatRef, memberLimit, type AgentId, type FileRef, type Plan, type PlanActor, type PlanItem, type ProjectRecord, type Ref, type TaskId } from '@agentic/core';
+import { formatRef, PLAN_LEASE_DEFAULT_MS, type AgentId, type FileRef, type Plan, type PlanActor, type PlanItem, type ProjectRecord, type Ref, type TaskId } from '@agentic/core';
 import { PlanRefusal, type NewPlanItem, type PlanAddInput, type PlanBoard, type PlanMember, type PlanPort, type PlanUpdateInput, type ToolCall } from '@agentic/runtimes';
 import type { LinkedItemInput } from './links.js';
-import type { ClaimOptions, PlanItemPatch, PlanNotice } from './rules.js';
+import type { ClaimOptions, HandoffOptions, PlanItemPatch, PlanNotice } from './rules.js';
+import { planLimitOf } from './settings.js';
 
 /** The Plan actor methods the port calls; a client of `definePlanActor()` satisfies it. */
 export interface PlanActorClient {
@@ -24,13 +25,13 @@ export interface PlanActorClient {
     ref(itemId: number, ref: Ref | string): Promise<PlanItem>;
     add(planId: string, phase: number, items: readonly LinkedItemInput[]): Promise<readonly PlanItem[]>;
     split(itemId: number, parts: readonly LinkedItemInput[]): Promise<readonly PlanItem[]>;
-    handoff(itemId: number, to: PlanActor | null, note: string): Promise<PlanItem>;
+    handoff(itemId: number, to: PlanActor | null, note: string, options?: HandoffOptions): Promise<PlanItem>;
     takeNotices(): Promise<readonly PlanNotice[]>;
 }
 
 /** Who may be named on a plan: the project's agents (by name) and the people who may be named by handle. */
 export interface PlanPeople {
-    readonly project: Pick<ProjectRecord, 'members'>;
+    readonly project: Pick<ProjectRecord, 'members'> & Partial<Pick<ProjectRecord, 'features'>>;
     /** The agents' display names by id; a handle is the name's slug (`Lint Bot` → `lint-bot`), else the id. */
     readonly names: ReadonlyMap<AgentId, string>;
     /** People (user ids) who may be named; the handle is the user id. */
@@ -156,12 +157,13 @@ export function createPlanPort(deps: PlanPortDeps): PlanPort {
             run(call, async (scope): Promise<PlanBoard> => {
                 const { plans } = await scope.plan.list();
                 const manager = scope.project.members.coordinator;
-                return { plans, members: planMembers(scope), me, ...(manager ? { manager } : {}), limit: memberLimit(scope.project, me) };
+                return { plans, members: planMembers(scope), me, ...(manager ? { manager } : {}), limit: planLimitOf(scope.project, me) };
             }),
         claim: (item, leaseMs, call) =>
             run(call, async (scope) => {
                 const taskId = deps.taskId?.();
-                return (await scope.plan.claim(item, { leaseMs, ...(taskId ? { taskId } : {}) })).item;
+                // The tool's own default stands for "none asked": the project's lease setting applies (#938).
+                return (await scope.plan.claim(item, { ...(leaseMs !== PLAN_LEASE_DEFAULT_MS ? { leaseMs } : {}), ...(taskId ? { taskId } : {}) })).item;
             }),
         assign: (item, to, index, call) => run(call, (scope) => scope.plan.assign(item, resolvePlanMember(scope, to), index)),
         update: (input, call) => run(call, (scope) => scope.plan.update(input.item, planPatch(input))),
@@ -178,7 +180,9 @@ export function createPlanPort(deps: PlanPortDeps): PlanPort {
         handoff: (item, to, note, call) =>
             run(call, async (scope) => {
                 const target = to !== undefined ? resolvePlanMember(scope, to) : planHandoffTarget(scope, (await scope.plan.list()).plans, item, undefined);
-                return scope.plan.handoff(item, target, note);
+                // The session's task: when its pull request merges, the item is done (#938).
+                const taskId = deps.taskId?.();
+                return scope.plan.handoff(item, target, note, ...(taskId ? [{ taskId }] : []));
             })
     };
 }
