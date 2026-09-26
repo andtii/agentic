@@ -7,7 +7,8 @@
  */
 import { component, signal, watch, type Define } from 'sigx';
 import { applyProjectFeaturePreset, type ProjectPatch, type ProjectRecord } from '@agentic/core';
-import { Button, ErrorNote, FilterChips, ICON_NAMES, Icon, SchemaForm, SlotMarks, Switch, type IconName, type ProjectFeatureSlot, type SchemaFormApi } from '@agentic/ui';
+import { Button, ErrorNote, FilterChips, Icon, SchemaForm, SlotMarks, Switch, type IconName, type ProjectFeatureSlot, type SchemaFormApi } from '@agentic/ui';
+import { featureIcon } from '../../features/registry';
 import { SLOT_LEGEND, catalogueTiles, categoryChips, enabledEntries, featurePatch, hasSettings, needLabel, removePatch, slotLines, unmetNeeds, type FeatureEntry, type SlotLine } from './model';
 
 export type FeaturesViewProps =
@@ -20,14 +21,8 @@ export type FeaturesViewProps =
 
 const SLOT_ICONS: Readonly<Record<ProjectFeatureSlot, IconName>> = { section: 'menu', overviewCard: 'home', workStages: 'check', chatRefPrefixes: 'chats', tools: 'brain' };
 
-/** Manifest icon names the kit spells differently. */
-const ICON_ALIASES: Readonly<Record<string, IconName>> = { code: 'terminal', 'git-branch': 'branch', calendar: 'schedules' };
-
-const iconOf = (entry: FeatureEntry): IconName => {
-    const icon = entry.ui.section?.icon;
-    if (!icon) return 'plugins';
-    return (ICON_NAMES as readonly string[]).includes(icon) ? (icon as IconName) : (ICON_ALIASES[icon] ?? 'plugins');
-};
+/** The feature's glyph: its manifest's `ui.section.icon`, as the sidebar draws it (#941). */
+const iconOf = (entry: FeatureEntry): IconName => featureIcon(entry.ui.section?.icon);
 
 /** The small picture beside a slot line: the sidebar item a section adds, the stage bars work stages make. */
 const preview = (entry: FeatureEntry, line: SlotLine) => {
@@ -204,7 +199,7 @@ export const FeaturesView = component<FeaturesViewProps>(({ props }) => {
                         ) : <p data-panel-note="">No settings.</p>}
                         <div data-feature-remove="">
                             <Button intent="danger" icon="trash" disabled={st.busy} onClick={() => void remove(entry)}>Remove from project</Button>
-                            <span>Items are kept for 30 days</span>
+                            <span>Items are kept for 30 days: add it back by then to restore its settings</span>
                         </div>
                     </div>
                 ) : (
@@ -251,7 +246,7 @@ export const FeaturesView = component<FeaturesViewProps>(({ props }) => {
                                 <input type="search" name="feature-search" placeholder="Search features" aria-label="Search features" value={st.query} onInput={(e: Event) => { st.query = (e.target as HTMLInputElement).value; }} />
                             </label>
                         </div>
-                        <FilterChips model={[st, 'category']} label="Feature categories" options={categoryChips(props.entries)} />
+                        <FilterChips model={[st, 'category']} label="Feature categories" options={categoryChips()} />
                         {props.loading && !props.entries.length
                             ? <p data-panel-note="">Loading…</p>
                             : tiles.length

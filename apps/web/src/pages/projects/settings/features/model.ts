@@ -4,7 +4,7 @@
  * has on, what each adds to the project (the five slots), what a feature cannot work without here (`needs`), and the
  * `ProjectPatch` an enable, a settings save or a remove sends to `Workspace.upsertProject`. Pure.
  */
-import { isProjectFeatureManifest, type ConfigSchema, type PluginManifest, type ProjectFeatureCategory, type ProjectFeatureNeed, type ProjectFeaturePlugin, type ProjectFeaturePreset, type ProjectFeatureUi, type ProjectPatch, type ProjectRecord } from '@agentic/core';
+import { isProjectFeatureManifest, PROJECT_FEATURE_CATEGORIES, type ConfigSchema, type PluginManifest, type ProjectFeatureCategory, type ProjectFeatureNeed, type ProjectFeaturePlugin, type ProjectFeaturePreset, type ProjectFeatureUi, type ProjectPatch, type ProjectRecord } from '@agentic/core';
 import { PROJECT_FEATURE_SLOTS, usedSlots, type ProjectFeatureSlot } from '@agentic/ui';
 import type { ProjectFeatureView } from '@agentic/platform';
 
@@ -98,10 +98,9 @@ export function catalogueTiles(entries: readonly FeatureEntry[], project: Pick<P
         && (!q || e.name.toLowerCase().includes(q) || e.description.toLowerCase().includes(q)));
 }
 
-/** The category chips: All, then every category some feature is in, in the catalogue's canonical order. */
-export function categoryChips(entries: readonly FeatureEntry[]): { readonly value: string; readonly label: string }[] {
-    const present = new Set(entries.map((e) => e.category).filter(Boolean));
-    return [{ value: 'all', label: 'All' }, ...(Object.keys(CATEGORY_LABELS) as ProjectFeatureCategory[]).filter((c) => present.has(c)).map((c) => ({ value: c, label: CATEGORY_LABELS[c] }))];
+/** The category chips: All, then all five categories in the catalogue's canonical order, whether or not a feature is in one yet (#941). */
+export function categoryChips(): { readonly value: string; readonly label: string }[] {
+    return [{ value: 'all', label: 'All' }, ...PROJECT_FEATURE_CATEGORIES.map((c) => ({ value: c, label: CATEGORY_LABELS[c] }))];
 }
 
 /** One "What it adds here" row: a used slot and what it does in this project. */
