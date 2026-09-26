@@ -17,6 +17,7 @@ import { projectTrail } from '../layout/trail';
 import type { ProjectPageProps } from '../layout/types';
 import { useProjects } from '../live';
 import { ChatsView } from './ChatsView';
+import { MoveRefused, moveChats, type MoveOptions } from './move';
 import type { ProjectChatRow, WorkChip } from './groups';
 import { chatTaskSummaries, summaryOf, type ChatTaskSummary } from './tasks';
 
@@ -82,7 +83,7 @@ const ChatWatch = component<{ id: string; workspaceId: string; onRead: (read: Ch
 /**
  * Live: the workspace's chats as the `/chats` list reads them (`useChatRows`), whose move is whose from the task
  * index (a running task of the chat's tree is WORKING, #258), and "Review and move" calls `Chat.setProject` per chat —
- * the Chat actor runs each feature's release hook server-side.
+ * the Chat actor runs each feature's release hook server-side; a refused move offers "Move anyway" (#947, `force`).
  */
 const LiveProjectChats = component<ProjectPageProps>(({ props }) => {
     const defs = useActorDefs();
@@ -98,18 +99,21 @@ const LiveProjectChats = component<ProjectPageProps>(({ props }) => {
         const tasks = chatTaskSummaries(index.value ?? []);
         return chats.rows().map((c) => projectChatRow(c, summaryOf(tasks, c.id), st.moved[c.id]));
     };
-    const move = async (ids: readonly string[]): Promise<void> => {
+    const move = async (ids: readonly string[], options?: MoveOptions): Promise<void> => {
         const ws = viewer.workspaceId;
         if (!ws) return;
         st.busy = true;
         st.error = '';
         try {
-            for (const id of ids) {
-                await actor(defs.Chat, chatKeyOf(ws, id)).setProject(props.project.id as ProjectId);
-                st.moved = { ...st.moved, [id]: props.project.id };
-            }
+            // A refusal (#947) comes back as `MoveRefused`: the dialog shows why and offers "Move anyway" (`force`).
+            await moveChats(
+                ids,
+                (id, o) => actor(defs.Chat, chatKeyOf(ws, id)).setProject(props.project.id as ProjectId, o),
+                (id) => { st.moved = { ...st.moved, [id]: props.project.id }; },
+                options
+            );
         } catch (e) {
-            st.error = errorText(e);
+            if (!(e instanceof MoveRefused)) st.error = errorText(e);
             throw e;
         } finally {
             st.busy = false;
