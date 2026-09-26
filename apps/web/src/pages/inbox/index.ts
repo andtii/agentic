@@ -17,7 +17,7 @@ export type { NeedsKind, NeedsRow, NeedsSource, RequestRef, RequestState, Reques
 export { sortRows } from './source';
 export { memoryNeedsSource, mockNeedsSource, type MemoryNeedsOptions, type MemoryNeedsSource } from './memory';
 export { liveNeedsSource, rowOf, hueOf, interruptedRows, INTERRUPTED_CONTEXT, type LiveNeedsDefs } from './live';
-export { NeedsYou, openRequestOf, decisionOf, hrefOf } from './NeedsYou';
+export { NeedsYou, PullNoticeRow, pullsNeedingYou, openRequestOf, decisionOf, hrefOf, type PullNeeds, type PullRowSurface } from './NeedsYou';
 
 /** The source "Needs you" renders from: a factory a page calls in its setup (it resolves `useActorDefs` / `useViewer` there in live mode). */
 export const useNeedsSource = defineInjectable<() => NeedsSource>(() => () => {
