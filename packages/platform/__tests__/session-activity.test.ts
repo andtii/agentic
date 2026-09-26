@@ -54,6 +54,8 @@ describe('shouldNoteActivity', () => {
         expect(shouldNoteActivity({ taskId: A, at: 1_000 }, A, 1_000 + ACTIVITY_THROTTLE_MS - 1)).toBe(false);
         expect(shouldNoteActivity({ taskId: A, at: 1_000 }, A, 1_000 + ACTIVITY_THROTTLE_MS)).toBe(true);
         expect(shouldNoteActivity({ taskId: A, at: 1_000 }, 'task_b' as TaskId, 1_001)).toBe(true);
+        // A clock that went back never leaves the throttle stuck.
+        expect(shouldNoteActivity({ taskId: A, at: 1_000 }, A, 999)).toBe(true);
     });
 });
 
@@ -138,5 +140,12 @@ describe('a tool call of a task turn is its task activity (#955)', () => {
         await session('session_3').prompt('go', 't1');
         await until(async () => !(await session('session_3').get()).running, 'the turn to end');
         expect((await task(A).get()).activity).toBeUndefined();
+    });
+
+    it('a task that cannot take the note never gates the turn', async () => {
+        await session('session_4').open({ agentId: ADA, runtime: 'anthropic-api', taskId: 'task_missing' as TaskId, config });
+        expect(await session('session_4').prompt('go', 't1')).toMatchObject({ kind: 'ack' });
+        await until(async () => !(await session('session_4').get()).running, 'the turn to end');
+        expect((await session('session_4').get()).status).toBe('idle');
     });
 });

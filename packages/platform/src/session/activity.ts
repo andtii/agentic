@@ -54,7 +54,7 @@ export interface ActivityMark {
     readonly at: number;
 }
 
-/** Whether a call at `at` for `taskId` is noted: always for another task than the last note's, else once the throttle has passed. */
+/** Whether a call at `at` for `taskId` is noted: always for another task than the last note's, else once the throttle has passed (or the clock went back). */
 export function shouldNoteActivity(last: ActivityMark | undefined, taskId: TaskId, at: number, throttleMs = ACTIVITY_THROTTLE_MS): boolean {
-    return !last || last.taskId !== taskId || at - last.at >= throttleMs;
+    return !last || last.taskId !== taskId || at < last.at || at - last.at >= throttleMs;
 }

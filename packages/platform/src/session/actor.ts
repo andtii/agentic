@@ -522,9 +522,10 @@ export function defineSessionActor(ports: SessionPorts) {
         if (!parsed) return;
         const at = now();
         if (!shouldNoteActivity(activityMarks.get(c.key), taskId, at)) return;
-        activityMarks.set(c.key, { taskId, at });
         try {
             await c.actor(TaskActor, taskKey(parsed.workspaceId, taskId)).with({ oneWay: true }).note({ activity: toolActivity(ev) });
+            // Marked once sent: a note that failed to go is tried again on the next call.
+            activityMarks.set(c.key, { taskId, at });
         } catch {
             // The status line is never a gate on the work.
         }
