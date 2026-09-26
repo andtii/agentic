@@ -531,6 +531,8 @@ export function definePlanActor(options: PlanActorOptions = {}) {
                  */
                 async pullMerged(pr: { readonly number: number; readonly taskId?: TaskId }): Promise<number[]> {
                     requireKey();
+                    // A project with no plan items stores nothing for a merge (every project's merges come here).
+                    if (!Object.keys(ctx.state.items).length) return [];
                     const done = await writeAs(null, (b, c) => pullMerged(b, c, pr));
                     return done.map((i) => i.id);
                 },
