@@ -5,7 +5,7 @@
  * rule — claims, leases, limits, `after` — and its refusals come back as `isError` results. The family is gated by the
  * `projects` scope: a plan is a project feature.
  */
-import { PLAN_LEASE_DEFAULT_MS, PLAN_TOOLS, formatRef, parseRef, type AgentId, type Plan, type PlanItem, type PlanItemState, type ProjectId, type Ref, type Scope } from '@agentic/core';
+import { PLAN_TOOLS, formatRef, parseRef, type AgentId, type Plan, type PlanItem, type PlanItemState, type ProjectId, type Ref, type Scope } from '@agentic/core';
 import type { AnyTool, ToolAnnotations } from '@sigx/ai';
 import { z } from 'zod';
 
@@ -30,7 +30,8 @@ export interface PlanMcpPort {
     list(projectId: ProjectId, planId?: string): Promise<readonly Plan[]>;
     /** What `agentId` should work on next: its queue, then open items; `null` when nothing is ready. */
     next(projectId: ProjectId, agentId: AgentId, planId?: string): Promise<PlanItem | null>;
-    claim(projectId: ProjectId, item: number, agentId: AgentId, leaseMs: number): Promise<PlanItem>;
+    /** `leaseMs` `undefined` (none asked) takes the project's lease. */
+    claim(projectId: ProjectId, item: number, agentId: AgentId, leaseMs: number | undefined): Promise<PlanItem>;
     assign(projectId: ProjectId, item: number, to: string, index?: number): Promise<PlanItem>;
     update(projectId: ProjectId, item: number, update: PlanMcpUpdate): Promise<PlanItem>;
     /**
@@ -88,10 +89,10 @@ export function planMcpTools(port: PlanMcpPort | undefined, tool: ScopedTool): A
         tool({
             name: CLAIM,
             scope: PLAN_SCOPE,
-            description: 'Start an item for an agent with a lease (default 30 minutes; any plan_* call renews it). Refused while it waits on unfinished items, is taken, or the agent holds its limit.',
+            description: 'Start an item for an agent with a lease (default: the project’s lease, 30 minutes unless set; any plan_* call renews it). Refused while it waits on unfinished items, is taken, or the agent holds its limit.',
             input: z.object({ projectId, item: itemNo, agentId: z.string().min(1).describe('The agent that starts it.'), leaseMinutes: z.number().int().min(1).max(240).optional() }),
             annotations: WRITE,
-            run: (input) => port.claim(input.projectId as ProjectId, input.item, input.agentId as AgentId, input.leaseMinutes !== undefined ? input.leaseMinutes * 60_000 : PLAN_LEASE_DEFAULT_MS)
+            run: (input) => port.claim(input.projectId as ProjectId, input.item, input.agentId as AgentId, input.leaseMinutes !== undefined ? input.leaseMinutes * 60_000 : undefined)
         }),
         tool({
             name: ASSIGN,
