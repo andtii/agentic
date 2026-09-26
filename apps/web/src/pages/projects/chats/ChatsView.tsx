@@ -12,6 +12,8 @@ import { settingsHref } from '../settings/tabs';
 import type { AgentLookup } from '../../chat/live';
 import { CHAT_GROUPS, GROUP_LABELS, chatDefaults, chatGroupOf, defaultsTail, groupChats, listOf, unassignedChats, type ChatGroup, type ProjectChatRow, type WorkChip } from './groups';
 import { featureViewsOf } from '../features/registry';
+import { chatHref } from '../../chat/href';
+import { newChatInProjectHref } from '../../chat/new-chat-prefill';
 
 export type ChatsViewProps =
     & Define.Prop<'project', ProjectRecord, true>
@@ -68,7 +70,7 @@ export const ChatsView = component<ChatsViewProps>(({ props }) => {
                     {pill ? <StatusPill status={g} tone={pill.tone} label={pill.label} hollow={pill.hollow} /> : <StatusPill status="archived" tone="dim" label="ARCHIVED" hollow />}
                 </span>
                 <span data-project-chat-main>
-                    <Link to={`/chats/${c.id}`}>
+                    <Link to={chatHref({ id: c.id, projectId: props.project.id })}>
                         <span data-project-chat-title>{c.title}</span>
                         <span data-project-chat-last>{c.speaker ? <b>{c.speaker}: </b> : null}{c.lastLine}</span>
                     </Link>
@@ -111,7 +113,7 @@ export const ChatsView = component<ChatsViewProps>(({ props }) => {
                     <span data-project-chats-counts>{`${openCount} open · ${all.archived.length} archived`}</span>
                     <span data-project-chats-actions>
                         <SearchField model={() => st.q} label={`Search chats in ${p.name}`} placeholder={`Search chats in ${p.name}`} />
-                        <Button intent="primary" icon="chats" href="/chats/new">New chat</Button>
+                        <Button intent="primary" icon="chats" href={newChatInProjectHref(p.id)}>New chat</Button>
                     </span>
                 </header>
 

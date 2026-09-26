@@ -9,6 +9,7 @@ import { AgentTile, Button, Icon, ItemGlyph } from '@agentic/ui';
 import type { ProjectPageProps } from '../../../layout/types';
 import { actorLook, usePlanStore } from './data';
 import { nextItems, planProgress, progressText, type PlanDoc, type Progress } from './model';
+import { chatHref } from '../../../../chat/href';
 
 export const PLAN_VIEW_LABELS = [
     { value: 'list', label: 'List' },
@@ -86,7 +87,7 @@ export const PlanHeader = component<PlanHeaderProps>(({ props }) => {
                     <p data-plan-sub="">
                         {plan.description ? <span data-plan-description="">{plan.description}</span> : null}
                         {plan.originChatId
-                            ? <span data-plan-origin="">from chat <Link to={`/chats/${plan.originChatId}`}>{`“${props.doc.originTitle ?? plan.originChatId}”`}</Link></span>
+                            ? <span data-plan-origin="">from chat <Link to={chatHref({ id: plan.originChatId, projectId: props.projectId })}>{`“${props.doc.originTitle ?? plan.originChatId}”`}</Link></span>
                             : null}
                     </p>
                 </div>

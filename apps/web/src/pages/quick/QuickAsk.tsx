@@ -16,6 +16,7 @@ import { useAgentDirectory } from '../chat/directory';
 import { startTaskWith } from '../task/start';
 import { useLiveWorkdirEnvironments } from '../workdir/environments';
 import { canSend, initialAgent, readRemembered, remember, sendsOnKey } from './model';
+import { chatHref } from '../chat/href';
 
 const LiveQuickAsk = component(() => {
     const defs = useActorDefs();
@@ -57,8 +58,8 @@ const LiveQuickAsk = component(() => {
             remember(storage(), st.agentId);
             st.text = '';
             const host = desktopHost();
-            if (host) await host.openMain(`/chats/${chatId}`);
-            else await router.push(`/chats/${chatId}`);
+            if (host) await host.openMain(chatHref({ id: chatId }));
+            else await router.push(chatHref({ id: chatId }));
         } catch (e) {
             st.error = e instanceof Error ? e.message : String(e);
         } finally {

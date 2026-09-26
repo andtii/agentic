@@ -13,7 +13,7 @@ import { useRoute, useRouter } from '@sigx/router';
 import { defineTopbar } from '../../components/topbar';
 import { Chats } from '../Chats';
 import { closeNewChat, newChatRequest, openNewChat, openNewChatWith } from './head';
-import { newChatPrefillOf } from './new-chat-prefill';
+import { newChatPrefillOf, newChatProjectOf } from './new-chat-prefill';
 
 defineTopbar('chat-new', () => ({ crumb: 'New chat' }));
 
@@ -22,6 +22,8 @@ export const NewChatEntry = component(() => {
     const router = useRouter();
     // Read once: the query is the request, and it is replaced as soon as the dialog answers.
     const prefill = newChatPrefillOf(route.query);
+    // Opened from a project's pages (#929): closed without a chat, it goes back to that project's chats.
+    const project = newChatProjectOf(route.query);
     onMounted(() => {
         if (prefill) openNewChatWith(prefill);
         else openNewChat();
@@ -30,7 +32,7 @@ export const NewChatEntry = component(() => {
     watch(
         () => newChatRequest.open,
         (open, prev) => {
-            if (prev && !open && route.name === 'chat-new') void router.replace('/chats');
+            if (prev && !open && route.name === 'chat-new') void router.replace(project ? `/projects/${encodeURIComponent(project)}/chats` : '/chats');
         }
     );
     onUnmounted(closeNewChat);

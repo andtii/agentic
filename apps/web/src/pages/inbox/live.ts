@@ -34,6 +34,7 @@ import { answerRequest } from '../chat/live';
 import { clockNow, zoneFormat } from '../../time';
 import { isMachineNotice } from '../machines/MachineNotice';
 import type { NeedsRow, NeedsSource, RequestRef, RequestState } from './source';
+import { chatHref } from '../chat/href';
 
 export type LiveNeedsDefs = Pick<ActorDefs, 'Inbox' | 'Session' | 'Routing' | 'Audit' | 'Workspace' | 'Chat'>;
 
@@ -85,7 +86,7 @@ export function interruptedRows(view: Pick<RoutingView, 'routes'> | null | undef
                 taskId: route.taskId,
                 agent: { name, hue: hueOf(route.agentId) },
                 context: `Interrupted: ${cause}. ${INTERRUPTED_CONTEXT}`,
-                href: route.chatId ? `/chats/${route.chatId}` : `/tasks/${route.taskId}`,
+                href: route.chatId ? chatHref({ id: route.chatId }) : `/tasks/${route.taskId}`,
                 hrefLabel: route.chatId ? 'Open chat' : 'Open task',
                 primary: cut?.resume === 'auto' ? { label: 'Resuming automatically', disabled: true } : cut?.resume === 'resuming' ? { label: 'Resuming…', disabled: true } : { label: 'Resume' }
             };

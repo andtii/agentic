@@ -18,12 +18,13 @@ import { useActorDefs, useViewer, type ActorDefs, type ViewerState } from '../..
 import { chatKeyOf, workspaceKeyOf } from '../../actors/keys';
 import type { ArchiveRequest, ChatListRow } from './archive';
 import { ChatList } from './ChatList';
+import { chatHref } from './href';
 import { useAgentDirectory, type AgentDirectory } from './directory';
 import { closeNewChat, newChatRequest, openNewChat } from './head';
 import { LIST_TAIL, chatRow } from './live';
 import { baselineReadMarks, loadReadMarks, readMarks } from './read-marks';
 import { NewChatDialog, type NewChatCreate } from './NewChatDialog';
-import { newProjectLink, type NewChatPrefill } from './new-chat-prefill';
+import { newChatProjectOf, newProjectLink, type NewChatPrefill } from './new-chat-prefill';
 import { useProjects } from '../projects/live';
 import { useLiveWorkdirEnvironments, type WorkdirEnvironments } from '../workdir/environments';
 import type { AgentIdentity } from './live';
@@ -239,10 +240,12 @@ export const LiveChats = component(() => {
         try {
             const chatId = await createChatFrom(defs, ws, input, memberEnvironmentFor(directory.lookup, workdirs), projects.byId(input.projectId), workdirs.machineOf, workdirs.hosted);
             // From the deep link (#336) the URL is replaced, so back never reopens it; the entry closes the dialog as it leaves.
-            if (route.name === 'chat-new') await router.replace(`/chats/${chatId}`);
+            // A chat made in a project opens inside it (#929).
+            const to = chatHref({ id: chatId, projectId: input.projectId }, (p) => projects.byId(p) !== undefined);
+            if (route.name === 'chat-new') await router.replace(to);
             else {
                 closeNewChat();
-                await router.push(`/chats/${chatId}`);
+                await router.push(to);
             }
         } catch (e) {
             st.error = e instanceof Error ? e.message : String(e);
@@ -263,7 +266,7 @@ export const LiveChats = component(() => {
                 agents={directory.all()}
                 environments={workdirs.list()}
                 projects={projects.list()}
-                lastProjectId={projects.lastProjectId()}
+                lastProjectId={(route.name === 'chat-new' ? newChatProjectOf(route.query) : undefined) ?? projects.lastProjectId()}
                 machines={workdirs.machines()}
                 lastMachineId={workdirs.lastMachineId()}
                 {...(newChatRequest.prefill ? { prefill: newChatRequest.prefill } : {})}

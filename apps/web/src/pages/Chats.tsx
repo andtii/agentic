@@ -1,5 +1,5 @@
 import { component } from 'sigx';
-import { useRouter } from '@sigx/router';
+import { useRoute, useRouter } from '@sigx/router';
 import { Button } from '@agentic/ui';
 import { Page } from '../components/Page';
 import { defineTopbar } from '../components/topbar';
@@ -9,7 +9,7 @@ import { ChatList } from './chat/ChatList';
 import { closeNewChat, newChatRequest, openNewChat } from './chat/head';
 import { LiveChats } from './chat/LiveChats';
 import { NewChatDialog } from './chat/NewChatDialog';
-import { newProjectLink } from './chat/new-chat-prefill';
+import { newChatProjectOf, newProjectLink } from './chat/new-chat-prefill';
 import { mockWorkdirEnvironments } from './workdir/environments';
 
 defineTopbar('chats', () => ({ actions: () => <Button intent="primary" icon="plus" onClick={openNewChat}>New chat</Button> }));
@@ -22,6 +22,7 @@ defineTopbar('chats', () => ({ actions: () => <Button intent="primary" icon="plu
 export const Chats = component(() => {
     const chats = loadChats();
     const router = useRouter();
+    const route = useRoute();
     return () => (dataMode() === 'live' ? <LiveChats /> : (
         <Page title="Chats" page="chats" hideTitle>
             <ChatList chats={chats} wide projects={PROJECTS} />
@@ -31,7 +32,7 @@ export const Chats = component(() => {
                 environments={mockWorkdirEnvironments.list()}
                 machines={mockWorkdirEnvironments.machines()}
                 projects={PROJECTS}
-                lastProjectId={LAST_PROJECT_ID}
+                lastProjectId={(route.name === 'chat-new' ? newChatProjectOf(route.query) : undefined) ?? LAST_PROJECT_ID}
                 {...(newChatRequest.prefill ? { prefill: newChatRequest.prefill } : {})}
                 onCancel={closeNewChat}
                 onCreate={closeNewChat}

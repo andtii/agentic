@@ -10,6 +10,7 @@ import { useAgentDirectory } from '../chat/directory';
 import { useLiveWorkdirEnvironments } from '../workdir/environments';
 import { closeStartTask, startTaskRequest, startTaskWith, type StartTaskInput } from './start';
 import { StartTaskDialog } from './StartTaskDialog';
+import { chatHref } from '../chat/href';
 
 export const LiveStartTask = component(() => {
     const defs = useActorDefs();
@@ -29,7 +30,7 @@ export const LiveStartTask = component(() => {
             const machineId = (input.workdir ? workdirs.machineOf(input.workdir.environmentId) : undefined) ?? workdirs.lastMachineId();
             const { chatId } = await startTaskWith(defs, ws, { ...input, machineId }, agents.lookup);
             closeStartTask();
-            await router.push(`/chats/${chatId}`);
+            await router.push(chatHref({ id: chatId }));
         } catch (e) {
             st.error = e instanceof Error ? e.message : String(e);
         } finally {

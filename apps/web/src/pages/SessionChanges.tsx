@@ -22,6 +22,7 @@ import { changesHref, displayRoot, filesHref, queryOf, relativeToRoot, rootQuery
 import { SessionFrame, type SessionFrameContext } from './session/frame';
 import { sessionHead } from './session/LiveSession';
 import { sessionTrail } from './session/trail';
+import { chatHref } from './chat/href';
 
 defineTopbar('session-changes', (route) => {
     const id = routeId(route);
@@ -30,7 +31,7 @@ defineTopbar('session-changes', (route) => {
     const agentName = head?.agentName ?? (v ? agentNamed(v.agentId).name : undefined);
     return {
         ...(v ? { crumb: 'Changes', trail: sessionTrail(id, v, agentName, 'Changes') } : {}),
-        actions: () => (v?.chatId ? <LinkButton to={`/chats/${v.chatId}`} icon="chats">Open chat</LinkButton> : null)
+        actions: () => (v?.chatId ? <LinkButton to={chatHref({ id: v.chatId })} icon="chats">Open chat</LinkButton> : null)
     };
 });
 

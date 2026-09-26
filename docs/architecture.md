@@ -632,6 +632,10 @@ The shell draws `NavItem.children` as the project menu (`packages/ui/src/shell/`
 - **Defaults strip**: `chatDefaults` — the project's first folder, coordinator, other members, and enabled features with an `instructions` string; `Change defaults` → Settings › General.
 - **Review and move**: `unassignedChats` lists live chats in no project, those whose title or last line names this project as a word (`suggestedProject`) first and pre-ticked. Moving calls `Chat.setProject(projectId)` per chat; the Chat actor runs each feature's release hook server-side.
 
+#### #929 web: a project's chat opens inside the project
+
+`/projects/:id/chats/:chatId` (`project-chat`, `pages/projects/chats/ProjectChat.tsx`) renders the chat page's `ChatScreen` (mock view, or `LiveChat` live) inside `ProjectLayout` with `projectId` set: no global list column, thread plus a 300px context panel, the menu's Chats active, crumbs `Projects › <project> › Chats › <chat>`. Every link to a chat is `chatHref(chat, exists)` (`pages/chat/href.ts`): the project route when the chat's project still exists, else `/chats/:id`. A chat page not at its chat's address (`/chats/:id` of a project's chat, the wrong project, a chat moved in or out) replaces itself via `chatRedirect`, keeping the query. New chat on a project's pages is `/chats/new?project=<id>`: the dialog opens on the project, and the chat made opens inside it.
+
 #### #732 web: global /chats grouped by project
 
 `ChatList` with `wide` (the `/chats` page, mock and live) and a non-empty `projects` groups its filtered rows with the pure `groupChatsByProject(chats, projects)` (`pages/chat/chat-groups.ts`): one group per project that has chats, newest activity first (ties by name), then "No project" for chats in none or in a removed project. Each group header has a collapse toggle, the `ProjectSquare`, the name linking to `/projects/:id/chats` and the count; collapsed keys live in the list's own state. The column beside a chat (`/chats/:id`) stays one flat list; the project filter chip is unchanged.

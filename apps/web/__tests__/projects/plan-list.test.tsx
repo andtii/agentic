@@ -107,7 +107,7 @@ describe('the Plan list page on mock data (#754)', () => {
         const dom = await mountRoute('/projects/p_agentic/plan');
         const el = page(dom, 'project-plan')!;
         expect(el.querySelector('[data-plan-title]')?.textContent).toBe('Plugin manifests v2');
-        expect(el.querySelector('[data-plan-origin] a')?.getAttribute('href')).toBe('/chats/c_restructure');
+        expect(el.querySelector('[data-plan-origin] a')?.getAttribute('href')).toBe('/projects/p_agentic/chats/c_restructure'); // inside the project (#929)
         expect(el.querySelector('[data-plan-progress-text]')?.textContent).toBe('5 of 14 done');
         expect(el.querySelector('[data-plan-view-link="list"]')?.getAttribute('aria-current')).toBe('page');
         expect(el.querySelector('[data-plan-view-link="board"]')?.getAttribute('href')).toBe('/projects/p_agentic/plan?view=board');

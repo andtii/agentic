@@ -58,7 +58,7 @@ describe('the work item page on mock data (#739)', () => {
         expect(el.querySelector('[data-owner="you"]')).not.toBeNull();
         expect(el.querySelector('[data-next-step]')?.textContent).toBe('Resume Forge’s interrupted turn');
         expect(el.querySelector('[data-link="task"] a')?.getAttribute('href')).toBe('/tasks/t7');
-        expect(el.querySelector('[data-link="chat"] a')?.getAttribute('href')).toBe('/chats/c4');
+        expect(el.querySelector('[data-link="chat"] a')?.getAttribute('href')).toBe('/projects/p_agentic/chats/c4'); // inside the project (#929)
         expect(el.querySelector('[data-link="session"] a')?.getAttribute('href')).toBe('/sessions/s6');
         expect(el.querySelector('[data-work-item-done-when]')).toBeNull();
         expect(el.querySelector('[data-link="plan"]')).toBeNull();

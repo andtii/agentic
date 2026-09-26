@@ -157,6 +157,8 @@
 [data-chat-machine] { text-decoration: none; }
 [data-member-workdir-stale] { font-size: var(--text-xs); color: var(--ag-text-dim); }
 [data-chat-settings-machine-note] { font-size: var(--text-xs); font-weight: var(--weight-normal); color: var(--ag-text-dim); }
+/* a project's chat (#929, board PMChat): inside the project layout, thread + 300 context panel, no global list column */
+[data-project-layout] > [data-page="chat"] { grid-template-columns: minmax(0, 1fr) 300px; }
 
 /* ---- responsive (#91): one breakpoint at 768; rails drop below 1280 (docs/design/HANDOFF.md → "Responsive behaviour") ---- */
 /* the topbar's tasks button shows only where the context panel has left the chat grid */
@@ -169,6 +171,7 @@
     /* Chat keeps list + thread; the context panel sits behind the tasks button */
     [data-page="chat"] { grid-template-columns: 280px minmax(0, 1fr); }
     [data-page="chat"] > [data-chat-context] { display: none; }
+    [data-project-layout] > [data-page="chat"] { grid-template-columns: minmax(0, 1fr); }
 }
 
 @media (--below-md) {

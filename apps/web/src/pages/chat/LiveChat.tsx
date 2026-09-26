@@ -58,6 +58,7 @@ import { ChatRequestsFrom, RequestCard, acceptedAt } from './entries/RequestCard
 import { closeContextDrawer, contextDrawer } from './context-drawer';
 import { useAgentDirectory } from './directory';
 import { openFeed, type FeedHandle } from './feeds';
+import { chatHref, chatRedirect } from './href';
 import { chatHead, chatSearchRequest, chatSettingsRequest, closeChatSearch, closeChatSettings, closeNewChat, newChatRequest, openNewChat } from './head';
 import { answerRequest, chatFailure, type InterruptionOfTurn, chatTasks, chatTitle, chatTranscript, chatWaitsOf, composeTranscript, detachedQuestions, entryTranscript, keepEntries, lastOf, membersOf, mentionsIn, notStoppedLine, queuedAgents, runActivation, stopTargets, waitingAgents, workingAgents, type SessionActorClient } from './live';
 import { LiveChatList, archiveChat, createChatWith } from './LiveChats';
@@ -76,7 +77,8 @@ export const YOU = 'You';
 /** Entries read per page — the Chat actor's page maximum: the newest page on open, one more per scroll to the top (#398). */
 export const HISTORY_LIMIT = 200;
 
-export const LiveChat = component<{ id: string }>(({ props }) => {
+/** `projectId`: the project whose route the chat is open in (#929) — the page then draws no global chat list. */
+export const LiveChat = component<{ id: string; projectId?: string }>(({ props }) => {
     const defs = useActorDefs();
     const viewer = useViewer()();
     const router = useRouter();
@@ -136,16 +138,26 @@ export const LiveChat = component<{ id: string }>(({ props }) => {
     const route = useRoute();
     const mention = signal<{ insert: ComposerInsert | null; sessions: Record<string, string> }>({ insert: null, sessions: {} });
     let mentionSeq = 0;
+    // A project's chat opens inside the project, any other at `/chats/:id` (#929), and a moved chat follows its project:
+    // once the chat and the projects are read, a page at another address replaces itself, the query kept.
+    const redirect = (): string | null | undefined => {
+        const s = summary.value;
+        if (!s || projects.loading) return undefined;
+        return chatRedirect(route.path, { id: props.id, projectId: s.projectId ?? null }, (p) => projects.byId(p) !== undefined);
+    };
     onMounted(() => {
+        const stopRedirect = watch(redirect, (to) => { if (to) void router.replace({ path: to, query: route.query }); }, { immediate: true });
+        onUnmounted(() => stopRedirect.stop());
+        // Read on the page that stays: not before the redirect is known, not on a page about to move.
         const stopMention = watch(
-            () => queryOf(route.query.file),
+            () => (redirect() === null ? queryOf(route.query.file) : undefined),
             (value) => {
                 const m = mentionOfQuery(value);
                 if (!m) return;
                 mention.sessions = { ...mention.sessions, [m.path]: m.sessionId };
                 mention.insert = { id: ++mentionSeq, text: `${fileToken(m.path)} ` };
                 // Consumed: a reload or a later visit does not insert it again.
-                void router.replace(`/chats/${encodeURIComponent(props.id)}`);
+                void router.replace(route.path);
             },
             { immediate: true }
         );
@@ -460,7 +472,7 @@ export const LiveChat = component<{ id: string }>(({ props }) => {
         try {
             const chatId = await createChatWith(defs, ws, agentIds, coordinator, projectId, machineId, permissionMode);
             closeNewChat();
-            await router.push(`/chats/${chatId}`);
+            await router.push(chatHref({ id: chatId, projectId }, (p) => projects.byId(p) !== undefined));
         } catch (e) {
             fail(e);
         }
@@ -543,7 +555,8 @@ export const LiveChat = component<{ id: string }>(({ props }) => {
         const loading = summary.loading && !s;
         return (
             <Page title={chat.title} page="chat" hideTitle flush>
-                <LiveChatList currentId={props.id} directory={directory} onNewChat={openNewChat} />
+                {/* Inside a project (#929) the project's menu is the way back to its chats: no global list column. */}
+                {props.projectId ? null : <LiveChatList currentId={props.id} directory={directory} onNewChat={openNewChat} />}
                 <section data-chat-main aria-label="Conversation" aria-busy={loading ? 'true' : undefined}>
                     {chatSearchRequest.open && s ? <ChatSearchPanel search={search} lookup={directory.lookup} time={time} onClose={closeChatSearch} /> : null}
                     {empty

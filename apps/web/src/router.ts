@@ -12,6 +12,7 @@ import { ProjectLinks } from './pages/projects/links/Links';
 import { inProject } from './pages/projects/layout/ProjectLayout';
 import { ProjectOverview } from './pages/projects/overview/Overview';
 import { ProjectChats } from './pages/projects/chats/ProjectChats';
+import { ProjectChat } from './pages/projects/chats/ProjectChat';
 import { ProjectWork } from './pages/projects/work/WorkView';
 import { ProjectWorkItem } from './pages/projects/work/WorkItemRoute';
 import { ProjectRequests } from './pages/projects/requests/Requests';
@@ -50,6 +51,8 @@ export const routes: RouteRecordRaw[] = [
     { path: '/projects/new', name: 'project-new', component: NewProject },
     { path: '/projects/:id', name: 'project', component: inProject(ProjectOverview, 'ProjectOverviewRoute') },
     { path: '/projects/:id/chats', name: 'project-chats', component: inProject(ProjectChats, 'ProjectChatsRoute') },
+    // A project's chat opens inside the project (#929); `/chats/:id` of a project's chat replaces itself with this.
+    { path: '/projects/:id/chats/:chatId', name: 'project-chat', component: inProject(ProjectChat, 'ProjectChatRoute') },
     { path: '/projects/:id/work', name: 'project-work', component: inProject(ProjectWork, 'ProjectWorkRoute') },
     { path: '/projects/:id/work/:item', name: 'project-work-item', component: inProject(ProjectWorkItem, 'ProjectWorkItemRoute') },
     { path: '/projects/:id/requests', name: 'project-requests', component: inProject(ProjectRequests, 'ProjectRequestsRoute') },

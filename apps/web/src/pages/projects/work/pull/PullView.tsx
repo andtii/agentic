@@ -16,6 +16,7 @@ import {
     APPROVAL_NOTE, REVIEW_LABEL, THREAD_LABEL, asksToMerge, autopilotOff, autopilotRows, blockerSentence, canMerge, diffText, durationText, openedAgo, originText, pullNow, pullSteps,
     switchesOf, type AutopilotSwitch, type PullActions, type PullNow, type PullLinked, type PullPageData, type PullRunState
 } from './model';
+import { chatHref } from '../../../chat/href';
 
 export interface PullAgent {
     readonly name: string;
@@ -172,7 +173,7 @@ export const PullView = component<PullViewProps>(({ props }) => {
                 {errorLine()}
                 <div data-pull-now-actions="">
                     {pr.sessionId ? <Link to={`/sessions/${pr.sessionId}`}>{`Watch session ${pr.sessionId}`}</Link> : null}
-                    {pr.chatId ? <Link to={`/chats/${pr.chatId}`}>Open chat</Link> : null}
+                    {pr.chatId ? <Link to={chatHref({ id: pr.chatId, projectId: props.projectId })}>Open chat</Link> : null}
                     <span data-spacer="" />
                     {asking
                         ? (
@@ -299,7 +300,7 @@ export const PullView = component<PullViewProps>(({ props }) => {
                     <dd data-link="task">{pr.taskId ? <><Link to={`/tasks/${pr.taskId}`}>{pr.taskId}</Link>{linked?.taskTitle ? <span data-task-title="">{linked.taskTitle}</span> : null}</> : <span data-none="">No task</span>}</dd>
                     {linked?.issue ? <><dt>Issue</dt><dd data-link="issue">{linked.issue.label}</dd></> : null}
                     <dt>Chat</dt>
-                    <dd data-link="chat">{pr.chatId ? <Link to={`/chats/${pr.chatId}`}>{linked?.chatTitle ?? pr.chatId}</Link> : <span data-none="">No chat</span>}</dd>
+                    <dd data-link="chat">{pr.chatId ? <Link to={chatHref({ id: pr.chatId, projectId: props.projectId })}>{linked?.chatTitle ?? pr.chatId}</Link> : <span data-none="">No chat</span>}</dd>
                     <dt>Session</dt>
                     <dd data-link="session">{pr.sessionId ? <Link to={`/sessions/${pr.sessionId}`}>{pr.sessionId}</Link> : <span data-none="">No session</span>}</dd>
                     {env ? <><dt>Runs on</dt><dd data-link="environment"><EnvironmentLine machine={env.machine} runtime={env.runtime} account={env.account} tone="live" /></dd></> : null}

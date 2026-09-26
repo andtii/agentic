@@ -7,6 +7,7 @@ import { agentNamed, type MockChatSummary } from '../../mock/workspace';
 import { dataMode } from '../../data-mode';
 import { mockArchive, setMockArchived, splitArchived, withMockArchive, type ArchiveRequest, type ChatListRow } from './archive';
 import { groupChatsByProject, type ChatGroupProject } from './chat-groups';
+import { chatHref } from './href';
 import type { AgentLookup } from './live';
 
 export type ChatListProps =
@@ -97,7 +98,7 @@ export const ChatList = component<ChatListProps>(({ props, emit }) => {
     );
     const row = (chat: ChatListRow) => (
         <li data-chat-row data-current={chat.id === props.currentId ? '' : undefined} data-waiting={chat.waiting ? '' : undefined} data-archived={chat.archived ? '' : undefined} style="display:flex;align-items:flex-start">
-            <Link to={`/chats/${chat.id}`} aria-current={chat.id === props.currentId ? 'page' : undefined} style="flex:1;min-inline-size:0">
+            <Link to={chatHref(chat, (p) => (props.projects ?? []).some((x) => x.id === p))} aria-current={chat.id === props.currentId ? 'page' : undefined} style="flex:1;min-inline-size:0">
                 <span data-chat-row-head>
                     <span data-chat-title>{chat.title}</span>
                     {chat.waiting ? <StatusPill status="approval" label={String(chat.unread || 1)} /> : chat.unread ? <Badge.Root color="warning" size="sm" data-chat-unread="">{chat.unread}</Badge.Root> : null}

@@ -16,6 +16,7 @@ const ROUTES = [
     '/projects/new',
     '/projects/p_agentic',
     '/projects/p_agentic/chats',
+    '/projects/p_agentic/chats/c4',
     '/projects/p_agentic/work',
     '/projects/p_agentic/work/pr:602',
     '/projects/p_agentic/work/t_93d1',
@@ -74,6 +75,40 @@ test('open a project, go to Work, open a pull request', async ({ page }) => {
     await expect(page).toHaveURL(/\/projects\/p_agentic\/work\/pr:602$/);
     await expect(page.locator('[data-pull-title]')).toHaveText('Make the drawer collapse below 768 px');
     await expect(page.getByRole('complementary', { name: 'Pull request actions' })).toBeVisible();
+});
+
+test('a chat opened from the project’s Chats stays inside the project (#929)', async ({ page }) => {
+    await page.goto('/projects/p_agentic/chats');
+    await page.locator('[data-project-chat-row="pc1"] [data-project-chat-main] a').click();
+    await expect(page).toHaveURL(/\/projects\/p_agentic\/chats\/pc1$/);
+    await expect(page.locator('[data-project-layout="p_agentic"]')).toBeVisible();
+    await expect(page.locator('[data-chat-list]')).toHaveCount(0);
+
+    if (width(page) >= 768) {
+        // The docked sidebar keeps the project's sub-menu, Chats active; the crumbs start Projects › agentic.
+        const nav = page.locator(drawerPanel);
+        await expect(nav.locator('[data-scope="nav-list"][data-part="link"][href="/projects/p_agentic/chats"]')).toHaveAttribute('aria-current', 'page');
+        const crumbs = page.locator(shell('breadcrumb'));
+        await expect(crumbs.locator('a[href="/projects"]')).toHaveText('Projects');
+        await expect(crumbs.locator('a[href="/projects/p_agentic"]')).toHaveText('agentic');
+        await expect(crumbs.locator('a[href="/projects/p_agentic/chats"]')).toHaveText('Chats');
+    } else {
+        // The phone's back link leads to the project's chats; its sheet's sub-menu has Chats active.
+        await expect(page.locator(shell('back')).locator('a')).toHaveAttribute('href', '/projects/p_agentic/chats');
+        await page.getByRole('button', { name: 'Menu' }).click();
+        const sub = page.locator(drawerPanel).locator('[data-nav-children]');
+        await expect(sub.locator('a[href="/projects/p_agentic/chats"]')).toHaveAttribute('aria-current', 'page');
+    }
+});
+
+test('/chats/:id of a project’s chat lands inside the project; a chat in no project keeps the global list (#929)', async ({ page }) => {
+    await page.goto('/chats/c4');
+    await expect(page).toHaveURL(/\/projects\/p_agentic\/chats\/c4$/);
+    await expect(page.locator('[data-project-layout="p_agentic"] [data-page="chat"] [data-chat-main]')).toBeVisible();
+    await page.goto('/chats/c1');
+    await expect(page).toHaveURL(/\/chats\/c1$/);
+    await expect(page.locator('[data-page="chat"] [data-chat-main]')).toBeVisible();
+    await expect(page.locator('[data-project-layout]')).toHaveCount(0);
 });
 
 test('Plan list to board, then move a card to another agent', async ({ page }) => {

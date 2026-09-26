@@ -29,6 +29,14 @@ export function newChatPrefillOf(query: Query): NewChatPrefill | undefined {
     return { environmentId, path, ...(origin ? { origin } : {}) };
 }
 
+/** `/chats/new?project=<id>` (#929): New chat from a project's pages opens the dialog on that project. */
+export function newChatProjectOf(query: Query): string | undefined {
+    return one(query['project']);
+}
+
+/** The New chat link from a project's pages: the dialog opens on the project, and the chat made opens inside it. */
+export const newChatInProjectHref = (projectId: string): string => `/chats/new?project=${encodeURIComponent(projectId)}`;
+
 /** The origin a project's git feature names (`features['agentic.feature.git'].origin`, or a plain `git` entry). */
 export function projectOriginOf(project: { readonly features?: ProjectRecord['features'] }): string | undefined {
     const features = project.features ?? {};

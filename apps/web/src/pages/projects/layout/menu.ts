@@ -29,7 +29,7 @@ const counted = (n: number | undefined): { count?: number } => (n ? { count: n }
 
 /** Every route drawn inside a project (`router.ts`), by name. */
 export const PROJECT_ROUTE_NAMES: ReadonlySet<string> = new Set([
-    'project', 'project-chats', 'project-work', 'project-work-item', 'project-requests', 'project-plan', 'project-settings', 'project-code', 'project-feature'
+    'project', 'project-chats', 'project-chat', 'project-work', 'project-work-item', 'project-requests', 'project-plan', 'project-settings', 'project-code', 'project-feature'
 ]);
 
 /** The project a route is inside, as far as the menu needs it; `undefined` off a project route or before it loads. */
