@@ -33,6 +33,11 @@ export interface PlanMcpPort {
     claim(projectId: ProjectId, item: number, agentId: AgentId, leaseMs: number): Promise<PlanItem>;
     assign(projectId: ProjectId, item: number, to: string, index?: number): Promise<PlanItem>;
     update(projectId: ProjectId, item: number, update: PlanMcpUpdate): Promise<PlanItem>;
+    /**
+     * Replace everything `item` waits on (#931): item numbers of this project, or `project#n` for another project's.
+     * Optional: a host without it refuses `plan_update` with `after`.
+     */
+    after?(projectId: ProjectId, item: number, after: readonly (number | string)[]): Promise<PlanItem>;
     /** A file ref comes back pinned to a commit. */
     ref(projectId: ProjectId, item: number, ref: Ref): Promise<Ref>;
     add(projectId: ProjectId, input: PlanMcpAdd): Promise<readonly PlanItem[]>;
@@ -99,18 +104,25 @@ export function planMcpTools(port: PlanMcpPort | undefined, tool: ScopedTool): A
         tool({
             name: UPDATE,
             scope: PLAN_SCOPE,
-            description: 'Tick or untick done-when lines (0-based), add a History note, or change an item’s state (a person may mark it done).',
+            description: 'Tick or untick done-when lines (0-based), add a History note, change an item’s state (a person may mark it done), or replace what it waits on with `after` — `project#n` names another project’s item.',
             input: z.object({
                 projectId,
                 item: itemNo,
                 check: z.array(z.number().int().min(0)).optional(),
                 uncheck: z.array(z.number().int().min(0)).optional(),
                 note: z.string().min(1).optional(),
-                state: z.enum(['ready', 'needs-you', 'blocked', 'done', 'stuck']).optional()
+                state: z.enum(['ready', 'needs-you', 'blocked', 'done', 'stuck']).optional(),
+                after: z.array(afterEntry).max(50).optional().describe('Replace what the item waits on; `[]` clears it. List what it already waits on to keep it.')
             }),
             annotations: WRITE,
-            run: (input) => {
-                if (!input.check?.length && !input.uncheck?.length && input.note === undefined && input.state === undefined) throw new Error(`${UPDATE}: nothing to change on #${input.item}: pass check, uncheck, note or state`);
+            run: async (input) => {
+                const patching = !!input.check?.length || !!input.uncheck?.length || input.note !== undefined || input.state !== undefined;
+                if (!patching && input.after === undefined) throw new Error(`${UPDATE}: nothing to change on #${input.item}: pass check, uncheck, note, state or after`);
+                if (input.after !== undefined) {
+                    if (!port.after) throw new Error(`${UPDATE}: changing what an item waits on is not available on this host`);
+                    const linked = await port.after(input.projectId as ProjectId, input.item, input.after);
+                    if (!patching) return linked;
+                }
                 return port.update(input.projectId as ProjectId, input.item, {
                     ...(input.check ? { check: input.check } : {}),
                     ...(input.uncheck ? { uncheck: input.uncheck } : {}),
