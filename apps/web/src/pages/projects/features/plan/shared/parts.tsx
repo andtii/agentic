@@ -4,26 +4,32 @@
  */
 import { component, signal, type Define } from 'sigx';
 import { Link, useRouter } from '@sigx/router';
-import type { PlanActor } from '@agentic/core';
+import type { Plan, PlanActor } from '@agentic/core';
 import { AgentTile, Button, Icon, ItemGlyph } from '@agentic/ui';
 import type { ProjectPageProps } from '../../../layout/types';
-import { actorLook, usePlanStore } from './data';
+import { actorLook, usePlanIdentity, usePlanStore, type PlanActorLook, type PlanStore } from './data';
+import { PlanSwitcher, PlanViews, planHref } from './switcher';
 import { nextItems, planProgress, progressText, type PlanDoc, type Progress } from './model';
 import { chatHref } from '../../../../chat/href';
 
-export const PLAN_VIEW_LABELS = [
-    { value: 'list', label: 'List' },
-    { value: 'board', label: 'Board' },
-    { value: 'graph', label: 'Graph' }
-] as const;
+export { PLAN_VIEW_LABELS, planHref } from './switcher';
 
-/** `/projects/:id/plan?view=…`, keeping the plan picked. */
-export function planHref(projectId: string, view: string, planId?: string): string {
-    const q = new URLSearchParams();
-    if (view !== 'list') q.set('view', view);
-    if (planId) q.set('plan', planId);
-    const s = q.toString();
-    return `/projects/${projectId}/plan${s ? `?${s}` : ''}`;
+/** Picking a plan follows `?plan=` in `view`; New plan is the store's `create`, then that plan (absent on mock data). Call in setup. */
+export function usePlanNav(view: string, projectId: () => string, store: Pick<PlanStore, 'docs' | 'writes'>): { select(id: string): void; readonly create?: () => void } {
+    const router = useRouter();
+    const writes = store.writes;
+    return {
+        select: (id) => { void router.push(planHref(projectId(), view, id)); },
+        ...(writes
+            ? {
+                create: () => {
+                    void writes.newPlan(`Untitled plan ${store.docs().length + 1}`).then((plan) => {
+                        if (plan) void router.push(planHref(projectId(), view, plan.id));
+                    });
+                }
+            }
+            : {})
+    };
 }
 
 /**
@@ -44,9 +50,9 @@ export const Bar = (p: Progress, attr: string) => (
     <span data-plan-bar={attr} aria-hidden="true"><span style={`inline-size: ${p.pct}%`} /></span>
 );
 
-/** An actor's tile at `size`. */
-export const ActorTile = (a: PlanActor, size: 18 | 20 | 22 | 24) => {
-    const look = actorLook(a);
+/** An actor's tile at `size`, drawn by `lookOf` (the mock workspace's when absent). */
+export const ActorTile = (a: PlanActor, size: 18 | 20 | 22 | 24, lookOf: (a: PlanActor) => PlanActorLook = actorLook) => {
+    const look = lookOf(a);
     return <AgentTile name={look.name} hue={look.hue} person={look.person} monogram={look.monogram} size={size} />;
 };
 
@@ -56,6 +62,12 @@ export type PlanHeaderProps =
     & Define.Prop<'view', string, true>
     /** Whether the project holds more than this plan (the chevron then says so). */
     & Define.Prop<'several', boolean>
+    /** The project's plans (#939): the title becomes the plan switcher. */
+    & Define.Prop<'plans', readonly Plan[]>
+    /** Pick a plan from the switcher. */
+    & Define.Prop<'onSelectPlan', (id: string) => void>
+    /** New plan from the switcher; absent, it is disabled. */
+    & Define.Prop<'onNewPlan', () => void>
     /** Add an item titled so (live, #926); resolves whether it was added. Absent, Add item is disabled. */
     & Define.Prop<'onAdd', (title: string) => Promise<boolean>>;
 
@@ -77,13 +89,19 @@ export const PlanHeader = component<PlanHeaderProps>(({ props }) => {
     return () => {
         const { plan } = props.doc;
         const progress = planProgress(plan);
+        const several = props.plans ? props.plans.length > 1 : props.several === true;
         return (
             <header data-plan-head="">
                 <div data-plan-ident="">
-                    <h2 data-plan-title="">
-                        <span>{plan.title}</span>
-                        <Icon name="chevron-down" size={16} />
-                    </h2>
+                    <div data-plan-title-row="" style="display: flex; align-items: center; gap: 6px; min-inline-size: 0">
+                        <h2 data-plan-title="">
+                            <span>{plan.title}</span>
+                            {props.plans ? null : <Icon name="chevron-down" size={16} />}
+                        </h2>
+                        {props.plans
+                            ? <PlanSwitcher compact plans={props.plans} current={plan} onSelect={(id: string) => props.onSelectPlan?.(id)} {...(props.onNewPlan ? { onNew: props.onNewPlan } : {})} />
+                            : null}
+                    </div>
                     <p data-plan-sub="">
                         {plan.description ? <span data-plan-description="">{plan.description}</span> : null}
                         {plan.originChatId
@@ -96,12 +114,7 @@ export const PlanHeader = component<PlanHeaderProps>(({ props }) => {
                     <span data-plan-progress-pct="">{`${progress.pct}%`}</span>
                     {Bar(progress, 'plan')}
                 </div>
-                <nav data-plan-views="" aria-label="Plan views">
-                    {PLAN_VIEW_LABELS.map((v) => {
-                        const href = planHref(props.projectId, v.value, props.several ? plan.id : undefined);
-                        return <a href={href} onClick={follow(href)} aria-current={v.value === props.view ? 'page' : undefined} data-plan-view-link={v.value}>{v.label}</a>;
-                    })}
-                </nav>
+                {PlanViews(props.projectId, props.view, follow, several ? plan.id : undefined)}
                 {props.onAdd
                     ? (
                         <span data-plan-add="">
@@ -136,6 +149,7 @@ export const PlanHeader = component<PlanHeaderProps>(({ props }) => {
 /** The Plan feature's card on the project Overview: "N of M done", the bar, the next three items. */
 export const PlanOverviewCard = component<ProjectPageProps>(({ props }) => {
     const store = usePlanStore(() => props.project.id);
+    const identity = usePlanIdentity();
     return () => {
         const doc = store.docs()[0];
         const href = `/projects/${props.project.id}/plan`;
@@ -161,7 +175,7 @@ export const PlanOverviewCard = component<ProjectPageProps>(({ props }) => {
                                     <li key={i.id} data-plan-card-item={i.id}>
                                         <ItemGlyph state={i.state} />
                                         <Link to={`${href}?item=${i.id}`}>{i.title}</Link>
-                                        {i.assignee ? ActorTile(i.assignee, 18) : null}
+                                        {i.assignee ? ActorTile(i.assignee, 18, identity.look) : null}
                                     </li>
                                 ))}
                             </ul>

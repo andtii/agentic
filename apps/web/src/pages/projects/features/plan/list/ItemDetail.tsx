@@ -5,12 +5,15 @@
  */
 import { component, signal, type Define, type JSXElement } from 'sigx';
 import { Link } from '@sigx/router';
-import { formatRef, parseRefs, planClaimLive, type PlanItem, type Ref } from '@agentic/core';
+import { formatRef, parseRefs, planClaimLive, type PlanActor, type PlanItem, type Ref } from '@agentic/core';
 import { Icon, Tag, type Tone } from '@agentic/ui';
 import { formatAge } from '../../../../../mock/workspace';
-import { actorName } from '../shared/data';
+import { mockPlanIdentity, type PlanIdentity } from '../shared/data';
+import type { PinSource } from '../shared/pins';
 import { ActorTile, useFollow } from '../shared/parts';
-import { REF_KIND_HINT, leaseMinutesLeft, pinLine, queuePlace, refIcon, refLabel, shortPath, touchOverlaps, unblocksOf, type PlanDoc } from '../shared/model';
+import { REF_KIND_HINT, leaseMinutesLeft, pinLine, queuePlace, refIcon, refLabel, shortPath, touchOverlaps, unblocksOf, type PlanDoc, type PlanFilePin } from '../shared/model';
+
+type FileRef = Extract<Ref, { kind: 'file' }>;
 
 export type ItemDetailProps =
     & Define.Prop<'projectId', string, true>
@@ -24,7 +27,11 @@ export type ItemDetailProps =
     /** Tick a done-when line (live, #926). Absent, the checklist is read-only. */
     & Define.Prop<'onTick', (index: number, checked: boolean) => void>
     /** Send a comment (live, #926); resolves whether it went. Absent, Send is disabled. */
-    & Define.Prop<'onComment', (text: string) => Promise<boolean>>;
+    & Define.Prop<'onComment', (text: string) => Promise<boolean>>
+    /** Who "You" is and how actors are named (#939); the mock workspace's when absent. */
+    & Define.Prop<'identity', PlanIdentity>
+    /** File refs' pinned lines read live (#939); absent, the doc's `pins` answer. */
+    & Define.Prop<'pins', PinSource>;
 
 export const STATE_TAGS: Readonly<Record<PlanItem['state'], { readonly label: string; readonly tone: Tone }>> = {
     ready: { label: 'READY', tone: 'muted' },
@@ -58,7 +65,36 @@ export const ItemDetail = component<ItemDetailProps>(({ props }) => {
     };
     const follow = useFollow();
     const NavChip = (href: string, kind: string, body: JSXElement) => <a href={href} onClick={follow(href)} data-plan-chip={kind}>{body}</a>;
-    const togglePin = (key: string): void => { st.pin = st.pin === key ? '' : key; };
+    const name = (a: PlanActor): string => (props.identity ?? mockPlanIdentity).name(a);
+    const tile = (a: PlanActor, size: 18 | 20) => ActorTile(a, size, (props.identity ?? mockPlanIdentity).look);
+    const openPin = (key: string, ref: FileRef): void => {
+        st.pin = key;
+        props.pins?.open(ref, props.doc.runs?.[props.item.id]);
+    };
+    const togglePin = (key: string, ref: FileRef): void => {
+        if (st.pin === key) st.pin = '';
+        else openPin(key, ref);
+    };
+    /** The card's code, or what stands in for it. */
+    const PinBody = (ref: FileRef, pin: PlanFilePin | undefined): JSXElement => {
+        const lines = (ls: readonly string[]) => (
+            <span data-plan-pin-code="">
+                {ls.map((line, i) => (
+                    <span data-plan-pin-line={ref.from + i}><span data-plan-pin-n="">{ref.from + i}</span><code>{line}</code></span>
+                ))}
+            </span>
+        );
+        if (!props.pins) return pin ? lines(pin.lines) : <span data-plan-pin-empty="">The pinned lines load with the file.</span>;
+        const view = props.pins.view(ref, props.doc.runs?.[props.item.id]);
+        if (!view) return <span data-plan-pin-empty="">Not pinned to a commit, so there are no fixed lines to show.</span>;
+        switch (view.status) {
+            case 'done': return lines(view.lines);
+            case 'loading': return <span data-plan-pin-empty="" data-plan-pin-status="loading" role="status">Reading the pinned lines…</span>;
+            case 'offline': return <span data-plan-pin-empty="" data-plan-pin-status="offline" role="status">{`${view.machine} is offline, so the pinned lines cannot be read.`}</span>;
+            case 'nowhere': return <span data-plan-pin-empty="" data-plan-pin-status="nowhere" role="status">No machine holds this project's folder, so the pinned lines cannot be read.</span>;
+            default: return <span data-plan-pin-empty="" data-plan-pin-status="error" role="status">{`Could not read the pinned lines: ${view.message}`}</span>;
+        }
+    };
 
     const RefChip = (ref: Ref) => {
         const key = formatRef(ref);
@@ -71,17 +107,18 @@ export const ItemDetail = component<ItemDetailProps>(({ props }) => {
             case 'url':
                 return <a href={ref.url} target="_blank" rel="noopener noreferrer" data-plan-chip="url">{body}</a>;
             case 'file': {
-                const pin = props.doc.pins?.[key];
+                const live = props.pins?.view(ref, props.doc.runs?.[props.item.id]);
+                const pin: PlanFilePin | undefined = props.pins ? (live?.status === 'done' ? { lines: live.lines, ...(live.branch ? { branch: live.branch } : {}) } : undefined) : props.doc.pins?.[key];
                 const open = st.pin === key;
                 const run = props.doc.runs?.[props.item.id];
                 return (
                     <span
                         data-plan-ref-file=""
-                        onMouseenter={() => { st.pin = key; }}
+                        onMouseenter={() => openPin(key, ref)}
                         onMouseleave={() => { if (st.pin === key) st.pin = ''; }}
                         onKeydown={(e: KeyboardEvent) => { if (e.key === 'Escape' && open) { st.pin = ''; e.stopPropagation(); } }}
                     >
-                        <button type="button" data-plan-chip="file" aria-expanded={open ? 'true' : 'false'} title={ref.path} onClick={() => togglePin(key)}>{body}</button>
+                        <button type="button" data-plan-chip="file" aria-expanded={open ? 'true' : 'false'} title={ref.path} onClick={() => togglePin(key, ref)}>{body}</button>
                         {open
                             ? (
                                 <span data-plan-pin="" role="group" aria-label={`${ref.path} lines ${ref.from} to ${ref.to}`}>
@@ -90,15 +127,7 @@ export const ItemDetail = component<ItemDetailProps>(({ props }) => {
                                         <span data-plan-pin-path="">{ref.path}</span>
                                         <span data-plan-pin-at="">{pinLine(ref, pin)}</span>
                                     </span>
-                                    {pin
-                                        ? (
-                                            <span data-plan-pin-code="">
-                                                {pin.lines.map((line, i) => (
-                                                    <span data-plan-pin-line={ref.from + i}><span data-plan-pin-n="">{ref.from + i}</span><code>{line}</code></span>
-                                                ))}
-                                            </span>
-                                        )
-                                        : <span data-plan-pin-empty="">The pinned lines load with the file.</span>}
+                                    {PinBody(ref, pin)}
                                     <span data-plan-pin-foot="">
                                         <span>{ref.sha ? 'Pinned to a commit, so the lines stay right after edits' : 'Not pinned yet: the lines follow the file'}</span>
                                         {run?.sessionId ? <Link to={`/sessions/${run.sessionId}/files`}>Open file</Link> : null}
@@ -136,8 +165,8 @@ export const ItemDetail = component<ItemDetailProps>(({ props }) => {
                     <dt>Assigned to</dt>
                     <dd data-fact="assigned">
                         {item.assignee
-                            ? <>{ActorTile(item.assignee, 20)}<strong>{actorName(item.assignee)}</strong>
-                                <span data-dim="">{[item.assignedBy ? `by ${actorName(item.assignedBy)}` : '', place ?? ''].filter(Boolean).join(' · ')}</span></>
+                            ? <>{tile(item.assignee, 20)}<strong>{name(item.assignee)}</strong>
+                                <span data-dim="">{[item.assignedBy ? `by ${name(item.assignedBy)}` : '', place ?? ''].filter(Boolean).join(' · ')}</span></>
                             : <span data-dim="">Not assigned</span>}
                     </dd>
                     <dt>Claimed</dt>
@@ -171,7 +200,7 @@ export const ItemDetail = component<ItemDetailProps>(({ props }) => {
                                 {overlaps.map((o) => (
                                     <p data-plan-overlap={o.item.id} role="note">
                                         <Icon name="warning" size={13} />
-                                        {`#${o.item.id}${o.item.assignee ? ` (${actorName(o.item.assignee)})` : ''} touches ${shortPath(o.path)} too.`}
+                                        {`#${o.item.id}${o.item.assignee ? ` (${name(o.item.assignee)})` : ''} touches ${shortPath(o.path)} too.`}
                                     </p>
                                 ))}
                             </dd>
@@ -222,8 +251,8 @@ export const ItemDetail = component<ItemDetailProps>(({ props }) => {
                             <ul data-plan-activity="">
                                 {[...item.activity].sort((a, b) => b.at - a.at).map((a) => (
                                     <li>
-                                        {ActorTile(a.actor, 18)}
-                                        <span><strong>{actorName(a.actor)}</strong> {a.text}</span>
+                                        {tile(a.actor, 18)}
+                                        <span><strong>{name(a.actor)}</strong> {a.text}</span>
                                         <span data-plan-age="">{formatAge(a.at, props.now)}</span>
                                     </li>
                                 ))}
