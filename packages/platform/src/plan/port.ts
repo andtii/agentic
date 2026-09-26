@@ -9,7 +9,7 @@
  * ran out, touches overlap, handoff) are taken and handed to `deliver`. A file ref is pinned through `pin` when the
  * host can, and stored unpinned otherwise.
  */
-import { formatRef, PLAN_LEASE_DEFAULT_MS, type AgentId, type FileRef, type Plan, type PlanActor, type PlanItem, type ProjectRecord, type Ref, type TaskId } from '@agentic/core';
+import { formatRef, type AgentId, type FileRef, type Plan, type PlanActor, type PlanItem, type ProjectRecord, type Ref, type TaskId } from '@agentic/core';
 import { PlanRefusal, type NewPlanItem, type PlanAddInput, type PlanBoard, type PlanMember, type PlanPort, type PlanUpdateInput, type ToolCall } from '@agentic/runtimes';
 import type { LinkedItemInput } from './links.js';
 import type { ClaimOptions, HandoffOptions, PlanItemPatch, PlanNotice } from './rules.js';
@@ -162,8 +162,8 @@ export function createPlanPort(deps: PlanPortDeps): PlanPort {
         claim: (item, leaseMs, call) =>
             run(call, async (scope) => {
                 const taskId = deps.taskId?.();
-                // The tool's own default stands for "none asked": the project's lease setting applies (#938).
-                return (await scope.plan.claim(item, { ...(leaseMs !== PLAN_LEASE_DEFAULT_MS ? { leaseMs } : {}), ...(taskId ? { taskId } : {}) })).item;
+                // None asked (`undefined`): the project's lease setting applies (#938); an explicit lease always wins (#962).
+                return (await scope.plan.claim(item, { ...(leaseMs !== undefined ? { leaseMs } : {}), ...(taskId ? { taskId } : {}) })).item;
             }),
         assign: (item, to, index, call) => run(call, (scope) => scope.plan.assign(item, resolvePlanMember(scope, to), index)),
         update: (input, call) => run(call, (scope) => scope.plan.update(input.item, planPatch(input))),

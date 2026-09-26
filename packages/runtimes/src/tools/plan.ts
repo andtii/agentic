@@ -13,7 +13,7 @@
 
 import { defineTool } from '@sigx/ai';
 import { z } from 'zod';
-import { PLAN_LEASE_DEFAULT_MS, PLAN_TOOLS, formatRef, parseRef, planClaimLive, planDoneWhenMet, planItemWaitsOn, planItems, planTouchesOverlap, type AgentId, type Plan, type PlanActor, type PlanDoneWhen, type PlanItem, type PlanItemState, type Ref } from '@agentic/core';
+import { PLAN_TOOLS, formatRef, parseRef, planClaimLive, planDoneWhenMet, planItemWaitsOn, planItems, planTouchesOverlap, type AgentId, type Plan, type PlanActor, type PlanDoneWhen, type PlanItem, type PlanItemState, type Ref } from '@agentic/core';
 import type { ToolCall } from './ports.js';
 
 /** A member of the project as the plan names them: `@handle`. */
@@ -74,8 +74,8 @@ export interface PlanAddInput {
  */
 export interface PlanPort {
     board(call: ToolCall): Promise<PlanBoard>;
-    /** Start `item` with a lease of `leaseMs`. */
-    claim(item: number, leaseMs: number, call: ToolCall): Promise<PlanItem>;
+    /** Start `item` with a lease of `leaseMs`; `undefined` (none asked) takes the project's lease. */
+    claim(item: number, leaseMs: number | undefined, call: ToolCall): Promise<PlanItem>;
     /** Put `item` in the queue of the member `to` (a handle), at `index` (default: the end). */
     assign(item: number, to: string, index: number | undefined, call: ToolCall): Promise<PlanItem>;
     update(input: PlanUpdateInput, call: ToolCall): Promise<PlanItem>;
@@ -351,7 +351,7 @@ export function planTools(port: PlanPort | undefined) {
                 const board = await p.board(call(ctx));
                 const refusal = planClaimRefusal(board, input.item);
                 if (refusal) throw new PlanRefusal(refusal);
-                const item = await p.claim(input.item, input.leaseMinutes !== undefined ? input.leaseMinutes * 60_000 : PLAN_LEASE_DEFAULT_MS, call(ctx));
+                const item = await p.claim(input.item, input.leaseMinutes !== undefined ? input.leaseMinutes * 60_000 : undefined, call(ctx));
                 const headsUp = planTouchWarnings(board, item);
                 return { item: item.id, state: item.state, ...(item.claim ? { leaseUntil: new Date(item.claim.leaseUntil).toISOString() } : {}), note: 'the lease renews on each plan_* call', ...(headsUp.length ? { headsUp } : {}) };
             }

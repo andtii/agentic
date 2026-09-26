@@ -1,5 +1,5 @@
 /** The `plan` tool family on the orchestration surface (#751) over a fake Plan port: scope gate, argument mapping, ref parsing. */
-import { PLAN_LEASE_DEFAULT_MS, PLAN_TOOLS, type PlanItem, type ProjectId, type Ref, type WorkspaceId } from '@agentic/core';
+import { PLAN_TOOLS, type PlanItem, type ProjectId, type Ref, type WorkspaceId } from '@agentic/core';
 import { platformTools, scopeOfTool, type ExternalPrincipal, type PlatformPort } from '@agentic/mcp';
 import type { PlanMcpPort } from '../../src/server/plan';
 
@@ -51,7 +51,7 @@ describe('plan tools on the platform MCP surface', () => {
         for (const name of PLAN_TOOLS) expect(toolsOf(undefined)(name)).toBeUndefined();
     });
 
-    it('maps each call onto the port: default lease, bare handles, only the fields given', async () => {
+    it('maps each call onto the port: no lease asked (the project’s applies), bare handles, only the fields given', async () => {
         const fake = fakePlan();
         const tool = toolsOf(fake.port);
         expect(await tool('plan_list').run({ projectId: 'project_agentic' }, ctx)).toMatchObject({ plans: [{ id: 'p1' }] });
@@ -65,7 +65,7 @@ describe('plan tools on the platform MCP surface', () => {
         expect(fake.calls).toEqual([
             { op: 'list', args: ['project_agentic', undefined] },
             { op: 'next', args: ['project_agentic', 'agent_forge', undefined] },
-            { op: 'claim', args: ['project_agentic', 9, 'agent_forge', PLAN_LEASE_DEFAULT_MS] },
+            { op: 'claim', args: ['project_agentic', 9, 'agent_forge', undefined] },
             { op: 'claim', args: ['project_agentic', 9, 'agent_forge', 10 * 60_000] },
             { op: 'assign', args: ['project_agentic', 11, 'lint', 0] },
             { op: 'update', args: ['project_agentic', 9, { check: [0], state: 'done' }] },

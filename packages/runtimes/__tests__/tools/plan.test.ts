@@ -60,7 +60,7 @@ function fakePlanPort(initial: PlanBoard) {
         },
         async claim(n, leaseMs, call) {
             calls.push({ op: 'claim', args: { n, leaseMs }, call });
-            return patch(n, (i) => ({ ...i, state: 'claimed', claim: { agentId: state.me, leaseUntil: 1_000_000 + leaseMs } }));
+            return patch(n, (i) => ({ ...i, state: 'claimed', claim: { agentId: state.me, leaseUntil: 1_000_000 + (leaseMs ?? PLAN_LEASE_DEFAULT_MS) } }));
         },
         async assign(n, to, index, call) {
             calls.push({ op: 'assign', args: { n, to, index }, call });
@@ -126,10 +126,10 @@ describe('plan tools', () => {
         expect(await tool(fakePlanPort(board()).port, 'plan_next').run({}, ctx())).toMatchObject({ item: null });
     });
 
-    it('plan_claim starts an item with the default lease and warns about overlapping touches', async () => {
+    it('plan_claim starts an item with no lease asked (the project’s applies) and warns about overlapping touches', async () => {
         const fake = fakePlanPort(board());
         const out = (await tool(fake.port, 'plan_claim').run({ item: 9 }, ctx())) as unknown as { item: number; headsUp?: string[] };
-        expect(fake.calls.find((c) => c.op === 'claim')!.args).toEqual({ n: 9, leaseMs: PLAN_LEASE_DEFAULT_MS });
+        expect(fake.calls.find((c) => c.op === 'claim')!.args).toEqual({ n: 9, leaseMs: undefined });
         expect(out.item).toBe(9);
         expect(out.headsUp).toEqual(['#10 (@lint) also touches plugins/model.ts']);
         await tool(fake.port, 'plan_claim').run({ item: 9, leaseMinutes: 45 }, ctx());
