@@ -5,27 +5,26 @@
  * `OverviewCard` (`features/registry.ts`), then Schedules, People and places, and the dashed Add-a-feature card.
  * The rail drops under the main column below 1280px.
  *
- * On mock data the rows come from `mock/projects/overview.ts`; live, Your move waits for the derived work items (K1)
- * and the chats and schedules for their project reads, so those cards say so — the header, the feature cards and
- * People and places read the record.
+ * On mock data the rows come from `mock/projects/overview.ts`; live (#933, `LiveOverview.tsx`), Your move is the
+ * project's `your-move` work items, Chats its five most recent chats and Schedules its schedules — skeleton rows until
+ * each first read lands. The header, the feature cards and People and places read the record.
  */
 import { component, type Define, type JSXElement } from 'sigx';
 import { Link } from '@sigx/router';
 import type { ProjectRecord } from '@agentic/core';
-import { AgentTile, Button, Icon, ProjectSquare, StatusPill, type IconName } from '@agentic/ui';
-import { useActorDefs, useViewer } from '../../../actors/defs';
+import { AgentTile, Button, Icon, ProjectSquare, StatusPill, TableSkeleton, type IconName } from '@agentic/ui';
 import { Age } from '../../../components/Age';
 import { Page } from '../../../components/Page';
 import { defineTopbar } from '../../../components/topbar';
 import { dataMode } from '../../../data-mode';
 import { MOCK_PROJECT_OVERVIEW } from '../../../mock/projects/overview';
 import { AGENTS, USER } from '../../../mock/workspace';
-import { useAgentDirectory } from '../../chat/directory';
 import { featureViewsOf, type ProjectFeatureViews } from '../features/registry';
 import { projectMenuSource } from '../layout/menu';
 import type { ProjectPageProps } from '../layout/types';
 import { settingsHref } from '../settings/tabs';
-import { addFeatureHintOf, CHAT_STATE_PILL, EMPTY_OVERVIEW, folderLineOf, peopleOf, projectTagsOf, recentChatsOf, type AgentNames, type OverviewChat, type OverviewData, type OverviewMove } from './model';
+import { addFeatureHintOf, CHAT_STATE_PILL, EMPTY_OVERVIEW, folderLineOf, peopleOf, projectTagsOf, recentChatsOf, type AgentNames, type OverviewChat, type OverviewData, type OverviewLoading, type OverviewMove } from './model';
+import { useLiveOverview } from './LiveOverview';
 
 export type OverviewViewProps =
     & Define.Prop<'project', ProjectRecord, true>
@@ -34,7 +33,9 @@ export type OverviewViewProps =
     /** The feature views by id; the registry's by default (a test passes its own). */
     & Define.Prop<'views', (featureId: string) => ProjectFeatureViews | undefined>
     /** The chats card's total when it knows more chats than `data.chats` holds. */
-    & Define.Prop<'chatCount', number>;
+    & Define.Prop<'chatCount', number>
+    /** The live cards still waiting for their first read (#933): skeleton rows instead of the empty line. */
+    & Define.Prop<'loading', OverviewLoading>;
 
 // The project's home is the route's own crumb: `Projects › <project name>` (live, what `ProjectLayout` published).
 defineTopbar('project', (route) => ({ crumb: projectMenuSource(route)?.name }));
@@ -72,7 +73,7 @@ const chatRow = (c: OverviewChat, names: AgentNames) => {
             <span data-overview-row-main="">
                 <Link to={`/chats/${c.id}`}>
                     <span data-overview-row-title="">{c.title}</span>
-                    <span data-overview-row-detail=""><b>{c.lastBy}:</b> {c.lastLine}</span>
+                    <span data-overview-row-detail="">{c.lastBy ? <><b>{`${c.lastBy}:`}</b>{' '}</> : null}{c.lastLine}</span>
                 </Link>
             </span>
             <span data-overview-tiles="">
@@ -100,6 +101,8 @@ export const OverviewView = component<OverviewViewProps>(({ props }) => () => {
     const views = props.views ?? featureViewsOf;
     const chats = recentChatsOf(data.chats);
     const chatCount = props.chatCount ?? data.chats.length;
+    const loading = props.loading ?? {};
+    const skeleton = (label: string) => <div data-overview-loading=""><TableSkeleton rows={3} cols="1fr 80px" label={label} /></div>;
     const cards = Object.keys(p.features).flatMap((id) => {
         const Card = views(id)?.OverviewCard;
         return Card ? [{ id, Card }] : [];
@@ -133,13 +136,13 @@ export const OverviewView = component<OverviewViewProps>(({ props }) => () => {
             <div data-overview-main="">
                 <section data-overview-card="move" aria-label="Your move">
                     {cardHead('check', 'Your move', <Link to={`${base(p)}/work`}>All work →</Link>)}
-                    {data.moves.length
+                    {loading.moves && !data.moves.length ? skeleton('Loading your move') : data.moves.length
                         ? <ul data-overview-rows="">{data.moves.map(moveRow)}</ul>
                         : <p data-overview-empty="">Nothing needs you here.</p>}
                 </section>
                 <section data-overview-card="chats" aria-label="Chats">
                     {cardHead('chats', 'Chats', <Link to={`${base(p)}/chats`}>{`All ${chatCount} chats →`}</Link>)}
-                    {chats.length
+                    {loading.chats && !chats.length ? skeleton('Loading chats') : chats.length
                         ? <ul data-overview-rows="">{chats.map((c) => chatRow(c, names))}</ul>
                         : <p data-overview-empty="">No chats in this project yet.</p>}
                 </section>
@@ -153,14 +156,14 @@ export const OverviewView = component<OverviewViewProps>(({ props }) => () => {
                 ))}
                 <section data-overview-card="schedules" aria-label="Schedules">
                     {cardHead('schedules', 'Schedules', <Link to="/schedules">Edit</Link>)}
-                    {data.schedules.length
+                    {loading.schedules && !data.schedules.length ? skeleton('Loading schedules') : data.schedules.length
                         ? data.schedules.map((s) => {
-                            const a = names(s.agentId);
+                            const a = s.agentId ? names(s.agentId) : null;
                             return (
                                 <div data-overview-schedule={s.id}>
                                     <div data-overview-kv="">
                                         <span data-overview-row-title="">{s.title}</span>
-                                        <AgentTile name={a.name} hue={a.hue} size={20} />
+                                        {a ? <AgentTile name={a.name} hue={a.hue} size={20} /> : null}
                                     </div>
                                     <div data-overview-kv="">
                                         <span data-overview-k="">Next run</span>
@@ -205,13 +208,15 @@ const MockOverview = component<ProjectPageProps>(({ props }) => () => (
     <OverviewView project={props.project} data={MOCK_PROJECT_OVERVIEW[props.project.id] ?? EMPTY_OVERVIEW} names={mockNames} />
 ), { name: 'MockProjectOverview' });
 
+/** Live (#933): the project's work items, chats and schedules over the actor wire, with watchers keeping them current. */
 const LiveOverview = component<ProjectPageProps>(({ props }) => {
-    const directory = useAgentDirectory(useActorDefs(), useViewer()());
-    const names: AgentNames = (id) => {
-        const a = directory.lookup(id);
-        return { name: a.name, hue: a.hue };
-    };
-    return () => <OverviewView project={props.project} data={EMPTY_OVERVIEW} names={names} />;
+    const live = useLiveOverview(() => props.project);
+    return () => (
+        <>
+            <OverviewView project={props.project} data={live.data()} names={live.names} chatCount={live.chatCount()} loading={live.loading()} />
+            {live.watchers()}
+        </>
+    );
 }, { name: 'LiveProjectOverview' });
 
 export const ProjectOverview = component<ProjectPageProps>(({ props }) => () => (dataMode() === 'live'
