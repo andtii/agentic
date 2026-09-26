@@ -37,6 +37,14 @@ import { checkedPmSpec, DEFAULT_PM_SPEC, pmCoordinatorError, PmSpecError, projec
 import { checkedPmPolicy } from './pm-policy.js';
 import { pmSummarySchedule, pmSummaryScheduleId, pmSummaryScheduleKey } from '../requests/summary-schedule.js';
 import { defineScheduleActor } from '../schedule/actor.js';
+import type { PlanListView } from '../plan/actor.js';
+import { planKey, PLAN_TYPE } from '../plan/key.js';
+import type { PullsView } from '../pulls/actor.js';
+import { pullsKey, PULLS_TYPE } from '../pulls/key.js';
+import type { RequestView } from '../requests/rules.js';
+import { requestsKey, REQUESTS_TYPE } from '../requests/key.js';
+import { TaskIndex, taskIndexKey, type TaskIndexRow } from '../task/task-index.js';
+import { isOpenTask, openPlanItemCount, tallyProjectWork, type ProjectWorkTally } from './project-work.js';
 
 export const WORKSPACE_STATE_VERSION = 1;
 
@@ -104,20 +112,57 @@ export interface ProjectSummaryLine {
     readonly archivedChats: number;
     /** The newest entry's `at` across the project's open chats; absent while none has one. */
     readonly lastActivityAt?: number;
+    /**
+     * The project's work (#934) as the Work view groups it: your move, agents on it, waiting, and the next moves.
+     * Absent when its tasks, pull requests or plan could not be read, so nothing claims the project is quiet.
+     */
+    readonly work?: ProjectWorkTally;
+    /** Plan items not done yet (#934), the Plan section's count; absent when the plan could not be read. */
+    readonly openPlanItems?: number;
+    /** Incoming requests waiting on a person (#934), the Requests count; absent when they could not be read. */
+    readonly requestsNeedYou?: number;
 }
 
 /** What `projectSummaries` returns: one line per project in creation order, and the chats outside any project. */
 export interface ProjectSummaries {
     readonly projects: readonly ProjectSummaryLine[];
     /** Open chats in no project, or in one the workspace no longer has (the "outside any project" strip); archived ones are left out. */
-    readonly unassigned: { readonly openChats: number; readonly lastActivityAt?: number };
+    readonly unassigned: {
+        readonly openChats: number;
+        readonly lastActivityAt?: number;
+        /** Root tasks in flight whose chat is in no project, or that came from no chat (#934); absent when the task index could not be read. */
+        readonly openTasks?: number;
+    };
 }
+
+export type { ProjectWorkTally } from './project-work.js';
 
 /** The project keys an upsert is audited by (`project.changed` data `changed`). */
 const PROJECT_KEYS = ['name', 'description', 'members', 'folders', 'connectors', 'features', 'color'] as const;
 
 /** How many chats `projectSummaries` reads at once. */
 const SUMMARY_CONCURRENCY = 8;
+
+/**
+ * The actors `projectSummaries` reads a project's work from (#934), as hop targets only: a call is routed by the
+ * actor type, so the app's own Plan, Pulls and Requests answer it (the Registry's `ScheduleRefDef` rule). Declared
+ * here with the one read each, not made from their `define*Actor`: those modules import this one.
+ */
+const hopOnly = (): never => {
+    throw new Error('[workspace] a hop target, never a host');
+};
+const PlanRef = defineActor({ type: PLAN_TYPE, state: () => ({}), methods: () => ({ list: async (): Promise<PlanListView> => hopOnly() }) });
+const PullsRef = defineActor({ type: PULLS_TYPE, state: () => ({}), methods: () => ({ get: async (): Promise<PullsView> => hopOnly() }) });
+const RequestsRef = defineActor({ type: REQUESTS_TYPE, state: () => ({}), methods: () => ({ incoming: async (): Promise<RequestView[]> => hopOnly() }) });
+
+/** `read()`, or `undefined` when it fails: a source that cannot be read leaves its count out. */
+async function orUnknown<T>(read: () => Promise<T>): Promise<T | undefined> {
+    try {
+        return await read();
+    } catch {
+        return undefined;
+    }
+}
 
 export interface WorkspaceState {
     v: number;
@@ -531,6 +576,11 @@ export function defineWorkspace(options: WorkspaceOptions = {}) {
              * Per project (#734; PRJ-01/02): open and archived chat counts and the newest activity, read from each
              * chat of the index over a hop (`Chat.get` for its project, `Chat.history` for its newest entry), a few at
              * a time. A chat that cannot be read is left out. Interleaves with writes: the index is copied first.
+             *
+             * Per project too (#934): its work counted as the Work view groups it (`project-work.ts`) from the
+             * TaskIndex rows of its chats, its Pulls actor's pull requests and its Plan actor's items; its open plan
+             * items; its incoming requests that need a person. Each is left out when its source cannot be read. The
+             * unassigned line counts root tasks in flight outside any project.
              */
             async projectSummaries(): Promise<ProjectSummaries> {
                 const projectIds = (ctx.state.projects ?? []).map((p) => p.id);
@@ -539,6 +589,10 @@ export function defineWorkspace(options: WorkspaceOptions = {}) {
                 type Line = { openChats: number; archivedChats: number; lastActivityAt?: number };
                 const unassigned: Line = { openChats: 0, archivedChats: 0 };
                 const lines = new Map<ProjectId, Line>(projectIds.map((id) => [id, { openChats: 0, archivedChats: 0 }]));
+                // Every chat's project (#934): a task belongs to its chat's project, archived chat or not.
+                const projectOfChat = new Map<string, ProjectId>();
+                const unreadChats = new Set<string>();
+                const taskRows = orUnknown(() => ctx.actor(TaskIndex, taskIndexKey(workspaceId)).list());
                 await eachLimited(chatIds, SUMMARY_CONCURRENCY, async (chatId) => {
                     const chat = ctx.actor(Chat, actorKey(workspaceId, 'chat', chatId));
                     let projectId: ProjectId | undefined;
@@ -551,9 +605,11 @@ export function defineWorkspace(options: WorkspaceOptions = {}) {
                         const newest = page.entries.at(-1)?.entry as { at?: unknown } | undefined;
                         if (typeof newest?.at === 'number') at = newest.at;
                     } catch {
+                        unreadChats.add(chatId);
                         return;
                     }
                     const line = (projectId !== undefined ? lines.get(projectId) : undefined) ?? unassigned;
+                    if (projectId !== undefined && lines.has(projectId)) projectOfChat.set(chatId, projectId);
                     // An archived chat is counted, not shown: it adds no activity (#774).
                     if (archived) {
                         line.archivedChats += 1;
@@ -562,10 +618,38 @@ export function defineWorkspace(options: WorkspaceOptions = {}) {
                     line.openChats += 1;
                     if (at !== undefined && (line.lastActivityAt === undefined || at > line.lastActivityAt)) line.lastActivityAt = at;
                 });
+                // A task of a chat that could not be read has no known project: then no task count is complete.
+                const read = await taskRows;
+                const rows = read && !read.some((r) => r.chatId !== undefined && unreadChats.has(r.chatId)) ? read : undefined;
+                const tasksOf = new Map<ProjectId, TaskIndexRow[]>();
+                let unassignedTasks = 0;
+                for (const row of rows ?? []) {
+                    const projectId = row.chatId !== undefined ? projectOfChat.get(row.chatId) : undefined;
+                    if (projectId !== undefined) {
+                        const list = tasksOf.get(projectId);
+                        if (list) list.push(row);
+                        else tasksOf.set(projectId, [row]);
+                    } else if (row.parentId === undefined && isOpenTask(row)) unassignedTasks += 1;
+                }
+                type Extra = Pick<ProjectSummaryLine, 'work' | 'openPlanItems' | 'requestsNeedYou'>;
+                const extras = new Map<ProjectId, Extra>();
+                await eachLimited(projectIds, SUMMARY_CONCURRENCY, async (projectId) => {
+                    const [plans, pulls, incoming] = await Promise.all([
+                        orUnknown(() => ctx.actor(PlanRef, planKey(workspaceId, projectId)).list()),
+                        orUnknown(() => ctx.actor(PullsRef, pullsKey(workspaceId, projectId)).get()),
+                        orUnknown(() => ctx.actor(RequestsRef, requestsKey(workspaceId, projectId)).incoming())
+                    ]);
+                    const items = plans?.plans.flatMap((p) => p.phases.flatMap((ph) => ph.items));
+                    extras.set(projectId, {
+                        ...(rows && pulls && items ? { work: tallyProjectWork(tasksOf.get(projectId) ?? [], pulls.pulls, items, now()) } : {}),
+                        ...(items ? { openPlanItems: openPlanItemCount(items) } : {}),
+                        ...(incoming ? { requestsNeedYou: incoming.filter((r) => r.state === 'needs-you').length } : {})
+                    });
+                });
                 const out = (line: Line) => ({ openChats: line.openChats, ...(line.lastActivityAt !== undefined ? { lastActivityAt: line.lastActivityAt } : {}) });
                 return {
-                    projects: projectIds.map((projectId) => ({ projectId, ...out(lines.get(projectId)!), archivedChats: lines.get(projectId)!.archivedChats })),
-                    unassigned: out(unassigned)
+                    projects: projectIds.map((projectId) => ({ projectId, ...out(lines.get(projectId)!), archivedChats: lines.get(projectId)!.archivedChats, ...extras.get(projectId) })),
+                    unassigned: { ...out(unassigned), ...(rows ? { openTasks: unassignedTasks } : {}) }
                 };
             },
 

@@ -1,5 +1,5 @@
-import { component, signal, type Define } from 'sigx';
-import { Link } from '@sigx/router';
+import { component, effect, onUnmounted, signal, type Define } from 'sigx';
+import { Link, useRoute } from '@sigx/router';
 import { Select } from '@sigx/zero';
 import { Badge, Field, Input, Menu } from '@sigx/zero-daisyui/components';
 import { AgentTile, Button, ErrorNote, Icon, ProjectSquare, StatusPill } from '@agentic/ui';
@@ -8,6 +8,7 @@ import { dataMode } from '../../data-mode';
 import { mockArchive, setMockArchived, splitArchived, withMockArchive, type ArchiveRequest, type ChatListRow } from './archive';
 import { groupChatsByProject, type ChatGroupProject } from './chat-groups';
 import type { AgentLookup } from './live';
+import { queryOf } from '../session/files';
 
 export type ChatListProps =
     & Define.Prop<'chats', readonly ChatListRow[], true>
@@ -47,13 +48,25 @@ export const MemberTiles = component<{ agentIds: readonly string[]; size?: 18 | 
 /** The project filter's "All projects" item: never a project id (those are minted by `createId`), and not zero's empty "nothing chosen". */
 export const ALL_PROJECTS = '*';
 
+/**
+ * The project filter's "No project" item (#934): chats in no project, or in one the workspace no longer has — what the
+ * projects index's unassigned strip counts. `/chats?project=none` opens the list on it, and the item is listed while
+ * it is chosen. Never a project id.
+ */
+export const NO_PROJECT = 'none';
+
 /** The "No project" group's key in the collapsed set: never a project id. */
 const NO_PROJECT_KEY = '-';
 
-/** The rows a search keeps: every word of `q` somewhere in the title or the last line, case-insensitive; a blank search keeps all. */
-export function matchingChats<T extends MockChatSummary>(chats: readonly T[], q: string, projectId: string = ''): readonly T[] {
+/**
+ * The rows a search keeps: every word of `q` somewhere in the title or the last line, case-insensitive; a blank search
+ * keeps all. `projectId` keeps one project's chats; `NO_PROJECT` those in no project of `known` (the workspace's).
+ */
+export function matchingChats<T extends MockChatSummary>(chats: readonly T[], q: string, projectId: string = '', known: ReadonlySet<string> = new Set()): readonly T[] {
     const words = q.toLowerCase().split(/\s+/).filter(Boolean);
-    const inProject = projectId ? chats.filter((c) => c.projectId === projectId) : chats;
+    const inProject = projectId === NO_PROJECT
+        ? chats.filter((c) => !c.projectId || !known.has(c.projectId))
+        : projectId ? chats.filter((c) => c.projectId === projectId) : chats;
     if (!words.length) return inProject;
     return inProject.filter((c) => {
         const text = `${c.title}\n${c.lastLine}`.toLowerCase();
@@ -71,6 +84,17 @@ export const ChatList = component<ChatListProps>(({ props, emit }) => {
     // The project filter's model: a project id, or `ALL_PROJECTS` (zero's Select keeps `null` / `''` for "nothing chosen").
     const st = signal({ q: '', project: ALL_PROJECTS as string | null });
     const projectFilter = (): string => (st.project && st.project !== ALL_PROJECTS ? st.project : '');
+    // `?project=none` (#934, the projects index's "Show" on chats outside any project) opens on "No project".
+    const route = useRoute();
+    // Only a change of the query moves the filter: a choice made in the Select stands while the query stays.
+    let lastQuery: string | undefined;
+    const stopQuery = effect(() => {
+        const q = queryOf(route.query.project);
+        if (q === lastQuery) return;
+        lastQuery = q;
+        if (q === NO_PROJECT) st.project = NO_PROJECT;
+    });
+    onUnmounted(stopQuery);
     // Collapsed group keys on `/chats` (#732): a project id, or `NO_PROJECT_KEY`.
     const groups = signal({ collapsed: [] as readonly string[] });
     const toggleGroup = (key: string) => {
@@ -130,7 +154,7 @@ export const ChatList = component<ChatListProps>(({ props, emit }) => {
         );
     };
     const rows = () => {
-        const { open: chats, archived } = splitArchived(matchingChats(current(), st.q, projectFilter()));
+        const { open: chats, archived } = splitArchived(matchingChats(current(), st.q, projectFilter(), new Set((props.projects ?? []).map((p) => p.id))));
         // The column beside a chat stays one flat list; `/chats` groups by project once there are projects.
         if (!props.wide || !props.projects?.length) return <><ul data-chat-rows>{chats.map(row)}</ul>{archivedGroup(archived)}</>;
         return (
@@ -179,7 +203,7 @@ export const ChatList = component<ChatListProps>(({ props, emit }) => {
                     <Field.Label visuallyHidden>Project</Field.Label>
                     <Select.Root
                         model={() => st.project}
-                        items={[{ id: ALL_PROJECTS, name: 'All projects' }, ...props.projects]}
+                        items={[{ id: ALL_PROJECTS, name: 'All projects' }, ...props.projects, ...(st.project === NO_PROJECT ? [{ id: NO_PROJECT, name: 'No project' }] : [])]}
                         itemValue={(p) => p.id}
                         itemLabel={(p) => p.name}
                         name="chat-project-filter"
