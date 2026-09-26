@@ -8,6 +8,7 @@ import type { PullRequest } from '@agentic/core';
 import type { PullLinksFn } from '@agentic/ui';
 import { MOCK_WORK } from '../../../../mock/projects/work';
 import type { PullNeeds } from '../../../inbox/NeedsYou';
+import { usePulls } from '../live';
 
 /** The PR page of pull request `number` in project `projectId`. */
 export const pullPageHref = (projectId: string, number: number): string => `/projects/${encodeURIComponent(projectId)}/work/pr:${number}`;
@@ -17,13 +18,28 @@ export function pullDiffHref(pr: Pick<PullRequest, 'provider' | 'url'>): string 
     return pr.provider === 'github' ? `${pr.url.replace(/\/+$/, '')}/files` : undefined;
 }
 
-/** A chat card's links in project `projectId`: the PR page and its diff. No project → the card keeps the provider's URL. */
+type UsePull = NonNullable<PullLinksFn['usePull']>;
+
+/**
+ * The chat card's live read (#935): the project's pull requests (`usePulls` — the Pulls actor's `get`, or the Work
+ * fixtures on mock data), the one with the ref's number and repo. Called in the card's setup.
+ */
+export const projectUsePull = (projectId: string): UsePull => (ref) => {
+    const pulls = usePulls(projectId);
+    return () => pulls().find((pr) => pr.number === ref.number && (ref.repo === undefined || pr.repo === ref.repo));
+};
+
+/**
+ * A chat card's links in project `projectId`: the PR page and its diff, and the live read that keeps the card on the
+ * project's Pulls actor. No project → the card keeps the provider's URL and the snapshot the call returned.
+ */
 export function chatPullLinks(projectId: string | undefined): PullLinksFn | undefined {
     if (!projectId) return undefined;
-    return (pr) => {
+    const links = (pr: PullRequest) => {
         const diffHref = pullDiffHref(pr);
         return { href: pullPageHref(projectId, pr.number), ...(diffHref ? { diffHref } : {}) };
     };
+    return Object.assign(links, { usePull: projectUsePull(projectId) });
 }
 
 /** Every mock project's pull requests, each with the project it belongs to. */

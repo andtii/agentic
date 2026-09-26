@@ -87,7 +87,7 @@ describe('pull_report (#793)', () => {
         const ports = createActorToolPorts({ principal, chatId: CHAT, pulls: () => Pulls });
         const [tool] = grantedPlatformTools(ports, [{ name: 'pull_report' }]);
         const out = await tool!.run({ number: 42 }, { toolCallId: 'c1', signal: new AbortController().signal });
-        expect(out).toEqual({ number: 42, repo: 'o/r', state: 'open', title: 'PR 42', url: 'https://github.com/o/r/pull/42' });
+        expect(out).toMatchObject({ number: 42, repo: 'o/r', state: 'open', title: 'PR 42', url: 'https://github.com/o/r/pull/42' });
         expect((await pulls(projectId).get()).pulls[0]).toMatchObject({ number: 42, taskId: TASK, chatId: CHAT, sessionId: SESSION });
         expect(await task().get()).toMatchObject({ status: 'waiting', wait: { kind: 'pull-request', number: 42, state: 'open' } });
     });

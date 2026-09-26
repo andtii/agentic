@@ -9,7 +9,9 @@
  * while the call waits on the operator; the sub-agent card when the call
  * spawned one. A call whose result is a pull request carries the live
  * `PullCard` in place of the well (PRJ-10): it re-renders from the record,
- * so it updates in place rather than posting a message per check.
+ * so it updates in place rather than posting a message per check. Given the
+ * page's `pullLinks.usePull`, the card reads the PR live by repo and number
+ * (#935) — `pull_report`'s answer included, read or not yet.
  *
  * `data-state` is zero's governed lifecycle (`./tool-state`): `loading`
  * while pending — arguments still streaming, or awaiting approval —
@@ -51,21 +53,57 @@ export interface ToolLink {
     readonly href: string;
 }
 
-/** Where a pull request a call returned leads: the PR page and its diff (`chat` card); the provider's page by default. */
-export type PullLinksFn = (pull: PullRequest) => { readonly href?: string; readonly diffHref?: string; readonly agentName?: string } | undefined;
+/** A pull request a call names: its repo (`owner/name`, when known) and number. */
+export interface PullRef {
+    readonly repo?: string;
+    readonly number: number;
+}
 
-/** The pull request a call's result is — the output itself, or its JSON text — else `undefined`. */
-export function pullOf(p: ToolPartState): PullRequest | undefined {
+/**
+ * The live read of a pull request (#935): called once in the chat card's setup, it returns a reactive getter of the
+ * record as the page's Pulls store holds it, so one card follows the PR and updates in place.
+ */
+export type UsePullFn = (ref: PullRef) => () => PullRequest | undefined;
+
+/**
+ * Where a pull request a call returned leads: the PR page and its diff (`chat` card); the provider's page by default.
+ * `usePull`, when the page gives it, makes the card live: it resolves the PR by repo and number and follows it.
+ */
+export type PullLinksFn = ((pull: PullRequest) => { readonly href?: string; readonly diffHref?: string; readonly agentName?: string } | undefined) & {
+    readonly usePull?: UsePullFn;
+};
+
+/** A call's output as a value: the output itself, or its JSON object text. */
+function outputValue(p: ToolPartState): unknown {
     if (p.status === 'streaming' || !reportedOutput(p)) return undefined;
-    let out: unknown = toolOutput(p);
+    const out: unknown = toolOutput(p);
     if (typeof out === 'string' && out.trimStart().startsWith('{')) {
         try {
-            out = JSON.parse(out);
+            return JSON.parse(out);
         } catch {
             return undefined;
         }
     }
+    return out;
+}
+
+/** The pull request a call's result is — the output itself, or its JSON text — else `undefined`. */
+export function pullOf(p: ToolPartState): PullRequest | undefined {
+    const out = outputValue(p);
     return isPullRequest(out) ? out : undefined;
+}
+
+/** The tool whose answer names the PR an agent opened, read or not (`pull_report`, #793). */
+export const PULL_REPORT_TOOL = 'pull_report';
+
+/** The pull request a call names: a full record, or `pull_report`'s answer (`{number, repo}`) before the PR is read. */
+export function pullRefOf(p: ToolPartState): PullRef | undefined {
+    const out = outputValue(p);
+    if (isPullRequest(out)) return { repo: out.repo, number: out.number };
+    if (p.name !== PULL_REPORT_TOOL || !out || typeof out !== 'object') return undefined;
+    const { number, repo } = out as { number?: unknown; repo?: unknown };
+    if (typeof number !== 'number') return undefined;
+    return { number, ...(typeof repo === 'string' ? { repo } : {}) };
 }
 
 /** The links a page puts on a call's card; none by default. */
@@ -232,6 +270,26 @@ const AgentCard = component<Define.Prop<'agent', AgentState, true> & ThreadConte
     };
 }, { name: 'ToolCall.Agent' });
 
+/**
+ * The chat card, live (#935): the page's `usePull` read of the PR (opened once, here in setup) wins over the snapshot the
+ * call returned, so the card updates in place as the Pulls store reads the PR. Nothing to show yet → the output well.
+ */
+const LivePullCard = component<
+    & Define.Prop<'pullRef', PullRef, true>
+    & Define.Prop<'snapshot', PullRequest, false>
+    & Define.Prop<'pullLinks', PullLinksFn, false>
+    & Define.Prop<'output', string, false>
+    & Define.Prop<'logHref', string, false>
+>(({ props }) => {
+    const usePull = props.pullLinks?.usePull;
+    const live = usePull ? usePull(props.pullRef) : () => undefined;
+    return () => {
+        const pull = live() ?? props.snapshot;
+        if (pull) return <PullCard pull={pull} surface="chat" {...pullCardLinks(pull, props.pullLinks)} />;
+        return props.output !== undefined ? <OutputBlock text={props.output} logHref={props.logHref} /> : null;
+    };
+}, { name: 'ToolCall.LivePull' });
+
 /** The chat card's links: the page's, else the provider's page. */
 function pullCardLinks(pull: PullRequest, links?: PullLinksFn): { href: string; diffHref?: string; agentName?: string } {
     const l = links?.(pull);
@@ -247,6 +305,9 @@ export const ToolCall = component<ToolCallProps>(({ props }) => {
         const streaming = p.status === 'streaming';
         const sig = streaming ? `${oneLine(p.inputText ?? '')}…` : signature(p.input);
         const pull = pullOf(p);
+        // A PR the page can read live gets the card even before the call's own answer carries the record.
+        const ref = streaming ? undefined : pullRefOf(p);
+        const card = ref && (pull || props.pullLinks?.usePull) ? ref : undefined;
         const output = streaming || pull ? undefined : outputText(p);
         const view = toolCallState(p, { awaiting, emptyOutput: output === undefined && !pull && reportedOutput(p) });
         const error = nonBlank(p.error);
@@ -276,7 +337,9 @@ export const ToolCall = component<ToolCallProps>(({ props }) => {
                     </span>
                 </div>
                 {!streaming && sig !== '' && <InputBlock text={inputText(p.input)} />}
-                {pull ? <PullCard pull={pull} surface="chat" {...pullCardLinks(pull, props.pullLinks)} /> : output !== undefined && <OutputBlock text={output} logHref={props.logHref} />}
+                {card
+                    ? <LivePullCard key={`${card.repo ?? ''}#${card.number}${props.pullLinks?.usePull ? ':live' : ''}`} pullRef={card} snapshot={pull} pullLinks={props.pullLinks} output={output} logHref={props.logHref} />
+                    : output !== undefined && <OutputBlock text={output} logHref={props.logHref} />}
                 {error && <p data-scope={SCOPE} data-part="error">{error}</p>}
                 {awaiting && props.onRespond && <ApprovalPrompt request={request!} onRespond={props.onRespond} {...approvalContext(props.describeRequest?.(request!))} toolName={p.name} input={p.input} />}
                 {asking && props.onRespond && <QuestionPrompt request={request!} onRespond={props.onRespond} requestedBy={props.describeRequest?.(request!)?.requestedBy} stale={props.describeRequest?.(request!)?.stale} />}
