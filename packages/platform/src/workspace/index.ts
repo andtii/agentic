@@ -33,6 +33,7 @@ import { Registry } from '../registry/actor.js';
 import { registryKey } from '../registry/key.js';
 import { deleteWorkspace, exportWorkspace } from './cascade.js';
 import type { ArtifactSink, WorkspaceStore } from './ports.js';
+import { nextPurgeIn, nextRemoved, purgeExpired, REMOVED_FEATURES_REMINDER, retainedSettings, type RemovedFeature } from './feature-retention.js';
 import { checkedPmSpec, DEFAULT_PM_SPEC, pmCoordinatorError, PmSpecError, projectManagerConfig, projectManagerConfigPatch, withProjectManager, type ProjectManagerPatch } from './project-manager.js';
 import { checkedPmPolicy } from './pm-policy.js';
 import { pmSummarySchedule, pmSummaryScheduleId, pmSummaryScheduleKey } from '../requests/summary-schedule.js';
@@ -184,6 +185,8 @@ export interface WorkspaceState {
     lastProjectId?: ProjectId;
     /** The machine last chosen for a chat (`createChat({ machineId })`, `noteMachine`, #414): what the New chat picker preselects. Absent until one is; cleared when that machine is removed. */
     lastMachineId?: MachineId;
+    /** Features taken off a project in the last 30 days (#941, `feature-retention.ts`): adding one back restores its settings; absent while none is. */
+    removedFeatures?: RemovedFeature[];
 }
 
 /** What `get` returns: the state, detached from the actor. */
@@ -471,7 +474,13 @@ function checkedConnectors(connectors: readonly ConnectorRef[] | undefined, base
  * `folders` after the patch too, so one whose `ui.needs` the project lacks is refused (Git needs a folder,
  * #772). A feature already on is not re-judged on needs: removing a folder never locks its settings.
  */
-async function checkedFeatures(ctx: ActorContext<WorkspaceState>, base: ProjectFeatures | undefined, patch: ProjectPatch['features'], folders: ProjectRecord['folders']): Promise<Record<string, Record<string, unknown>>> {
+async function checkedFeatures(
+    ctx: ActorContext<WorkspaceState>,
+    base: ProjectFeatures | undefined,
+    patch: ProjectPatch['features'],
+    folders: ProjectRecord['folders'],
+    retained: (id: string) => Readonly<Record<string, unknown>> | undefined
+): Promise<Record<string, Record<string, unknown>>> {
     const features: Record<string, Record<string, unknown>> = {};
     for (const [id, settings] of Object.entries(base ?? {})) features[id] = { ...settings };
     if (patch === undefined) return features;
@@ -484,14 +493,25 @@ async function checkedFeatures(ctx: ActorContext<WorkspaceState>, base: ProjectF
             continue;
         }
         if (typeof settings !== 'object' || Array.isArray(settings)) bad(`the settings of feature ${id} must be an object`);
+        const isOn = base !== undefined && Object.hasOwn(base, id);
+        // Added back within the retention window (#941): its kept settings return, the patch's own on top.
+        const kept = isOn ? undefined : retained(id);
+        const next = kept ? { ...kept, ...settings } : settings;
         try {
-            await registry.checkProjectSettings(id, settings, base !== undefined && Object.hasOwn(base, id) ? undefined : { folders });
+            await registry.checkProjectSettings(id, next, isOn ? undefined : { folders });
         } catch (error) {
             bad(`feature ${id}: ${errorText(error)}`);
         }
-        features[id] = { ...settings };
+        features[id] = { ...next };
     }
     return features;
+}
+
+/** Arm the removed-feature purge for the next record that runs out, or clear it when none is kept (#941). */
+async function armFeaturePurge(ctx: ActorContext<WorkspaceState>, at: number): Promise<void> {
+    const due = nextPurgeIn(ctx.state.removedFeatures, at);
+    if (due === undefined) await ctx.reminders.clear(REMOVED_FEATURES_REMINDER);
+    else await ctx.reminders.set(REMOVED_FEATURES_REMINDER, { due });
 }
 
 export function defineWorkspace(options: WorkspaceOptions = {}) {
@@ -689,7 +709,7 @@ export function defineWorkspace(options: WorkspaceOptions = {}) {
                 const pmPolicy = patch.pmPolicy !== undefined ? pmChecked('upsertProject', () => checkedPmPolicy(patch.pmPolicy)) : undefined;
                 const connectors = checkedConnectors(patch.connectors, base?.connectors);
                 const folders = await checkedFolders(ctx, base?.folders, patch.folders);
-                const features = await checkedFeatures(ctx, base?.features, patch.features, folders as ProjectRecord['folders']);
+                const features = await checkedFeatures(ctx, base?.features, patch.features, folders as ProjectRecord['folders'], (id) => retainedSettings(ctx.state.removedFeatures, base?.id, id, now()));
                 const color = checkedColor(patch.color, base?.color);
                 // The hops awaited: the record may have moved meanwhile (a concurrent remove, a `get` interleaving is read-only).
                 const current = ctx.state.projects ?? [];
@@ -723,7 +743,12 @@ export function defineWorkspace(options: WorkspaceOptions = {}) {
                 if (pmPolicy) record = { ...record, pm: { ...(record.pm?.agentId ? { agentId: record.pm.agentId } : {}), policy: pmPolicy } };
                 const saved = record;
                 ctx.state.projects = base ? current.map((p) => (p.id === saved.id ? saved : p)) : [...current, saved];
+                const removedFeatures = nextRemoved(ctx.state.removedFeatures, base, saved, at);
+                const retentionChanged = removedFeatures.length || ctx.state.removedFeatures?.length;
+                if (removedFeatures.length) ctx.state.removedFeatures = removedFeatures;
+                else delete ctx.state.removedFeatures;
                 await ctx.save();
+                if (retentionChanged) await armFeaturePurge(ctx, at);
                 // Through the Agent create path: its first (or next) config version, audited as `config.versioned`.
                 if (pmConfig) await ctx.actor(AgentActor, agentKey(ownerOfWorkspaceKey(ctx.key) as WorkspaceId, saved.pm!.agentId!)).update(pmConfig, `project manager of ${saved.name}`);
                 const data: ProjectChangedData = { projectId: record.id, name: record.name, op: base ? 'updated' : 'created', changed: [...changedKeys(base, record), ...(pmPolicy && JSON.stringify(base?.pm?.policy) !== JSON.stringify(pmPolicy) ? ['pm.policy'] : [])] };
@@ -1019,6 +1044,21 @@ export function defineWorkspace(options: WorkspaceOptions = {}) {
                 return { started: true };
             }
         }),
+        /** The removed-feature purge (#941): what ran out of its 30 days loses its data; the reminder re-arms for the next. */
+        onReminder: async (ctx, name) => {
+            if (name !== REMOVED_FEATURES_REMINDER) return;
+            // Nothing kept (a deleted workspace, a stale reminder): write nothing, so no record is brought back.
+            if (!ctx.state.removedFeatures?.length) {
+                await ctx.reminders.clear(REMOVED_FEATURES_REMINDER);
+                return;
+            }
+            const at = now();
+            const { kept } = await purgeExpired(ctx.state.removedFeatures, ownerOfWorkspaceKey(ctx.key) as WorkspaceId, ctx.state.projects ?? [], options.store, at);
+            if (kept.length) ctx.state.removedFeatures = kept;
+            else delete ctx.state.removedFeatures;
+            await ctx.save();
+            await armFeaturePurge(ctx, at);
+        },
         tasks: (ctx) => ({
             async exportAll(): Promise<void> {
                 const startedAt = (await ctx.turn((c) => c.snapshot())).ops?.export?.startedAt ?? now();
@@ -1058,3 +1098,4 @@ export type WorkspaceActor = ReturnType<typeof defineWorkspace>;
 export type { ActorRecordRef, ArtifactSink, WorkspaceStore } from './ports.js';
 export { childRecords, deleteWorkspace, exportWorkspace, type CascadeOptions, type DeleteReport, type ExportReport } from './cascade.js';
 export { checkedPmPolicy, pmPolicyOf, PM_SENDER_RULES_MAX, PM_SENDERS_PER_RULE_MAX } from './pm-policy.js';
+export { FEATURE_DATA, PURGE_MIN_DELAY_MS, REMOVED_FEATURE_RETENTION_MS, REMOVED_FEATURES_REMINDER, type RemovedFeature } from './feature-retention.js';

@@ -1,11 +1,12 @@
 /**
  * The project's own menu (#725; HANDOFF "Navigation inside a project"): while a project route is open the sidebar's
  * `Projects` entry expands into it — Core (Overview, Chats, Work, Requests when the project has a manager), Features
- * (one item per enabled feature that draws a section) and Settings. `App.tsx` passes it to `NAV_GROUPS`; the shell
+ * (one item per enabled feature whose manifest declares a `ui.section`: its label, icon and badge, #941) and Settings. `App.tsx` passes it to `NAV_GROUPS`; the shell
  * draws it (`NavItem.children`). Mock mode reads the sample workspace; live mode what `ProjectLayout` published.
  *
  * Counts (#728, `counts.ts`): Chats carries `count`, Work carries the `needs-you` `badge` when something there waits
- * on the person and its `count` otherwise, a feature section its own `count`. The first block's label is the project's
+ * on the person and its `count` otherwise, a feature section its own `count` when its manifest's section badge is
+ * `open-items`. The first block's label is the project's
  * name — the switcher #727 draws, which opens the picker (`ProjectPicker.tsx`).
  *
  * #728 owns this file; #727 draws it.
@@ -15,7 +16,7 @@ import type { TopbarRoute } from '../../../components/topbar';
 import { dataMode } from '../../../data-mode';
 import { MOCK_PROJECT_MENU_COUNTS } from '../../../mock/projects/layout';
 import { CHATS, projectNamed } from '../../../mock/workspace';
-import { featureHref, featureViewsOf } from '../features/registry';
+import { featureHref, featureSectionOf } from '../features/registry';
 import { projectHead, type ProjectHead } from '../head';
 import { SETTINGS_TABS, settingsHref } from '../settings/tabs';
 import { countsFromChats, projectCounts, type ProjectMenuCounts } from './counts';
@@ -68,8 +69,8 @@ export function projectMenu(src: ProjectHead, counts: ProjectMenuCounts = {}): r
         ...(src.manager ? [{ href: `${base}/requests`, label: 'Requests', icon: 'delegate' as const }] : [])
     ];
     const features: ProjectMenuItem[] = (src.features ?? []).flatMap((id) => {
-        const views = featureViewsOf(id);
-        return views?.Section ? [{ href: featureHref(src.id, id), label: views.label ?? id, ...counted(counts.features?.[id]) }] : [];
+        const section = featureSectionOf(id);
+        return section ? [{ href: featureHref(src.id, id), label: section.label, icon: section.icon, ...(section.badge === 'open-items' ? counted(counts.features?.[id]) : {}) }] : [];
     });
     const settings: NavItem[] = SETTINGS_TABS.map((t) => ({ href: settingsHref(src.id, t.id), label: t.label }));
     return [

@@ -49,7 +49,7 @@ describe('features view model (#736)', () => {
         expect(catalogueTiles(MOCK_FEATURE_CATALOGUE, bare, { query: '', category: 'all' })).not.toContainEqual(byId(PLAN));
         expect(catalogueTiles(MOCK_FEATURE_CATALOGUE, bare, { query: 'rsvp', category: 'all' }).map((e) => e.name)).toEqual(['Guest list']);
         expect(catalogueTiles(MOCK_FEATURE_CATALOGUE, bare, { query: '', category: 'code' }).map((e) => e.id)).toEqual([GIT]);
-        expect(categoryChips(MOCK_FEATURE_CATALOGUE).map((c) => c.label)).toEqual(['All', 'Planning', 'Events', 'Knowledge', 'Code', 'Ops']);
+        expect(categoryChips().map((c) => c.label)).toEqual(['All', 'Planning', 'Events', 'Knowledge', 'Code', 'Ops']);
     });
 
     it('enable, save and remove are one feature key of a patch; the mock merge follows upsertProject', () => {
