@@ -18,6 +18,10 @@
  * overriding it), `leaseMinutes`, `agentsMayTick`, and `starter` for a new plan given no phases. A merged pull request
  * marks the items handed off from its task done (`pullMerged`, called by the Pulls actor).
  *
+ * Accepted requests (#943): what an item waits on is the manager's and people's to change, with one exception — the
+ * manager of another project accepting a request that names the item may add that one wait on the item the accept
+ * filed (`after`, checked against the other project's record and the new item's refs; see `acceptedLink`).
+ *
  * Every change is a line in the item's activity and a `plan.changed` / `plan.lease-expired` audit record with
  * its actor. Workers eviction rule: every mutation ends in `ctx.save()` inside the turn.
  */
@@ -38,6 +42,7 @@ import {
     linkSource,
     lookupOf,
     parseAfter,
+    resolveProject,
     setAfter,
     setCrossAfter,
     type CrossAfter,
@@ -57,6 +62,7 @@ import {
     emptyBook,
     expireLeases,
     handoff,
+    isManager,
     nextFor,
     pullMerged,
     nextLeaseEnd,
@@ -191,6 +197,18 @@ function planCallOf(project: PlanProjectInfo | undefined, at: number, actor: Pla
     };
 }
 
+/**
+ * Whether `after` (parsed) keeps everything `item` waits on — its own items and other projects' — and adds only
+ * `link` (#943).
+ */
+function onlyAdds(item: StoredItem, after: { readonly local: readonly number[]; readonly cross: readonly CrossAfter[] }, link: CrossAfter): boolean {
+    const local = new Set(after.local);
+    if (local.size !== item.after.length || !item.after.every((n) => local.has(n))) return false;
+    const want = new Set([...crossAfterOf(item), link].map((a) => `${a.projectId}#${a.n}`));
+    const got = new Set(after.cross.map((a) => `${a.projectId}#${a.n}`));
+    return got.size === want.size && [...want].every((k) => got.has(k));
+}
+
 // ---------------------------------------------------------------------------
 // Definition
 
@@ -206,6 +224,7 @@ export function definePlanActor(options: PlanActorOptions = {}) {
     /** This definition, for the hop to another project's Plan actor; set once `defineActor` returns. */
     let self: AnyActorDefinition | undefined;
     type StatesClient = { itemStates(ns: readonly number[]): Promise<Record<string, PlanItemState>> };
+    type RefsClient = { itemRefs(n: number): Promise<readonly Ref[]> };
     const linkProjects = async (ctx: Ctx, workspaceId: WorkspaceId): Promise<readonly LinkProjectInfo[]> =>
         options.links?.projects ? options.links.projects(ctx, workspaceId) : (await ctx.actor(Workspace, workspaceKey(workspaceId)).projects()).map(linkProjectInfo);
     const linkStates = async (ctx: Ctx, workspaceId: WorkspaceId, projectId: ProjectId, ns: readonly number[]): Promise<Readonly<Record<string, PlanItemState>>> =>
@@ -317,7 +336,7 @@ export function definePlanActor(options: PlanActorOptions = {}) {
         authorize,
         methodAuthorize: { pullMerged: never },
         // The cross-project reads never wait behind a turn: a Plan actor mid-claim reads another that may be reading it.
-        methodReentrancy: { itemStates: 'always', linkItems: 'always' },
+        methodReentrancy: { itemStates: 'always', itemRefs: 'always', linkItems: 'always' },
         ...(options.allowAnonymous ? { allowAnonymous: true as const } : {}),
         state: (key): PlanState => {
             // A malformed key is refused by the methods, not here: a throwing factory is an opaque activation failure.
@@ -415,6 +434,39 @@ export function definePlanActor(options: PlanActorOptions = {}) {
             };
             const viewOf = async (item: StoredItem): Promise<PlanItem> => (await viewsOf([item]))[0]!;
 
+            /**
+             * The one wait an accept in another project may set on this project's item (#943): the caller is an agent,
+             * `after` keeps everything the item waits on and adds exactly one other project's item, the caller manages
+             * that project (`pm.agentId`, else its coordinator — the Requests actor's rule), and that item names this
+             * one among its refs (an accepted request's refs are copied onto the item it became). `null` otherwise —
+             * the ordinary rule then decides. Read before the turn: the rules are pure.
+             */
+            const acceptedLink = async (itemId: number, values: readonly unknown[], projectList: readonly LinkProjectInfo[]): Promise<(CrossAfter & { by: AgentId }) | null> => {
+                const caller = principalActor(ctx.principal as Principal | null);
+                const s = ctx.state;
+                const stored = Number.isSafeInteger(itemId) ? s.items[String(itemId)] : undefined;
+                if (caller?.kind !== 'agent' || !stored || !projectList.length) return null;
+                let parsed: ReturnType<typeof parseAfter>;
+                try {
+                    parsed = parseAfter(values, s.projectId, projectList);
+                } catch {
+                    return null;
+                }
+                const had = new Set(crossAfterOf(stored).map((a) => `${a.projectId}#${a.n}`));
+                const added = parsed.cross.filter((a) => !had.has(`${a.projectId}#${a.n}`));
+                if (added.length !== 1 || !onlyAdds(stored, parsed, added[0]!)) return null;
+                const link = added[0]!;
+                try {
+                    const from = (await projects.project(ctx, s.workspaceId, link.projectId)) as (PlanProjectInfo & Partial<Pick<ProjectRecord, 'pm'>>) | undefined;
+                    if (!from || (from.pm?.agentId ?? from.members.coordinator ?? null) !== caller.agentId) return null;
+                    const refs = await (ctx.actor(self!, planKey(s.workspaceId, link.projectId)) as unknown as RefsClient).itemRefs(link.n);
+                    const names = refs.some((r) => r.kind === 'project-item' && r.n === stored.id && resolveProject(r.project, projectList) === s.projectId);
+                    return names ? { ...link, by: caller.agentId } : null;
+                } catch {
+                    return null;
+                }
+            };
+
             return {
                 /** A new plan, optionally with its phases and items. Project manager and people. */
                 async create(input: PlanCreateInput): Promise<Plan> {
@@ -480,7 +532,14 @@ export function definePlanActor(options: PlanActorOptions = {}) {
                  */
                 async after(itemId: number, values: readonly (number | string | Ref)[]): Promise<PlanItem> {
                     const projectList = await projectsFor(mentionsProject(values));
-                    const item = await write((b, c) => setAfter(b, c, itemId, parseAfter(values, b.projectId, projectList), projectList));
+                    const vouched = await acceptedLink(itemId, values, projectList);
+                    const item = await write((b, c) => {
+                        const parsed = parseAfter(values, b.projectId, projectList);
+                        // An accepting manager of another project sets this one wait, nothing else (#943).
+                        const stored = b.items[String(itemId)];
+                        const call = vouched && !isManager(c) && c.actor?.kind === 'agent' && c.actor.agentId === vouched.by && stored && onlyAdds(stored, parsed, vouched) ? { ...c, manager: vouched.by } : c;
+                        return setAfter(b, call, itemId, parsed, projectList);
+                    });
                     return viewOf(item);
                 },
 
@@ -587,6 +646,16 @@ export function definePlanActor(options: PlanActorOptions = {}) {
                         if (item) out[String(n)] = viewState(ctx.state, item, at);
                     }
                     return out;
+                },
+
+                /**
+                 * The refs of item `n` (none when there is no such item) — how another project's Plan actor checks that an
+                 * accepted request's item names the item it is about to wait on (#943). Pure read: no lease is touched.
+                 */
+                async itemRefs(n: number): Promise<Ref[]> {
+                    requireKey();
+                    const item = Number.isSafeInteger(n) ? ctx.state.items[String(n)] : undefined;
+                    return item ? item.refs.map((r) => ({ ...r })) : [];
                 },
 
                 /** Every item as the workspace's link graph reads it (`workspaceLinks`). Pure read: no lease is touched. */

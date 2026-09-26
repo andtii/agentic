@@ -539,7 +539,7 @@ export const LiveChat = component<{ id: string; projectId?: string }>(({ props }
         const inserts: ThreadInsert[] = visitors.flatMap((v) => (sentFrom.value[v.projectId] ?? []).flatMap((r) => {
             const card = (part: 'request' | 'result') => () => (
                 <div data-chat-question>
-                    <RequestCard request={r} part={part} toProjectName={v.projectName} managerName={directory.lookup(v.agentId).name} {...(project ? { homeProjectName: project.name } : {})} time={time} />
+                    <RequestCard request={r} part={part} toProjectName={v.projectName} managerName={directory.lookup(v.agentId).name} agentName={(id) => directory.lookup(id).name} {...(project ? { homeProjectName: project.name } : {})} time={time} />
                 </div>
             );
             const accepted = acceptedAt(r);

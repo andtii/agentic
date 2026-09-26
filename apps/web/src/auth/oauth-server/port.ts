@@ -391,6 +391,7 @@ export function createActorPlatformPort(principal: ExternalPrincipal, options: A
                 return client.assign(item, resolvePlanMember(people, to), index);
             },
             update: async (projectId, item, update) => (await planOf(projectId)).client.update(item, planPatch(update)),
+            after: async (projectId, item, after) => (await planOf(projectId)).client.after(item, after),
             async ref(projectId, item, ref) {
                 // No session, so no folder to pin a file ref in: it is stored as given.
                 await (await planOf(projectId)).client.ref(item, ref);

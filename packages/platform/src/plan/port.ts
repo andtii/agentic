@@ -23,6 +23,8 @@ export interface PlanActorClient {
     assign(itemId: number, to: PlanActor | null, index?: number): Promise<PlanItem>;
     update(itemId: number, patch: PlanItemPatch): Promise<PlanItem>;
     ref(itemId: number, ref: Ref | string): Promise<PlanItem>;
+    /** Replace what an item waits on: numbers for this project's items, `project#n` for another project's (#822, #943). */
+    after(itemId: number, after: readonly (number | string | Ref)[]): Promise<PlanItem>;
     add(planId: string, phase: number, items: readonly LinkedItemInput[]): Promise<readonly PlanItem[]>;
     split(itemId: number, parts: readonly LinkedItemInput[]): Promise<readonly PlanItem[]>;
     handoff(itemId: number, to: PlanActor | null, note: string, options?: HandoffOptions): Promise<PlanItem>;
@@ -176,6 +178,7 @@ export function createPlanPort(deps: PlanPortDeps): PlanPort {
                 const printed = formatRef(stored);
                 return out.refs.find((r) => formatRef(r) === printed) ?? stored;
             }),
+        after: (item, after, call) => run(call, (scope) => scope.plan.after(item, after)),
         add: (input, call) => run(call, (scope) => planAdd(scope.plan, input)),
         handoff: (item, to, note, call) =>
             run(call, async (scope) => {
