@@ -48,7 +48,7 @@ import { Page } from '../../components/Page';
 import { baseTurnId, capacityWaitText, FailureNotice, interruptionOf, machineOfflineText, useInterruptionReads } from '../../components/status';
 import { useActorDefs, useViewer } from '../../actors/defs';
 import { chatKeyOf, inboxKeyOf, machineKeyOf, routingKeyOf, sessionKeyOf, taskIndexKeyOf, taskKeyOf } from '../../actors/keys';
-import { resolveAddressing, type MockChatMember, type MockChatSummary } from '../../mock/workspace';
+import type { MockChatMember, MockChatSummary } from '../../mock/workspace';
 import { useWorkspaceZone, zoneFormat } from '../../time';
 import { ChatSearchPanel, SEARCH_LIMIT } from './ChatSearchPanel';
 import { ChatSettingsDialog, type ChatSettingsChange } from './ChatSettingsDialog';
@@ -66,6 +66,7 @@ import { queryOf } from '../session/files';
 import { fileToken, fileTokensIn, mentionOfQuery, viewDiffLinks } from '../session/references';
 import { NewChatDialog, type NewChatCreate } from './NewChatDialog';
 import { markSeen } from './read-marks';
+import { chatAddressing, useChatProjectContext } from './project-context';
 import { useProjects } from '../projects/live';
 import { chatPullLinks } from '../projects/work/pull/links';
 import { useLiveWorkdirEnvironments } from '../workdir/environments';
@@ -138,6 +139,11 @@ export const LiveChat = component<{ id: string; projectId?: string }>(({ props }
     const route = useRoute();
     const mention = signal<{ insert: ComposerInsert | null; sessions: Record<string, string> }>({ insert: null, sessions: {} });
     let mentionSeq = 0;
+    // The chat project's context (#940): its features' ref prefixes (`#` plan items, `pr:` PRs) and context chips.
+    const context = useChatProjectContext(defs, viewer, () => projects.byId(summary.value?.projectId));
+    const insertRef = (prefix: string): void => {
+        mention.insert = { id: `ref-${++mentionSeq}`, text: prefix };
+    };
     // A project's chat opens inside the project, any other at `/chats/:id` (#929), and a moved chat follows its project:
     // once the chat and the projects are read, a page at another address replaces itself, the query kept.
     const redirect = (): string | null | undefined => {
@@ -502,7 +508,8 @@ export const LiveChat = component<{ id: string; projectId?: string }>(({ props }
         const chat: MockChatSummary = { id: props.id, title: s ? chatTitle(members, directory.lookup, s.title) : '…', members, lastLine: last.line, unread: 0, waiting: waiting.size > 0, updatedAt: last.at, ...(s?.projectId ? { projectId: s.projectId } : {}), ...(s?.machineId ? { machineId: s.machineId } : {}) };
         const machineName = s?.machine?.name ?? s?.machineId;
         const project = projects.byId(s?.projectId);
-        const addressing = resolveAddressing(members, mentionsIn(st.draft, members, directory.lookup), directory.lookup);
+        // Who the draft activates (#940): a visiting manager it `@`s shows in To with its project before it joins.
+        const addressing = chatAddressing(members, st.draft, visitingManagers(projects.list(), s?.projectId), directory.lookup);
         const mentions: Mention[] = members.map((m) => {
             const a = directory.lookup(m.agentId);
             return { id: a.name, label: a.name, description: a.role };
@@ -620,6 +627,7 @@ export const LiveChat = component<{ id: string; projectId?: string }>(({ props }
                             recipients={addressing.recipients}
                             hint={addressing.recipients.length ? addressing.hint : NOBODY_HINT}
                             mentions={mentions}
+                            refs={context.refs()}
                             busy={st.sending}
                             disabled={!s}
                             placeholder="Message the chat. @ to address an agent, otherwise the coordinator answers."
@@ -632,11 +640,11 @@ export const LiveChat = component<{ id: string; projectId?: string }>(({ props }
                         />
                     </div>
                 </section>
-                <ContextPanel chat={chat} tasks={tasks} lookup={directory.lookup} candidates={candidates} time={time} onAddAgent={(e) => addAgent(e.agentId, e.access)} onStopChain={() => { void stopChain(); }} environments={workdirs.list()} machineOf={workdirs.machineOf} project={project} {...(machineName ? { machineName } : {})} hosted={workdirs.hosted} machines={workdirs.machines()} accountEnvironment={workdirs.accountEnvironment} onSetWorkdir={(e) => setWorkdir(e.agentId, e.ref)} onResetSession={(e) => { void resetSession(e.agentId); }} onSetOptions={(e) => setOptions(e.agentId, e.patch)} visitorOf={visitorOfMember} across={across} />
+                <ContextPanel chat={chat} tasks={tasks} lookup={directory.lookup} candidates={candidates} time={time} onAddAgent={(e) => addAgent(e.agentId, e.access)} onStopChain={() => { void stopChain(); }} environments={workdirs.list()} machineOf={workdirs.machineOf} project={project} {...(machineName ? { machineName } : {})} hosted={workdirs.hosted} machines={workdirs.machines()} accountEnvironment={workdirs.accountEnvironment} onSetWorkdir={(e) => setWorkdir(e.agentId, e.ref)} onResetSession={(e) => { void resetSession(e.agentId); }} onSetOptions={(e) => setOptions(e.agentId, e.patch)} visitorOf={visitorOfMember} across={across} chips={context.chips()} onInsertRef={insertRef} />
                 <Drawer.Root model={() => contextDrawer.open} placement="end" label="Members and tasks" onOpenChange={(open: boolean) => { if (!open) closeContextDrawer(); }}>
                     <Drawer.Panel>
                         <div data-context-drawer>
-                            <ContextPanel chat={chat} tasks={tasks} lookup={directory.lookup} candidates={candidates} time={time} onAddAgent={(e) => addAgent(e.agentId, e.access)} onStopChain={() => { void stopChain(); }} environments={workdirs.list()} machineOf={workdirs.machineOf} project={project} {...(machineName ? { machineName } : {})} hosted={workdirs.hosted} machines={workdirs.machines()} accountEnvironment={workdirs.accountEnvironment} onSetWorkdir={(e) => setWorkdir(e.agentId, e.ref)} onResetSession={(e) => { void resetSession(e.agentId); }} onSetOptions={(e) => setOptions(e.agentId, e.patch)} visitorOf={visitorOfMember} across={across} />
+                            <ContextPanel chat={chat} tasks={tasks} lookup={directory.lookup} candidates={candidates} time={time} onAddAgent={(e) => addAgent(e.agentId, e.access)} onStopChain={() => { void stopChain(); }} environments={workdirs.list()} machineOf={workdirs.machineOf} project={project} {...(machineName ? { machineName } : {})} hosted={workdirs.hosted} machines={workdirs.machines()} accountEnvironment={workdirs.accountEnvironment} onSetWorkdir={(e) => setWorkdir(e.agentId, e.ref)} onResetSession={(e) => { void resetSession(e.agentId); }} onSetOptions={(e) => setOptions(e.agentId, e.patch)} visitorOf={visitorOfMember} across={across} chips={context.chips()} onInsertRef={insertRef} />
                         </div>
                     </Drawer.Panel>
                 </Drawer.Root>
