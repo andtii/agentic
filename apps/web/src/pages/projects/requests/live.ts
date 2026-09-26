@@ -3,7 +3,7 @@
  * person's accept / edit first / ask for more / decline as the actor's `resolve` (or `admit`, for a request the sender
  * rules held back). Pure: the page reads the actor and calls it; these shape the data between the two.
  */
-import type { LinkedRequest, RequestResolution, RequestView } from '@agentic/platform';
+import { requestWhyText, type LinkedRequest, type RequestResolution, type RequestView } from '@agentic/platform';
 import type { AcceptEdit } from './RequestsView';
 import type { RequestEntry } from './model';
 
@@ -37,6 +37,7 @@ function entryOf(r: RequestView, box: RequestEntry['box'], names: ProjectNames, 
         ...(r.fromChatTitle ? { fromChatTitle: r.fromChatTitle } : {}),
         ...(r.triagedAt !== undefined ? { triagedAt: r.triagedAt } : {}),
         ...(r.state === 'needs-you' && r.needs ? { needs: r.needs } : {}),
+        ...(r.state === 'needs-you' && r.reasons?.length ? { why: requestWhyText(r.reasons) } : {}),
         ...(note !== undefined ? { note } : {})
     };
 }

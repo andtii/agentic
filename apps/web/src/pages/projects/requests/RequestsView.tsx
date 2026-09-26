@@ -11,12 +11,12 @@
 import { component, signal, type Define } from 'sigx';
 import { derivedModel } from '@sigx/zero/behaviors';
 import type { ProjectRecord, Ref, TriageProposedItem } from '@agentic/core';
-import { AgentTile, Button, Icon, Segmented, SelectField, StatusPill, Switch, SwitchField, TextField, TextareaField } from '@agentic/ui';
+import { AgentTile, Button, Icon, Segmented, SelectField, StatusPill, Switch, SwitchField, TableSkeleton, TextField, TextareaField } from '@agentic/ui';
 import { Age } from '../../../components/Age';
 import { refIcon, refLabel } from '../features/plan/shared/model';
 import {
     BOX_LABELS, PRIORITY_LABELS, REQUEST_BOXES, actorName, boxCount, draftErrors, draftOf, entriesIn, githubRepoOf, itemMeta, itemOfDraft,
-    kindLine, phaseName, requestPill, senderLine, type ActorNames, type ItemDraft, type RequestBox, type RequestEntry
+    kindLine, phaseName, requestPill, senderLine, whyYou, type ActorNames, type ItemDraft, type RequestBox, type RequestEntry
 } from './model';
 
 /** How a request is accepted when it is not exactly as proposed. */
@@ -37,6 +37,10 @@ export type RequestsViewProps =
     & Define.Prop<'phases', readonly { n: number; title: string }[], true>
     /** The clock ages are measured against. */
     & Define.Prop<'now', number>
+    /** The workspace's IANA zone the ages are told in (`useWorkspaceZone`); absent, the mock workspace's. */
+    & Define.Prop<'zone', string>
+    /** The first read has not landed: skeleton rows stand in for the list, not its empty state (#942). */
+    & Define.Prop<'loading', boolean>
     /** Shown above the list (a live read that failed, a store that is not there yet). */
     & Define.Prop<'note', string>
     & Define.Prop<'onAccept', (id: string, edit?: AcceptEdit) => void, true>
@@ -44,6 +48,12 @@ export type RequestsViewProps =
     & Define.Prop<'onDecline', (id: string, reason: string) => void, true>;
 
 type Mode = 'view' | 'edit' | 'ask' | 'decline';
+
+/** A row title stays on one line and ends in an ellipsis; the whole title is its tooltip (#942). */
+const TITLE_ELLIPSIS = 'display: block; min-width: 0; max-width: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis';
+
+/** The `why you:` line, when something sent the request to a person. */
+const whyLine = (why: string | undefined) => (why ? <span data-requests-why="">{`why you: ${why}`}</span> : null);
 
 const RefChip = (ref: Ref) => (
     <span data-requests-ref={ref.kind}><Icon name={refIcon(ref)} size={12} />{refLabel(ref)}</span>
@@ -86,7 +96,7 @@ export const RequestsView = component<RequestsViewProps>(({ props }) => {
         (next) => { st.openIssue = next; }
     );
 
-    const age = (at: number) => <Age at={at} now={props.now} />;
+    const age = (at: number) => (props.zone ? <Age at={at} now={props.now} zone={props.zone} /> : <Age at={at} now={props.now} />);
 
     const origin = (e: RequestEntry) => (
         <span data-requests-origin="">
@@ -113,7 +123,7 @@ export const RequestsView = component<RequestsViewProps>(({ props }) => {
                         <StatusPill status={r.state} label={pill.label} tone={pill.tone} hollow={pill.hollow} />
                         <span data-requests-row-age="" data-fresh={r.state === 'needs-you' ? '' : undefined}>{age(r.createdAt)}</span>
                     </span>
-                    <span data-requests-row-title="">{r.title}</span>
+                    <span data-requests-row-title="" title={r.title} style={TITLE_ELLIPSIS}>{r.title}</span>
                     <span data-requests-row-meta="">{origin(e)}{listLine(e)}</span>
                 </button>
             </li>
@@ -134,6 +144,15 @@ export const RequestsView = component<RequestsViewProps>(({ props }) => {
             return (
                 <section data-requests-triage="admit" aria-label={`${props.manager}’s triage`}>
                     <p data-requests-empty="">{`${e.fromProjectName} needs your say before sending here; let it in and ${props.manager} triages it.`}</p>
+                    {whyLine(whyYou(e))}
+                </section>
+            );
+        }
+        if (!t && r.state === 'needs-you') {
+            return (
+                <section data-requests-triage="person" aria-label="Your decision">
+                    <p data-requests-empty="">No project manager triaged this request; it is yours to decide.</p>
+                    {whyLine(whyYou(e))}
                 </section>
             );
         }
@@ -154,7 +173,7 @@ export const RequestsView = component<RequestsViewProps>(({ props }) => {
                     <AgentTile name={props.manager} size={22} />
                     <span data-requests-triage-title="">{`${props.manager}’s triage`}</span>
                     {e.triagedAt !== undefined ? <span data-requests-triage-age="">{age(e.triagedAt)}</span> : null}
-                    {t.why ? <span data-requests-why="">{`why you: ${t.why}`}</span> : null}
+                    {whyLine(t.why || whyYou(e))}
                 </header>
                 <dl data-requests-kvs="">
                     {kv('Kind', kindLine(t, e.area), 'kind')}
@@ -352,7 +371,9 @@ export const RequestsView = component<RequestsViewProps>(({ props }) => {
                         </header>
                         {rows.length
                             ? <ul>{rows.map((e) => row(e, e === current))}</ul>
-                            : <p data-requests-empty="">{EMPTY[st.box]}</p>}
+                            : props.loading
+                                ? <TableSkeleton rows={4} cols="1fr" label="Loading requests" />
+                                : <p data-requests-empty="">{EMPTY[st.box]}</p>}
                     </section>
                     {current ? detail(current) : null}
                 </div>
