@@ -16,6 +16,7 @@ const PROJECT_ROUTES = [
     ['/projects/new', 'project-new'],
     ['/projects/:id', 'project'],
     ['/projects/:id/chats', 'project-chats'],
+    ['/projects/:id/chats/:chatId', 'project-chat'],
     ['/projects/:id/work', 'project-work'],
     ['/projects/:id/work/:item', 'project-work-item'],
     ['/projects/:id/requests', 'project-requests'],
@@ -77,7 +78,7 @@ describe('route skeleton', () => {
         const table = routes.filter((r) => r.path.startsWith('/projects')).map((r) => [r.path, r.name] as const);
         expect(table).toEqual(PROJECT_ROUTES);
         for (const [, name] of PROJECT_ROUTES) expect(CRUMBS[name]!.href, name).toBe('/projects');
-        for (const [path, name] of [['/projects/links', 'projects-links'], ['/projects/p1/work/pr:603', 'project-work-item'], ['/projects/p1/settings/members', 'project-settings'], ['/projects/p1/code', 'project-code'], ['/projects/p1/f/agentic.feature.plan', 'project-feature']] as const) {
+        for (const [path, name] of [['/projects/links', 'projects-links'], ['/projects/p1/chats/c4', 'project-chat'], ['/projects/p1/work/pr:603', 'project-work-item'], ['/projects/p1/settings/members', 'project-settings'], ['/projects/p1/code', 'project-code'], ['/projects/p1/f/agentic.feature.plan', 'project-feature']] as const) {
             const router = createServerRouter(path);
             await router.isReady();
             expect(router.currentRoute.name, path).toBe(name);

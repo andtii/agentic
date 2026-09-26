@@ -9,6 +9,7 @@
 import { RESOURCE_TEXT_MAX_CHARS, parseSessionFileUri, sessionFileUri, type PromptPart } from '@agentic/core';
 import { filesTouched, type ToolCallLike } from '@agentic/runtimes';
 import { changesHref, type LineQuestion } from './files';
+import { chatHref } from '../chat/href';
 
 /** A file reference in a draft: `@file:` then the path relative to the session's folder, up to whitespace. */
 export const FILE_TOKEN = '@file:';
@@ -66,7 +67,7 @@ export function questionParts(sessionId: string, q: LineQuestion): PromptPart[] 
 }
 
 /** The draft path of a chat opened to mention a file: `/chats/<id>?file=<sessionFileUri>`. */
-export const mentionHref = (chatId: string, sessionId: string, path: string): string => `/chats/${encodeURIComponent(chatId)}?file=${encodeURIComponent(sessionFileUri(sessionId, path))}`;
+export const mentionHref = (chatId: string, sessionId: string, path: string): string => `${chatHref({ id: chatId })}?file=${encodeURIComponent(sessionFileUri(sessionId, path))}`;
 
 /** The file a `?file=` query names for a mention: the session and the path, or `null` when it names none. */
 export function mentionOfQuery(value: string | undefined): { readonly sessionId: string; readonly path: string } | null {

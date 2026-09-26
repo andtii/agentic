@@ -86,7 +86,7 @@ describe('the work item page on live data (#790)', () => {
         expect(page.querySelector('[data-owner="you"]')).not.toBeNull();
         expect(page.querySelector('[data-next-step]')?.textContent).toBe('Answer the agent’s question');
         expect(page.querySelector('[data-link="task"] a')?.getAttribute('href')).toBe(`/tasks/${taskId}`);
-        expect(page.querySelector('[data-link="chat"] a')?.getAttribute('href')).toBe(`/chats/${chatId}`);
+        expect(page.querySelector('[data-link="chat"] a')?.getAttribute('href')).toBe(`/projects/${projectId}/chats/${chatId}`); // inside the project (#929)
         expect(page.querySelector('[data-link="chat"] a')?.textContent).toBe('Forge'); // an untitled chat is named for its member
         expect(page.querySelector('[data-link="session"] a')?.getAttribute('href')).toBe(`/sessions/${sessionId}`);
 

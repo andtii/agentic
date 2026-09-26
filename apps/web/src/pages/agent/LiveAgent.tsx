@@ -43,6 +43,7 @@ import { SessionsTab } from './SessionsTab';
 import { useProjects } from '../projects/live';
 import { pmProjectsOf } from './pm';
 import { PmChip } from './PmChip';
+import { chatHref } from '../chat/href';
 
 export const LiveAgent = component<{ id: string }>(({ props }) => {
     const defs = useActorDefs();
@@ -120,7 +121,7 @@ export const LiveAgent = component<{ id: string }>(({ props }) => {
         try {
             // On the machine used last (#414), as New chat would preselect it; an account-bound agent needs one.
             const chatId = await createChatWith(defs, ws, [props.id], null, null, workdirs.lastMachineId());
-            await router.push(`/chats/${chatId}`);
+            await router.push(chatHref({ id: chatId }));
         } catch (e) {
             st.error = e instanceof Error ? e.message : String(e);
         } finally {

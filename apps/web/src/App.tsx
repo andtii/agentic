@@ -111,7 +111,7 @@ const FONTS_HREF = 'https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:w
  * actions, the sub-line and the phone's one right slot.
  */
 /** Routes that run edge to edge: the chat, and a session's views under their session bar (#564). */
-const FLUSH_ROUTES = new Set(['chat', 'session', 'session-changes', 'session-files']);
+const FLUSH_ROUTES = new Set(['chat', 'project-chat', 'session', 'session-changes', 'session-files']);
 /** The desktop app's quick-ask window (#849): the page alone, no shell around it. */
 const BARE_ROUTE = 'quick';
 

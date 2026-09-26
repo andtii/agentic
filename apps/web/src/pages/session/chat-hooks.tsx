@@ -21,6 +21,7 @@ import { chatSessionOf, loadChat, type MockSessionView } from '../../mock/worksp
 import { CONTEXT_WINDOW, runActivation, type ActivationPorts, type AgentIdentity, type AgentLookup } from '../chat/live';
 import { relativeToRoot, transcriptHref, type LineQuestion, type SessionFiles } from './files';
 import { lastTouches, mentionHref, questionParts } from './references';
+import { chatHref } from '../chat/href';
 
 /** What `askInChat` needs from the actors: the chat's summary and recent entries, and the activation's own ports. */
 export type AskPorts = ActivationPorts & {
@@ -89,7 +90,7 @@ export function mockChatHooks(v: MockSessionView, agent: Pick<AgentIdentity, 'na
         runtime: agent.environment.runtime,
         calls,
         agent: { name: agent.name, hue: agent.hue },
-        href: () => `/chats/${chatId}`,
+        href: () => chatHref({ id: chatId }),
         time: (c) => chat?.authors[c.messageId]?.time?.text
     });
     return {

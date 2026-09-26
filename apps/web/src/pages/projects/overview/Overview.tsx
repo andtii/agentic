@@ -25,6 +25,8 @@ import type { ProjectPageProps } from '../layout/types';
 import { settingsHref } from '../settings/tabs';
 import { addFeatureHintOf, CHAT_STATE_PILL, EMPTY_OVERVIEW, folderLineOf, peopleOf, projectTagsOf, recentChatsOf, type AgentNames, type OverviewChat, type OverviewData, type OverviewLoading, type OverviewMove } from './model';
 import { useLiveOverview } from './LiveOverview';
+import { chatHref } from '../../chat/href';
+import { newChatInProjectHref } from '../../chat/new-chat-prefill';
 
 export type OverviewViewProps =
     & Define.Prop<'project', ProjectRecord, true>
@@ -65,13 +67,13 @@ const moveRow = (m: OverviewMove) => (
     </li>
 );
 
-const chatRow = (c: OverviewChat, names: AgentNames) => {
+const chatRow = (c: OverviewChat, names: AgentNames, projectId: string) => {
     const pill = CHAT_STATE_PILL[c.state];
     return (
         <li data-overview-chat={c.id} data-state={c.state}>
             <span data-overview-chat-state=""><StatusPill status={pill.status} label={pill.label} hollow={pill.hollow} /></span>
             <span data-overview-row-main="">
-                <Link to={`/chats/${c.id}`}>
+                <Link to={chatHref({ id: c.id, projectId })}>
                     <span data-overview-row-title="">{c.title}</span>
                     <span data-overview-row-detail="">{c.lastBy ? <><b>{`${c.lastBy}:`}</b>{' '}</> : null}{c.lastLine}</span>
                 </Link>
@@ -129,7 +131,7 @@ export const OverviewView = component<OverviewViewProps>(({ props }) => () => {
                         })}
                     </span>
                     <Button icon="plus" href={`${base(p)}/work`}>New task</Button>
-                    <Button intent="primary" icon="chats" href="/chats/new">New chat</Button>
+                    <Button intent="primary" icon="chats" href={newChatInProjectHref(p.id)}>New chat</Button>
                 </div>
             </header>
 
@@ -143,7 +145,7 @@ export const OverviewView = component<OverviewViewProps>(({ props }) => () => {
                 <section data-overview-card="chats" aria-label="Chats">
                     {cardHead('chats', 'Chats', <Link to={`${base(p)}/chats`}>{`All ${chatCount} chats →`}</Link>)}
                     {loading.chats && !chats.length ? skeleton('Loading chats') : chats.length
-                        ? <ul data-overview-rows="">{chats.map((c) => chatRow(c, names))}</ul>
+                        ? <ul data-overview-rows="">{chats.map((c) => chatRow(c, names, p.id))}</ul>
                         : <p data-overview-empty="">No chats in this project yet.</p>}
                 </section>
             </div>

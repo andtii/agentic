@@ -71,7 +71,10 @@ describe('projects on the live pages (#333)', () => {
         expect(summary.project).toEqual({ id: projectId, name: 'agentic' });
         expect(Object.values(summary.members).every((m) => !m.workdir)).toBe(true);
 
+        // `/chats/:id` of a project's chat moves into the project (#929): its layout, no global list column.
         const dom = await mountLive(`/chats/${chatId}`, h);
+        await until(() => dom.querySelector(`[data-project-layout="${projectId}"] [data-page="chat"]`) !== null, 'the chat inside its project');
+        expect(dom.querySelector('[data-chat-list]')).toBeNull();
         const chips = () => [...dom.querySelectorAll<HTMLElement>('[data-page="chat"] > [data-chat-context] [data-member-workdir]')];
         await until(() => chips().length === 2 && chips().every((c) => c.hasAttribute('data-inherited')), 'both members on the project folders');
         // Each member's own machine and the project's folder there — nobody touched a row; the row's title carries environment and path.
@@ -84,14 +87,15 @@ describe('projects on the live pages (#333)', () => {
         expect(dom.querySelector('[data-page="chat"] > [data-chat-context] [data-member-workdir-clear]')).toBeNull();
         // The header carries the project chip, linking to its page.
         await until(() => chatHead.value?.project?.name === 'agentic', 'the head to carry the project');
-        const subtitle = topbarFor({ name: 'chat', path: `/chats/${chatId}`, params: { id: chatId } })?.subtitle;
+        const subtitle = topbarFor({ name: 'project-chat', path: `/projects/${projectId}/chats/${chatId}`, params: { id: projectId, chatId } })?.subtitle;
         expect(subtitle).toBeDefined();
-        // The list column filters by project.
-        const filter = dom.querySelector<HTMLElement>('[data-chat-project-filter] [data-scope="select"][data-part="root"]');
+        // The chats list filters by project.
+        const list = await mountLive('/chats', h);
+        await until(() => list.querySelector(`[data-chat-list] a[href="/projects/${projectId}/chats/${chatId}"]`) !== null, 'the row, linking inside the project');
+        const filter = list.querySelector<HTMLElement>('[data-chat-project-filter] [data-scope="select"][data-part="root"]');
         expect(filter).not.toBeNull();
         expect(texts(filter!.querySelectorAll('[role="option"]')).map((t) => t.replace('✓', '').trim())).toEqual(['All projects', 'agentic']);
         expect(texts(filter!.querySelectorAll('[data-scope="select"][data-part="value"]'))).toEqual(['All projects']);
-        expect(dom.querySelector('[data-chat-row][data-current]')).not.toBeNull();
 
         // An override for one member wins over the project and can be cleared back to it.
         await h.app.as(owner).actor(Chat, chatKeyOf(USER, chatId)).setWorkdir(forge, { environmentId: win.envId, path: 'C:\\Dev\\agentic\\branches\\x' });

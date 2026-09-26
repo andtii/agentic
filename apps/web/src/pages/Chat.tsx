@@ -5,7 +5,7 @@ import type { ToolPartState } from '@sigx/ai-agent';
 import { Drawer } from '@sigx/zero';
 import { Button, Composer, EmptyState, NOBODY_HINT, Tag, Thread, type ComposerInsert, type Mention } from '@agentic/ui';
 import { Page } from '../components/Page';
-import { defineTopbar, routeId } from '../components/topbar';
+import { defineTopbar, routeId, type TopbarContribution } from '../components/topbar';
 import { mockChatPosts } from '../mock/chat-posts';
 import { PROJECTS, USER, agentNamed, chatSessionOf, formatTime, loadChat, loadChats, mentionedIn, projectNamed, resolveAddressing, type MockChatSummary } from '../mock/workspace';
 import { ChatList, MemberTiles } from './chat/ChatList';
@@ -13,6 +13,7 @@ import { ContextPanel } from './chat/ContextPanel';
 import { closeContextDrawer, contextDrawer, openContextDrawer } from './chat/context-drawer';
 import { dataMode } from '../data-mode';
 import { chatHead, openChatSettings, toggleChatSearch } from './chat/head';
+import { chatIdOfRoute, chatRedirect } from './chat/href';
 import { lookupOver } from './chat/live';
 import { LiveChat } from './chat/LiveChat';
 import { chatPullLinks } from './projects/work/pull/links';
@@ -29,8 +30,8 @@ export function memberSummary(chat: Pick<MockChatSummary, 'members'>): string {
 
 const tasksButton = () => <Button intent="icon" icon="tree" label="Tasks in this chat" class="ag-chat-tasks" onClick={openContextDrawer} />;
 
-defineTopbar('chat', (route) => {
-    const id = routeId(route);
+/** The chat page's topbar for chat `id` (#929: the same on `/chats/:id` and inside a project). */
+export function chatTopbar(id: string): TopbarContribution {
     // Live: what the page published for THIS chat (`chat/head.ts`); mock: the workspace's view.
     const live = dataMode() === 'live';
     const head = live ? (chatHead.value?.id === id ? chatHead.value : undefined) : loadChat(id)?.chat;
@@ -62,7 +63,9 @@ defineTopbar('chat', (route) => {
             </>
         )
     };
-});
+}
+
+defineTopbar('chat', (route) => chatTopbar(routeId(route)));
 
 /**
  * `/chats/:id` — chat list, thread and composer, members and tasks. In
@@ -72,14 +75,14 @@ defineTopbar('chat', (route) => {
  * row follows the handoff rule: mentions ∩ members, else the coordinator,
  * else the single member, else nobody.
  */
-export const Chat = component(() => {
+export const ChatScreen = component<{ id: string; projectId?: string }>(({ props }) => {
     const route = useRoute();
     const chats = loadChats();
     const st = signal({ draft: '' });
     // Folders picked on the mock page: kept for the visit, like its composer.
     const folders = signal<{ value: Record<string, WorkdirRef | null> }>({ value: {} });
     const view = () => {
-        const v = loadChat(String(route.params.id));
+        const v = loadChat(props.id);
         if (!v) return v;
         const members = v.chat.members.map((m) => {
             const picked = folders.value[m.agentId];
@@ -99,14 +102,25 @@ export const Chat = component(() => {
     const router = useRouter();
     const mention = signal<{ insert: ComposerInsert | null }>({ insert: null });
     let mentionSeq = 0;
+    // A project's chat opens inside the project, any other at `/chats/:id` (#929): a page elsewhere replaces itself,
+    // the query kept, so the mention below is read on the page that stays.
+    const redirect = (): string | null => {
+        const chat = loadChat(props.id)?.chat;
+        return chat && chatIdOfRoute(route) === props.id ? chatRedirect(route.path, { id: chat.id, projectId: chat.projectId ?? null }, (p) => projectNamed(p) !== undefined) : null;
+    };
     onMounted(() => {
+        const to = redirect();
+        if (to) {
+            void router.replace({ path: to, query: route.query });
+            return;
+        }
         const stop = watch(
             () => queryOf(route.query.file),
             (value) => {
                 const m = mentionOfQuery(value);
-                if (!m) return;
+                if (!m || chatIdOfRoute(route) !== props.id) return;
                 mention.insert = { id: ++mentionSeq, text: `${fileToken(m.path)} ` };
-                void router.replace(`/chats/${encodeURIComponent(String(route.params.id))}`);
+                void router.replace(route.path);
             },
             { immediate: true }
         );
@@ -122,12 +136,12 @@ export const Chat = component(() => {
     return () => {
         // Keyed by the chat: the page holds the entries it has read (`held`), the feeds, the draft and the chips per
         // chat, so another chat picked from the list mounts a fresh page rather than merging into the last one's.
-        if (dataMode() === 'live') return <LiveChat key={String(route.params.id)} id={String(route.params.id)} />;
+        if (dataMode() === 'live') return <LiveChat key={props.id} id={props.id} {...(props.projectId ? { projectId: props.projectId } : {})} />;
         const v = view();
         if (!v) {
             return (
                 <Page title="Chat not found">
-                    <EmptyState variant="generic" title="No chat with that id" caption={`Nothing is called ${String(route.params.id)}.`} slots={{ actions: () => <Link to="/chats">Back to chats</Link> }} />
+                    <EmptyState variant="generic" title="No chat with that id" caption={`Nothing is called ${props.id}.`} slots={{ actions: () => <Link to="/chats">Back to chats</Link> }} />
                 </Page>
             );
         }
@@ -140,7 +154,8 @@ export const Chat = component(() => {
         const project = v.chat.projectId ? projectNamed(v.chat.projectId) : undefined;
         return (
             <Page title={v.chat.title} page="chat" hideTitle flush>
-                <ChatList chats={chats} currentId={v.chat.id} projects={PROJECTS} />
+                {/* Inside a project (#929) the project's menu is the way back to its chats: no global list column. */}
+                {props.projectId ? null : <ChatList chats={chats} currentId={v.chat.id} projects={PROJECTS} />}
                 <section data-chat-main aria-label="Conversation">
                     {empty
                         ? <div data-chat-empty><EmptyState variant="chat" /></div>
@@ -180,3 +195,10 @@ export const Chat = component(() => {
         );
     };
 });
+
+/** `/chats/:id` — the route's chat, with the global chat list. */
+export const Chat = component(() => {
+    const route = useRoute();
+    // Keyed by the chat: another chat picked from the list mounts a fresh page (its draft and mention are per chat).
+    return () => <ChatScreen key={String(route.params.id)} id={String(route.params.id)} />;
+}, { name: 'ChatRoute' });

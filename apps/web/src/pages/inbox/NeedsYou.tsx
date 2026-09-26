@@ -24,6 +24,7 @@ import type { SessionRequestView } from '@agentic/platform';
 import { LinkButton } from '../ops/LinkButton';
 import { MachineNotice } from '../machines/MachineNotice';
 import { sortRows, type NeedsRow, type NeedsSource, type PlanApproval, type RequestState } from './source';
+import { chatHref } from '../chat/href';
 
 /** The Session's request as the card takes it. */
 export function openRequestOf(view: SessionRequestView): OpenRequest {
@@ -52,7 +53,7 @@ export function decisionOf(view: SessionRequestView, from?: string): ApprovalDec
 /** Where a row leads: the chat it belongs to, else its task, else the session. */
 export function hrefOf(row: NeedsRow, view?: SessionRequestView): { readonly to: string; readonly label: string } {
     if (row.href && row.hrefLabel) return { to: row.href, label: row.hrefLabel };
-    if (view?.chatId) return { to: `/chats/${view.chatId}`, label: 'Open chat' };
+    if (view?.chatId) return { to: chatHref({ id: view.chatId }), label: 'Open chat' };
     if (view?.taskId) return { to: `/tasks/${view.taskId}`, label: 'Open task' };
     return { to: `/sessions/${row.ref?.sessionId ?? view?.sessionId ?? ''}`, label: 'Open session' };
 }

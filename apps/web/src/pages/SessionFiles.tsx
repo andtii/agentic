@@ -20,6 +20,7 @@ import { changesHref, displayRoot, filesHref, queryOf, relativeToRoot, rootQuery
 import { SessionFrame, type SessionFrameContext } from './session/frame';
 import { sessionHead } from './session/LiveSession';
 import { sessionTrail } from './session/trail';
+import { chatHref } from './chat/href';
 
 defineTopbar('session-files', (route) => {
     const id = routeId(route);
@@ -28,7 +29,7 @@ defineTopbar('session-files', (route) => {
     const agentName = head?.agentName ?? (v ? agentNamed(v.agentId).name : undefined);
     return {
         ...(v ? { crumb: 'Files', trail: sessionTrail(id, v, agentName, 'Files') } : {}),
-        actions: () => (v?.chatId ? <LinkButton to={`/chats/${v.chatId}`} icon="chats">Open chat</LinkButton> : null)
+        actions: () => (v?.chatId ? <LinkButton to={chatHref({ id: v.chatId })} icon="chats">Open chat</LinkButton> : null)
     };
 });
 

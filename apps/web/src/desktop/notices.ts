@@ -12,12 +12,13 @@
  */
 import type { InboxNotification } from '@agentic/platform';
 import type { DesktopNotice } from './bridge';
+import { chatHref } from '../pages/chat/href';
 
 /** Where clicking a notification lands: an answer is given on Home's "Needs you", anything else opens what it points at. */
 export function noticeHref(n: Pick<InboxNotification, 'kind' | 'ref'>): string {
     if (n.kind === 'approval' || n.kind === 'input') return '/';
     switch (n.ref?.kind) {
-        case 'chat': return `/chats/${n.ref.chatId}`;
+        case 'chat': return chatHref({ id: n.ref.chatId });
         case 'task': return `/tasks/${n.ref.taskId}`;
         case 'session': return `/sessions/${n.ref.sessionId}`;
         case 'machine': return `/machines/${n.ref.machineId}`;

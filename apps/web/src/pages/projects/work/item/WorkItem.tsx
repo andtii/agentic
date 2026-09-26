@@ -18,6 +18,7 @@ import { refIcon, refLabel } from '../../features/plan/shared/model';
 import { MOCK_WORK_ITEMS } from './fixtures';
 import { useLiveWorkItems } from './live';
 import { activityOf, actorLabel, doneWhenProgress, findWorkItem, ownerLabel, refHref, stagesOf, stepsOf, type WorkItemDetail } from './model';
+import { chatHref } from '../../../chat/href';
 
 export type WorkItemProps = ProjectPageProps & Define.Prop<'item', string, true>;
 
@@ -63,7 +64,7 @@ const Header = (d: WorkItemDetail, agentOf: WorkAgentLookup) => {
     );
 };
 
-const Links = (d: WorkItemDetail) => (
+const Links = (d: WorkItemDetail, projectId: string) => (
     <section data-work-item-links="" aria-label="Linked">
         <h3>Linked</h3>
         <dl>
@@ -74,7 +75,7 @@ const Links = (d: WorkItemDetail) => (
                     : <span data-none="">No task yet</span>}
             </dd>
             <dt>Chat</dt>
-            <dd data-link="chat">{d.chat ? <Link to={`/chats/${d.chat.id}`}>{d.chat.title}</Link> : <span data-none="">No chat</span>}</dd>
+            <dd data-link="chat">{d.chat ? <Link to={chatHref({ id: d.chat.id, projectId })}>{d.chat.title}</Link> : <span data-none="">No chat</span>}</dd>
             <dt>Session</dt>
             <dd data-link="session">{d.sessionId ? <Link to={`/sessions/${d.sessionId}`}>{d.sessionId}</Link> : <span data-none="">No session</span>}</dd>
             {d.plan ? <><dt>Plan</dt><dd data-link="plan">{`${d.plan.title} · ${d.plan.phase} · #${d.plan.item.id}`}</dd></> : null}
@@ -155,7 +156,7 @@ const render = (projectId: string, param: string, d: WorkItemDetail | undefined,
                         {DoneWhen(d)}
                         {Refs(d, projectId)}
                         {Activity(d, agentOf)}
-                        {Links(d)}
+                        {Links(d, projectId)}
                     </div>
                 </>
             )
