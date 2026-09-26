@@ -671,8 +671,9 @@ export function claim(book: PlanBook, call: PlanCall, itemId: number, options: C
     if (actor.kind !== 'agent') fail('forbidden', 'only an agent claims an item; a person assigns it');
     const agentId = (actor as { agentId: AgentId }).agentId;
     const item = itemOf(book, itemId);
+    // A lease the agent asks for is bounded here; the project's own (`leaseMinutes`, up to 8 hours) was bounded by its settings.
+    if (options.leaseMs !== undefined && (!Number.isSafeInteger(options.leaseMs) || options.leaseMs < LEASE_MIN_MS || options.leaseMs > LEASE_MAX_MS)) fail('invalid', `leaseMs must be between ${LEASE_MIN_MS} and ${LEASE_MAX_MS}`);
     const leaseMs = options.leaseMs ?? call.leaseMs ?? PLAN_LEASE_DEFAULT_MS;
-    if (!Number.isSafeInteger(leaseMs) || leaseMs < LEASE_MIN_MS || leaseMs > LEASE_MAX_MS) fail('invalid', `leaseMs must be between ${LEASE_MIN_MS} and ${LEASE_MAX_MS}`);
     if (options.taskId !== undefined && (typeof options.taskId !== 'string' || !options.taskId.trim() || options.taskId.length > 200)) fail('invalid', 'taskId must be a task id');
     const refusal = claimRefusal(book, call, agentId, item);
     if (refusal) throw refusal;

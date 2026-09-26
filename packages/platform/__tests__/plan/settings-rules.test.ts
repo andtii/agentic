@@ -82,6 +82,14 @@ describe('claimLimit and the project lease', () => {
         claim(b, call(agent(FORGE), { leaseMs: 45 * 60_000, limitOf: () => 2 }), 2, { leaseMs: 10 * 60_000 });
         expect(itemOf(b, 2).claim).toMatchObject({ leaseUntil: T0 + 10 * 60_000 });
     });
+
+    it('a project lease longer than an agent may ask for (up to 8 hours) still claims', () => {
+        const b = book();
+        const lease = planSettings(project({ leaseMinutes: 480 })).leaseMs;
+        claim(b, call(agent(FORGE), { leaseMs: lease }), 1);
+        expect(itemOf(b, 1).claim).toMatchObject({ leaseUntil: T0 + 8 * 60 * 60_000 });
+        expect(code(() => claim(b, call(agent(LINT), { leaseMs: lease }), 2, { leaseMs: lease }))).toBe('invalid');
+    });
 });
 
 describe('agentsMayTick, and done by an agent', () => {
