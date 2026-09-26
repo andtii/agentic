@@ -4,7 +4,7 @@
  * number, so one card updates in place.
  */
 import { describe, it, expect } from 'vitest';
-import { signal } from '@sigx/runtime-core';
+import { component, signal, type Define } from '@sigx/runtime-core';
 import { createTranscript } from '@sigx/ai-agent';
 import type { PullRequest } from '@agentic/core';
 import type { ToolPartState } from '@sigx/ai-agent/app';
@@ -36,6 +36,11 @@ function fakeStore(initial: readonly PullRequest[]) {
     });
     return { st, refs, links };
 }
+
+/** A page whose `pullLinks` arrives later (its project read lands after the first render). */
+const Wrapper = component<Define.Prop<'transcript', ReturnType<typeof createTranscript>, true> & Define.Prop<'links', () => PullLinksFn | undefined, true>>(
+    ({ props }) => () => <Thread transcript={props.transcript} pullLinks={props.links()} />
+);
 
 const card = (host: ParentNode) => host.querySelector('[data-ag-project="pull-card"]');
 
@@ -78,6 +83,17 @@ describe('the live chat PR card (#935)', () => {
         await tick();
         expect(card(host)?.getAttribute('data-state')).toBe('closed');
         expect(card(host)?.textContent).toContain('closed');
+    });
+
+    it('a live read that arrives after the first render takes over the card', async () => {
+        const store = fakeStore([{ ...pr, state: 'merged' }]);
+        const st = signal<{ links: PullLinksFn | undefined }>({ links: undefined });
+        const transcript = transcriptWith(pr);
+        const host = mount(<Wrapper transcript={transcript} links={() => st.links} />);
+        expect(card(host)?.getAttribute('data-state')).toBe('open');
+        st.links = store.links;
+        await tick();
+        expect(card(host)?.getAttribute('data-state')).toBe('merged');
     });
 
     it('without a live read, an unread pull_report answer stays the output well', () => {

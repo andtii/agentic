@@ -338,7 +338,7 @@ export const ToolCall = component<ToolCallProps>(({ props }) => {
                 </div>
                 {!streaming && sig !== '' && <InputBlock text={inputText(p.input)} />}
                 {card
-                    ? <LivePullCard key={`${card.repo ?? ''}#${card.number}`} pullRef={card} snapshot={pull} pullLinks={props.pullLinks} output={output} logHref={props.logHref} />
+                    ? <LivePullCard key={`${card.repo ?? ''}#${card.number}${props.pullLinks?.usePull ? ':live' : ''}`} pullRef={card} snapshot={pull} pullLinks={props.pullLinks} output={output} logHref={props.logHref} />
                     : output !== undefined && <OutputBlock text={output} logHref={props.logHref} />}
                 {error && <p data-scope={SCOPE} data-part="error">{error}</p>}
                 {awaiting && props.onRespond && <ApprovalPrompt request={request!} onRespond={props.onRespond} {...approvalContext(props.describeRequest?.(request!))} toolName={p.name} input={p.input} />}

@@ -330,7 +330,7 @@ export const PullView = component<PullViewProps>(({ props }) => {
                 <dl>
                     <dt>Task</dt>
                     <dd data-link="task">{pr.taskId ? <><Link to={`/tasks/${pr.taskId}`}>{pr.taskId}</Link>{linked?.taskTitle ? <span data-task-title="">{linked.taskTitle}</span> : null}</> : <span data-none="">No task</span>}</dd>
-                    {linked?.issue ? <><dt>Issue</dt><dd data-link="issue">{linked.issue.href ? <a href={linked.issue.href} target="_blank" rel="noreferrer">{linked.issue.label}</a> : linked.issue.label}</dd></> : null}
+                    {linked?.issue ? <><dt>Issue</dt><dd data-link="issue">{linked.issue.href ? <a href={linked.issue.href} target="_blank" rel="noopener noreferrer">{linked.issue.label}</a> : linked.issue.label}</dd></> : null}
                     <dt>Chat</dt>
                     <dd data-link="chat">{pr.chatId ? <Link to={chatHref({ id: pr.chatId, projectId: props.projectId })}>{linked?.chatTitle ?? pr.chatId}</Link> : <span data-none="">No chat</span>}</dd>
                     <dt>Session</dt>
