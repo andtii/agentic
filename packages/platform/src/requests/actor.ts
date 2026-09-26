@@ -19,6 +19,11 @@
  *   cross-project `after` (#931), so Links shows the pair and they stay blocked until it is done — best effort, as
  *   the caller: the requester's Plan decides whether it may (a person may; another project's manager agent may not).
  *   Who accepted is kept on the request (`acceptedBy`) for the requester's chat divider.
+ * - **issue** (#932): an accept with `openIssue` opens a GitHub issue for the new item through `RequestIssuePort`
+ *   (`issue.ts`; the app's git provider with the project's credential), once — its URL is kept on the request
+ *   (`issueUrl`) and added to the item as a ref, as the caller. Best effort: the request is accepted either way.
+ * - **send check** (#932): the sending project's manager agent sends only when its policy's `autonomy.sendRequests`
+ *   is on; a person, or another member agent, always may (the receiving project's sender rules still apply).
  *
  * - **replies** (#839): the manager's triage reply, the result of an accept, a decline's reason and a question for
  *   the sender are posted into the request's `fromChat` through `RequestReplyPort` (`reply.ts`), as the caller.
@@ -41,6 +46,8 @@ import { Workspace } from '../workspace/index.js';
 import { pmPolicyOf } from '../workspace/pm-policy.js';
 import { parseRequestsKey, REQUESTS_TYPE, requestsKey } from './key.js';
 import { chatRequestReplies, requestReplyFor, type RequestReplyPort } from './reply.js';
+import { NO_REQUEST_ISSUES, requestIssueBody, type RequestIssuePort } from './issue.js';
+export { NO_REQUEST_ISSUES, requestIssueBody, type OpenedRequestIssue, type RequestIssue, type RequestIssuePort } from './issue.js';
 export { chatRequestReplies, NO_REQUEST_REPLIES, requestReplyText, type RequestReply, type RequestReplyHop, type RequestReplyPort } from './reply.js';
 import {
     admit,
@@ -137,6 +144,8 @@ export interface RequestsActorOptions {
     readonly turns?: RequestsTurnPort;
     /** Where a request's replies go (#839). Default: `chatRequestReplies`, into the request's `fromChat`. */
     readonly replies?: RequestReplyPort;
+    /** Where an accept's GitHub issue is opened (#932). Default: `NO_REQUEST_ISSUES` — the app wires its git provider. */
+    readonly issues?: RequestIssuePort;
     /** Clock; default `Date.now`. */
     readonly now?: () => number;
     /** Override the policy chain. Default: the package's `sameWorkspace`. */
@@ -184,6 +193,7 @@ export function defineRequestsActor(options: RequestsActorOptions = {}) {
     const projectsPort = options.projects ?? workspaceRequestProjects;
     const turns = options.turns ?? taskTriageTurns;
     const replies = options.replies ?? chatRequestReplies;
+    const issues = options.issues ?? NO_REQUEST_ISSUES;
     const authorize: ActorPolicy | readonly ActorPolicy[] = options.authorize ?? sameWorkspace;
 
     type Ctx = ActorContext<RequestsState>;
@@ -372,6 +382,38 @@ export function defineRequestsActor(options: RequestsActorOptions = {}) {
                 }
             };
 
+            /**
+             * Open the accepted request's GitHub issue (#932) and add its URL to the item it became, as the caller. Once:
+             * a request that already carries an `issueUrl` is left alone. Best effort — the request stays accepted.
+             */
+            const openIssue = async (request: StoredRequest, itemN: number, title: string, all: readonly Pick<ProjectRecord, 'id' | 'name'>[], projectName: string): Promise<void> => {
+                const s = ctx.state;
+                if (request.issueUrl) return;
+                const fromProjectName = all.find((p) => p.id === request.fromProject)?.name ?? request.fromProject;
+                let opened: Awaited<ReturnType<RequestIssuePort['open']>>;
+                try {
+                    opened = await issues.open({
+                        workspaceId: s.workspaceId,
+                        projectId: s.projectId,
+                        projectName,
+                        requestId: request.id,
+                        itemN,
+                        title,
+                        body: requestIssueBody({ id: request.id, body: request.body, fromProjectName }, projectName, itemN)
+                    });
+                } catch {
+                    return;
+                }
+                if (!opened?.url) return;
+                request.issueUrl = opened.url;
+                try {
+                    await ctx.save();
+                    await ctx.actor(PlanRef, planKey(s.workspaceId, s.projectId)).ref(itemN, { kind: 'url', url: opened.url });
+                } catch {
+                    // The issue is open; the request is accepted either way (a failed save or ref leaves only the link missing).
+                }
+            };
+
             /** Requests this project sent, from each project it sent to (one that cannot be read is skipped). */
             const sentRequests = async (): Promise<RequestView[]> => {
                 const s = ctx.state;
@@ -391,6 +433,11 @@ export function defineRequestsActor(options: RequestsActorOptions = {}) {
                     const from = all.find((p) => p.id === (input as { fromProject?: unknown } | null)?.fromProject);
                     if (!from) throw new ServerFnError(404, `[requests] no project ${String((input as { fromProject?: unknown } | null)?.fromProject)} to send from`);
                     const isMember = actor.kind === 'user' || from.members.agentIds.includes(actor.agentId) || from.members.coordinator === actor.agentId;
+                    // The sending project's manager sends on its own only when its policy lets it (#932); a person always may.
+                    const fromManager = from.pm?.agentId ?? from.members.coordinator ?? null;
+                    if (actor.kind === 'agent' && actor.agentId === fromManager && !pmPolicyOf(from).autonomy.sendRequests) {
+                        throw new ServerFnError(403, `[requests] ${from.name}'s manager may not send requests on its own ("send requests to other projects" is off); ask a person to send it`, { code: 'forbidden' });
+                    }
                     let out: ReturnType<typeof receive>;
                     try {
                         out = receive(ctx.state, call, input, isMember);
@@ -456,6 +503,7 @@ export function defineRequestsActor(options: RequestsActorOptions = {}) {
                     if (resultItem !== undefined) (out.value as StoredRequest & { acceptedBy?: PlanActor }).acceptedBy = { ...actor };
                     await record(out.change, out.value, actor, at);
                     if (resultItem !== undefined) await linkRequester(out.value, resultItem, all);
+                    if (resultItem !== undefined && accept?.openIssue) await openIssue(out.value, resultItem, accept.item.title, all, project.name);
                     await reply(out.change, out.value, project.name);
                     return requestView(out.value);
                 },

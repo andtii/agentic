@@ -129,7 +129,7 @@ import { channelCatalogue, connectorOpener, learningCatalogue, memoryCatalogue, 
 import { createPurgeHandler, durableObjectWorkspaceStore, r2ArtifactSink, type R2BucketLike } from './retention';
 import { runWithHost } from './host-scope';
 import { observeSlowTurns } from './actors/slow-turns';
-import { githubPullSources, pullsAutopilot, pullsPlacement } from './actors/pulls';
+import { githubPullSources, githubRequestIssues, pullsAutopilot, pullsPlacement } from './actors/pulls';
 
 export { DAEMON_SOCKET_PREFIX };
 
@@ -317,7 +317,8 @@ export function platformActors(ports: PlatformPorts = defaultPorts): readonly An
 
         definePlanActor(),
 
-        defineRequestsActor(),
+        // An accept with "open GitHub issue" opens it with the project's GitHub credential (#932).
+        defineRequestsActor({ issues: githubRequestIssues({ registry, workspace: () => Workspace }) }),
     ];
 }
 

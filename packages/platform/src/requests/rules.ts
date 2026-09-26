@@ -81,6 +81,8 @@ export interface StoredRequest {
     resultItem?: number;
     /** `accepted`: whether a GitHub issue is opened for the item — the person's choice on accept, else the triage's (#883). */
     openIssue?: boolean;
+    /** `accepted` with `openIssue`: the GitHub issue opened for the item (#932), once it is. */
+    issueUrl?: string;
     declineReason?: string;
     /** `needs-you`: what a person is asked — to let it in, or to decide on the triage. */
     needs?: 'admit' | 'decision';
@@ -119,6 +121,8 @@ export interface RequestView extends ProjectRequest {
     readonly triagedAt?: number;
     /** `accepted`: whether a GitHub issue is opened for the item it became (#883). */
     readonly openIssue?: boolean;
+    /** The GitHub issue opened for the item it became (#932). */
+    readonly issueUrl?: string;
 }
 
 export function requestView(r: StoredRequest): RequestView {

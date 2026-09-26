@@ -84,7 +84,7 @@ describe('Requests actor: resolve with openIssue (#883)', () => {
     beforeEach(() => {
         const projects = [
             { id: SX, name: 'signalx', members: { agentIds: [NOVA], coordinator: NOVA }, pm: { agentId: NOVA, policy } },
-            { id: AG, name: 'agentic', members: { agentIds: [FORGE], coordinator: FORGE }, pm: { agentId: FORGE, policy: PM_POLICY_DEFAULT } }
+            { id: AG, name: 'agentic', members: { agentIds: [FORGE], coordinator: FORGE }, pm: { agentId: FORGE, policy: { ...PM_POLICY_DEFAULT, autonomy: { ...PM_POLICY_DEFAULT.autonomy, sendRequests: true } } } }
         ];
         const audit = capturingAuditPort();
         const Plan = definePlanActor({ audit, projects: { project: async (_ctx: unknown, _ws: WorkspaceId, id: ProjectId) => projects.find((p) => p.id === id) } });
