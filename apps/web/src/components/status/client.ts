@@ -1,14 +1,15 @@
 /**
  * This browser's connection to the platform — the first of the four signals
  * of failure distinction (OPS-04): `live` while the actor wire answers,
- * `reconnecting` from the moment it stops (the `$live` stream dropped, a
+ * `reconnecting` from the moment it stops (an actor's live socket dropped, a
  * call failed at the network, the browser went offline) until it answers
  * again. One page-global signal: the shell's connection strip, the offline
  * banner and every page's failure card read the same word.
  *
  * `watchTransport` is how the wire reports: it wraps the transport the
  * `actorsPlugin` installs so every stream frame and every answered call say
- * `live`, and a network failure says `reconnecting`. `installClientConnection`
+ * `live`, and a network failure says `reconnecting`. The live sockets report
+ * their own opens and drops (`reportingConnect`, `entry-client.tsx`). `installClientConnection`
  * adds the browser's own `online` / `offline` events. Tests drive the signal
  * with `setClientConnection`.
  */

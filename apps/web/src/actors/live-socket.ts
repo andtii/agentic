@@ -14,7 +14,7 @@
  * `calls` (POSTs): one-shot calls do not keep an object awake.
  */
 import type { ActorLiveChannel, ActorTransport } from '@sigx/actors/client';
-import { socketTransport } from '@sigx/actors-ws/client';
+import { socketTransport, type SocketTransportOptions } from '@sigx/actors-ws/client';
 
 /** The actor mount's socket prefix (`DEFAULT_SOCKET_PATH`). */
 export const SOCKET_PATH = '/_sigx/socket';
@@ -22,11 +22,63 @@ export const SOCKET_PATH = '/_sigx/socket';
 /** `{path}/{type}/{key}`, both segments URI-encoded (`parseSocketActorPath`). */
 export const actorSocketPath = (type: string, key: string, path = SOCKET_PATH): string => `${path}/${encodeURIComponent(type)}/${encodeURIComponent(key)}`;
 
-/** The browser default: a same-origin `ws(s):` URL for the actor's socket. */
-export function browserSocketFor(type: string, key: string): ActorTransport {
+/** One connection attempt: `socketTransport`'s `connect` seam. */
+export type SocketConnect = NonNullable<SocketTransportOptions['connect']>;
+
+/** What the connection pill hears from a socket (OPS-04): it opened, or it dropped without being asked to. */
+export interface SocketReport {
+    onOpen?(): void;
+    onDrop?(): void;
+}
+
+/**
+ * `connect`, reporting: an open says so, and so does a close nobody asked for.
+ * A close the transport made itself (the actor's last subscription ended, the
+ * app unmounted) is not a drop. A dial that never opened is one: the
+ * transport retries it with backoff, so the reader is reconnecting.
+ */
+export function reportingConnect(connect: SocketConnect, report: SocketReport): SocketConnect {
+    return (handlers) => {
+        let closing = false;
+        const link = connect({
+            onOpen() {
+                report.onOpen?.();
+                handlers.onOpen();
+            },
+            onMessage: (message) => handlers.onMessage(message),
+            onClose() {
+                if (!closing) report.onDrop?.();
+                handlers.onClose();
+            }
+        });
+        return {
+            send: (message) => link.send(message),
+            close() {
+                closing = true;
+                link.close();
+            }
+        };
+    };
+}
+
+/** Dial `url` on the global `WebSocket`, as `socketTransport({ url })` does. */
+const webSocketConnect =
+    (url: string): SocketConnect =>
+    (handlers) => {
+        const ws = new WebSocket(url);
+        ws.addEventListener('open', () => handlers.onOpen());
+        ws.addEventListener('message', (e) => {
+            if (typeof e.data === 'string') handlers.onMessage(e.data);
+        });
+        ws.addEventListener('close', () => handlers.onClose());
+        return { send: (message) => ws.send(message), close: () => ws.close() };
+    };
+
+/** The browser default: a same-origin `ws(s):` URL for the actor's socket, its opens and drops told to `report`. */
+export function browserSocketFor(type: string, key: string, report: SocketReport = {}): ActorTransport {
     const url = new URL(actorSocketPath(type, key), location.href);
     url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
-    return socketTransport({ url: url.href });
+    return socketTransport({ connect: reportingConnect(webSocketConnect(url.href), report) });
 }
 
 export interface LiveOverSocketsOptions {

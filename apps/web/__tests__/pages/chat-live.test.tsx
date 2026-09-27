@@ -3,20 +3,80 @@
  * real wire in-process (`live-harness`), a mock runtime behind the Session
  * actor. Live reads (AC-06), the composer → `Chat.post` → Task → Routing
  * path, membership dialogs, and the topbar contribution.
+ *
+ * As the browser does (#713): calls are POSTs on the harness's fetch wire,
+ * live reads ride one socket per actor (`liveOverSockets`), each served by an
+ * in-process `createActorSocketSession` on the harness host.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import type { ActorTransport } from '@sigx/actors/client';
+import { createActorSocketSession, type ActorSocketSession } from '@sigx/actors/server';
+import { socketTransport } from '@sigx/actors-ws/client';
 import type { ChatId, TaskId } from '@agentic/core';
 import { Chat, TaskActor, Workspace, taskKey, workspaceKey } from '@agentic/platform';
 import { agentKey, routingKey } from '@agentic/platform';
+import { actorSocketPath, liveOverSockets } from '../../src/actors/live-socket';
 import { agentKeyOf, chatKeyOf, routingKeyOf, sessionKeyOf, taskKeyOf, workspaceKeyOf } from '../../src/actors/keys';
 import { topbarFor } from '../../src/components/topbar';
 import { setDataMode } from '../../src/data-mode';
 import { chatHead } from '../../src/pages/chat/head';
 import { USER, WS, mountLive, owner, startLive, texts, tick, until, type LiveHarness } from './live-harness';
 
+/** One actor's socket, served in-process by a socket session on the harness host; the upgrade carries the tab's identity. */
+function inProcessSocketFor(harness: LiveHarness, dialled: string[]): (type: string, key: string) => ActorTransport {
+    return (type, key) =>
+        socketTransport({
+            connect(handlers) {
+                const path = actorSocketPath(type, key);
+                dialled.push(path);
+                let session: ActorSocketSession | undefined;
+                let closed = false;
+                const request = new Request(`http://agentic.test${path}`, { headers: { upgrade: 'websocket', 'x-user': USER } });
+                // Both directions hop a microtask, as a socket's messages do.
+                void createActorSocketSession({
+                    host: harness.app.host,
+                    request,
+                    origin: false,
+                    send: (m) => queueMicrotask(() => !closed && handlers.onMessage(m)),
+                    close: () => {
+                        closed = true;
+                        handlers.onClose();
+                    }
+                }).then(
+                    (s) => {
+                        if (closed) return s.close();
+                        session = s;
+                        handlers.onOpen();
+                    },
+                    () => handlers.onClose()
+                );
+                return {
+                    send: (m) => queueMicrotask(() => session?.handle(m)),
+                    close() {
+                        closed = true;
+                        session?.close();
+                    }
+                };
+            },
+            retryMs: 10,
+            maxRetryMs: 50
+        });
+}
+
 let h: LiveHarness;
+let dialled: string[];
 beforeEach(async () => {
-    h = await startLive();
+    const harness = await startLive();
+    dialled = [];
+    const transport = liveOverSockets({ calls: harness.transport, socketFor: inProcessSocketFor(harness, dialled) });
+    h = {
+        ...harness,
+        transport,
+        async stop() {
+            await transport.close?.();
+            await harness.stop();
+        }
+    };
 });
 afterEach(async () => {
     await h.stop();
@@ -76,6 +136,8 @@ describe('/chats/:id (live)', () => {
         const a = await mountLive(`/chats/${chatId}`, h);
         const b = await mountLive(`/chats/${chatId}`, h);
         expect(a.querySelector('[data-chat-empty]')).not.toBeNull();
+        // The chat's live reads are on its own socket (#713), shared by both tabs' subscriptions.
+        expect(dialled.filter((p) => p === actorSocketPath('Chat', chatKeyOf(USER, chatId)))).toHaveLength(1);
         await chat.post('first');
         await until(() => names(a).length === 1 && names(b).length === 1, 'both tabs to show the post');
         expect(texts(a.querySelectorAll('[data-scope="ai-message"][data-part="body"]'))).toEqual(['first']);
