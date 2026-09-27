@@ -1,5 +1,5 @@
 import { component, signal, watch, type Define } from 'sigx';
-import { Button, ConfirmDialog, SelectField, StatusPill, TextField } from '@agentic/ui';
+import { Button, ErrorNote, FormDialog, SelectField, StatusPill, TextField } from '@agentic/ui';
 import { CONNECTOR_AUTH_OPTIONS, connectorIdOf, emptyConnectorDraft, probeConnector, validateConnectorDraft, type ConnectorAuthKind, type ConnectorDraft, type ConnectorProbe } from './connector';
 
 export interface AddConnectorRequest {
@@ -71,14 +71,13 @@ export const AddConnectorDialog = component<AddConnectorDialogProps>(({ props, e
         const p = probe();
         const id = connectorIdOf(draft.name);
         return (
-            <ConfirmDialog
+            <FormDialog
                 model={props.model}
                 title="Add MCP server"
                 description="Agents that pick it get its tools. Its credential is sealed in this workspace and never shown again."
-                confirmLabel="Add connector"
-                danger={false}
+                submitLabel="Add connector"
                 busy={props.busy}
-                onConfirm={() => {
+                onSubmit={() => {
                     if (Object.keys(errors()).length) {
                         st.attempted = true;
                         return;
@@ -111,9 +110,9 @@ export const AddConnectorDialog = component<AddConnectorDialogProps>(({ props, e
                             )
                         ) : null}
                     </div>
-                    {props.error ? <p data-chat-error role="alert">{props.error}</p> : null}
+                    {props.error ? <ErrorNote data-chat-error="">{props.error}</ErrorNote> : null}
                 </div>
-            </ConfirmDialog>
+            </FormDialog>
         );
     };
 }, { name: 'AddConnectorDialog' });

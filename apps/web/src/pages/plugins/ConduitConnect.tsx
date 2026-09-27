@@ -21,7 +21,7 @@
 import { component, signal, type Define, type JSXElement } from 'sigx';
 import { useActorState } from '@sigx/actors/app';
 import type { PluginView } from '@agentic/platform';
-import { Button, Label, StatusPill } from '@agentic/ui';
+import { Button, ErrorNote, Label, StatusPill } from '@agentic/ui';
 import type { ActorDefs } from '../../actors/defs';
 import { connectorAccountsKeyOf, registryKeyOf } from '../../actors/keys';
 import { connectorDisconnectPath, connectorRedirectUri, connectorStartPath } from '../../connectors/paths';
@@ -107,7 +107,7 @@ export const ConduitConnectPanel = component<ConduitConnectPanelProps>(({ props,
                 </dl>
                 {blocker ? <p data-plugin-hint data-connect-blocker>{blocker}</p> : null}
                 {props.notice ? <p data-plugin-saved role="status">{props.notice}</p> : null}
-                {props.error ? <p data-chat-error role="alert">{props.error}</p> : null}
+                {props.error ? <ErrorNote data-chat-error="">{props.error}</ErrorNote> : null}
                 {props.unsupported?.length ? <p data-plugin-hint data-connect-unsupported>Not yet: {props.unsupported.join(', ')}.</p> : null}
                 <p data-plugin-hint data-connect-testing>
                     While your Google consent screen is in “Testing”, Google issues refresh tokens that expire after 7 days: the account then shows Reconnect. Publish the consent screen to keep a connection longer.

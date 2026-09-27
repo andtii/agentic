@@ -17,7 +17,7 @@ import { actor } from '@sigx/actors';
 import { useActorState } from '@sigx/actors/app';
 import { runtimeKindOf, type PermissionScope, type ToolMode } from '@agentic/core';
 import type { Dependents, SlotKind } from '@agentic/platform';
-import { EmptyState } from '@agentic/ui';
+import { EmptyState, ErrorNote } from '@agentic/ui';
 import { useActorDefs, useViewer } from '../../actors/defs';
 import { registryKeyOf } from '../../actors/keys';
 import { useAgentDirectory } from '../chat/directory';
@@ -232,7 +232,7 @@ export const LivePlugin = component<LivePluginProps>(({ props }) => {
                                 />
                             )}
                 {switches.left()[props.id] ? <p data-plugin-left role="status">Disabled. New work cannot use it; running work finishes.</p> : null}
-                {st.error || switches.error() ? <p data-chat-error role="alert">{st.error || switches.error()}</p> : null}
+                {st.error || switches.error() ? <ErrorNote data-chat-error="">{st.error || switches.error()}</ErrorNote> : null}
                 {switches.dialog()}
                 {memory.dialog()}
             </OpsPage>

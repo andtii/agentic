@@ -68,10 +68,12 @@ describe('/plugins: MCP servers (live)', () => {
 
         buttonNamed(dom, 'Add MCP server').click();
         await until(() => popup(dom) !== null, 'the dialog');
-        // Nothing filled in: the dialog stays, the fields say why.
+        // Nothing filled in: it is a form, so the required fields block the submit and the dialog stays.
+        expect(popup(dom)!.getAttribute('role')).not.toBe('alertdialog');
         buttonNamed(popup(dom)!, 'Add connector').click();
         await tick();
-        expect(popup(dom)!.textContent).toContain('Give it a name.');
+        expect(popup(dom)).not.toBeNull();
+        expect(field(popup(dom)!, 'connector-name').validity.valueMissing).toBe(true);
         expect(await registry().connectors()).toEqual([]);
 
         setText(field(popup(dom)!, 'connector-name'), 'Acme Tools');

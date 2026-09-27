@@ -45,6 +45,7 @@ export const UpdateAll = component<Define.Prop<'machines', readonly UpdateAllEnt
                         {results.map((r) => <li data-update-result={r.id} data-ok={r.ok ? '' : undefined}><span data-update-result-name>{r.name}</span> <span>{r.text}</span></li>)}
                     </ul>
                 ) : null}
+                {/* A consequence confirm (every listed daemon restarts), not data entry: it stays the alert dialog, without the danger intent. */}
                 <ConfirmDialog
                     model={() => ui.confirming}
                     title={`Update ${targets.length} ${targets.length === 1 ? 'machine' : 'machines'}?`}

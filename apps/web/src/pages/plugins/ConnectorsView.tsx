@@ -13,7 +13,7 @@
  */
 import { component, signal, type Define, type JSXElement } from 'sigx';
 import type { Dependents, PluginView } from '@agentic/platform';
-import { AgentTile, Button, ConfirmDialog, EmptyState, FilterChips, FormDialog, Label, PluginRow, SearchField, Switch, TextField, type AgentHue } from '@agentic/ui';
+import { AgentTile, Button, ConfirmDialog, EmptyState, ErrorNote, FilterChips, FormDialog, Label, PluginRow, SearchField, Switch, TextField, type AgentHue } from '@agentic/ui';
 import { connectorAccounts, connectorDependents, connectorFacts, connectorPlugins, connectorRecords } from '../../mock/plugins-connectors';
 import { dataMode } from '../../data-mode';
 import { OpsPage } from '../ops/OpsPage';
@@ -91,7 +91,7 @@ export const ConnectorsList = component<ConnectorsListProps>(({ props, emit }) =
                         <Label>Connected · {all.length}</Label>
                         <span data-connectors-note>{CONNECTED_NOTE}</span>
                     </div>
-                    {props.error ? <p data-chat-error role="alert">{props.error}</p> : null}
+                    {props.error ? <ErrorNote data-chat-error="">{props.error}</ErrorNote> : null}
                     {all.length
                         ? rows.length
                             ? (
@@ -189,7 +189,7 @@ export const McpSignInDialog = component<McpSignInDialogProps>(({ props, emit })
             >
                 <div data-mcp-sign-in={row?.id}>
                     {needsValue ? <TextField model={() => st.value} name="connector-secret" label={cred.auth === 'header' ? 'Key' : 'Token'} type="password" required /> : null}
-                    {props.error ? <p data-chat-error role="alert">{props.error}</p> : null}
+                    {props.error ? <ErrorNote data-chat-error="">{props.error}</ErrorNote> : null}
                 </div>
             </FormDialog>
         );

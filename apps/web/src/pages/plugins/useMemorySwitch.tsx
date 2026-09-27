@@ -61,6 +61,7 @@ export function useMemorySwitch(options: MemorySwitchOptions): MemorySwitch {
         const report = move.preview;
         if (!report) return null;
         const text = memorySwitchText(report, options.nameOf, options.agentName);
+        // A consequence confirm (the listed memories move), not data entry: it stays the alert dialog, without the danger intent.
         return (
             <ConfirmDialog
                 model={() => move.preview !== null}
