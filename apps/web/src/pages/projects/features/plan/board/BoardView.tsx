@@ -22,6 +22,8 @@ export type BoardViewProps =
     & Define.Prop<'lookup', AgentLookup, true>
     /** The viewer's name, for the You column. */
     & Define.Prop<'you', string, true>
+    /** The viewer's user id (#963): only their items sit in You. Absent, every person's do. */
+    & Define.Prop<'me', string>
     /** ms epoch the leases count down from. */
     & Define.Prop<'now', number, true>
     /** A drop: item `id` into `slot`'s queue, with the handoff note when it was taken off the agent working it. */
@@ -51,7 +53,7 @@ export const BoardView = component<BoardViewProps>(({ props }) => {
     const nameOf = (actor: PlanActor): string => (actor.kind === 'user' ? props.you : props.lookup(actor.agentId).name);
     const columnName = (key: BoardColumnKey): string => (key === 'open' ? 'Not assigned' : key === 'you' ? 'You' : props.lookup(key.slice('agent:'.length)).name);
     const itemOf = (id: number): PlanItem | undefined => props.items.find((i) => i.id === id);
-    const columns = (): BoardColumn[] => boardColumns(props.items, props.members, props.now);
+    const columns = (): BoardColumn[] => boardColumns(props.items, props.members, props.now, props.me);
     const where = (slot: BoardSlot): string => `${columnName(slot.column)}, queue position ${slot.index + 1}`;
 
     const focusCard = (id: number): void => {
@@ -160,7 +162,7 @@ export const BoardView = component<BoardViewProps>(({ props }) => {
         const drag = st.drag;
         const lifted = drag?.id === item.id;
         const meta = cardMeta(item, props.items, props.now, nameOf);
-        const moving = lifted && drag && drag.slot.column !== columnOf(item) ? `moving to ${columnName(drag.slot.column)}` : null;
+        const moving = lifted && drag && drag.slot.column !== columnOf(item, props.me) ? `moving to ${columnName(drag.slot.column)}` : null;
         const chips = item.refs.filter((r) => r.kind === 'project-item' || r.kind === 'pr');
         return (
             <li key={item.id} data-plan-card-slot="" {...(queueIndex === null ? {} : { 'data-queue-index': String(queueIndex) })}>
