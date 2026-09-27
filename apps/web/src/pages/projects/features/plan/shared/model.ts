@@ -12,14 +12,18 @@ export interface PlanItemRun {
     readonly taskRef: string;
     readonly machine?: string;
     readonly branch?: string;
+    /** Where the task runs (#939, live): the machine and environment a pinned file is read on, and its folder. */
+    readonly machineId?: string;
+    readonly environmentId?: string;
+    readonly workdir?: string;
     /** The session the task runs in, for "Open file". */
     readonly sessionId?: string;
 }
 
 /** The pinned lines of a file ref, for its hover card: `lines[0]` is line `ref.from`. */
 export interface PlanFilePin {
-    /** The branch the pinned commit is on (`main@4f2a9c1`). */
-    readonly branch: string;
+    /** The branch the pinned commit is on (`main@4f2a9c1`); absent when unknown (read live, #939). */
+    readonly branch?: string;
     readonly lines: readonly string[];
 }
 
@@ -267,5 +271,5 @@ export const REF_KIND_HINT: Readonly<Record<Ref['kind'], string>> = {
 /** A file ref's hover card line: `L38–41 · main@4f2a9c1`. */
 export function pinLine(ref: Extract<Ref, { kind: 'file' }>, pin: PlanFilePin | undefined): string {
     const lines = ref.from === ref.to ? `L${ref.from}` : `L${ref.from}–${ref.to}`;
-    return ref.sha ? `${lines} · ${pin?.branch ?? 'commit'}@${ref.sha}` : `${lines} · not pinned`;
+    return ref.sha ? `${lines} · ${pin?.branch ?? 'commit'}@${ref.sha.slice(0, 7)}` : `${lines} · not pinned`;
 }

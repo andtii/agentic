@@ -9,6 +9,7 @@ import type { ProjectPageProps } from '../../../layout/types';
 import { BoardView } from './BoardView';
 import { boardFixture } from './fixture';
 import { usePlanStore } from '../shared/data';
+import { usePlanNav } from '../shared/parts';
 import { planOf } from '../shared/model';
 import { assignIndex, boardColumns, columnOf, moveItem, needsHandoff, type BoardSlot } from './model';
 
@@ -39,6 +40,7 @@ const LivePlanBoard = component<ProjectPageProps>(({ props }) => {
     const directory = useAgentDirectory(defs, viewer);
     const store = usePlanStore(() => props.project.id);
     const st = signal({ refused: '' });
+    const nav = usePlanNav('board', () => props.project.id, store);
     const items = (): readonly PlanItem[] => {
         const doc = planOf(store.docs(), route.query.plan);
         return doc ? planItems(doc.plan) : [];
@@ -49,12 +51,12 @@ const LivePlanBoard = component<ProjectPageProps>(({ props }) => {
         const writes = store.writes;
         if (!item || !writes) return;
         st.refused = '';
-        if (slot.column === 'you') {
-            // The viewer's user id is not on the page yet (#927), so the actor cannot be told who "you" are.
-            st.refused = `Could not move #${id}: assigning to yourself from the board is not ready yet (#927).`;
+        const me = viewer.userId;
+        if (slot.column === 'you' && !me) {
+            st.refused = `Could not move #${id}: sign in to take items yourself.`;
             return;
         }
-        const to: PlanActor | null = slot.column === 'open' ? null : { kind: 'agent', agentId: slot.column.slice('agent:'.length) as AgentId };
+        const to: PlanActor | null = slot.column === 'open' ? null : slot.column === 'you' ? { kind: 'user', userId: me! } : { kind: 'agent', agentId: slot.column.slice('agent:'.length) as AgentId };
         const now = Date.now();
         if (note?.trim() && needsHandoff(item, slot, now)) {
             void writes.handoff(id, to, note.trim());
@@ -69,7 +71,20 @@ const LivePlanBoard = component<ProjectPageProps>(({ props }) => {
         return (
             <>
                 {note ? <p data-plan-note="" role="alert">{note}</p> : null}
-                <BoardView projectId={props.project.id} title={doc?.plan.title ?? 'Plan'} items={items()} members={props.project.members} lookup={directory.lookup} you="You" now={Date.now()} onMove={move} />
+                <BoardView
+                    projectId={props.project.id}
+                    title={doc?.plan.title ?? 'Plan'}
+                    items={items()}
+                    members={props.project.members}
+                    lookup={directory.lookup}
+                    you="You"
+                    now={Date.now()}
+                    onMove={move}
+                    plans={store.docs().map((d) => d.plan)}
+                    {...(doc ? { planId: doc.plan.id } : {})}
+                    onSelectPlan={nav.select}
+                    {...(nav.create ? { onNewPlan: nav.create } : {})}
+                />
             </>
         );
     };

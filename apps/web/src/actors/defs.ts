@@ -65,6 +65,8 @@ export const useActorDefs = defineInjectable<ActorDefs>('ActorDefs', { hint: 'ap
 /** The signed-in viewer, as the pages see it — reactive getters over `whoami`. */
 export interface ViewerState {
     readonly workspaceId: string | null;
+    /** The signed-in user's id (#939) — who "You" and "Mine" are in the Plan views; `null` when unknown or signed out. */
+    readonly userId?: string | null;
     /** The provider login the viewer signed in with (#893) — PullCard's `me`; `null` when unknown or signed out. */
     readonly login?: string | null;
     /** Still asking; `workspaceId` is `null` meanwhile. */

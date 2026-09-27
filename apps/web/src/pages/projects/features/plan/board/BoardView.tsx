@@ -6,10 +6,12 @@
  */
 import { component, signal, type Define, type JSXElement } from 'sigx';
 import { Link } from '@sigx/router';
-import type { PlanActor, PlanItem, ProjectMembers } from '@agentic/core';
+import type { Plan, PlanActor, PlanItem, ProjectMembers } from '@agentic/core';
 import { formatRef } from '@agentic/core';
 import { AgentTile, FormDialog, Icon, TextareaField } from '@agentic/ui';
 import type { AgentLookup } from '../../../../chat/live';
+import { useFollow } from '../shared/parts';
+import { PlanSwitcher, PlanViews } from '../shared/switcher';
 import { boardColumns, cardMeta, columnOf, doneCount, isNoop, isWorking, needsHandoff, startSlot, stepSlot, type BoardColumn, type BoardColumnKey, type BoardSlot, type BoardStep } from './model';
 
 export type BoardViewProps =
@@ -23,7 +25,14 @@ export type BoardViewProps =
     /** ms epoch the leases count down from. */
     & Define.Prop<'now', number, true>
     /** A drop: item `id` into `slot`'s queue, with the handoff note when it was taken off the agent working it. */
-    & Define.Prop<'onMove', (id: number, slot: BoardSlot, note?: string) => void, true>;
+    & Define.Prop<'onMove', (id: number, slot: BoardSlot, note?: string) => void, true>
+    /** The project's plans (#939): the title becomes the plan switcher. */
+    & Define.Prop<'plans', readonly Plan[]>
+    /** The plan on the board, kept by the view toggle when the project has several. */
+    & Define.Prop<'planId', string>
+    & Define.Prop<'onSelectPlan', (id: string) => void>
+    /** New plan from the switcher; absent, it is disabled. */
+    & Define.Prop<'onNewPlan', () => void>;
 
 interface Drag {
     readonly id: number;
@@ -36,6 +45,7 @@ const KEY_STEPS: Readonly<Record<string, BoardStep>> = { ArrowUp: 'up', ArrowDow
 const GLYPH_STATES: Readonly<Record<PlanItem['state'], string>> = { ready: 'Ready', claimed: 'Claimed', 'needs-you': 'Needs you', blocked: 'Blocked', done: 'Done', stuck: 'Stuck' };
 
 export const BoardView = component<BoardViewProps>(({ props }) => {
+    const follow = useFollow();
     const st = signal({ drag: null as Drag | null, pending: null as { id: number; slot: BoardSlot } | null, asking: false, note: '', said: '' });
 
     const nameOf = (actor: PlanActor): string => (actor.kind === 'user' ? props.you : props.lookup(actor.agentId).name);
@@ -243,14 +253,15 @@ export const BoardView = component<BoardViewProps>(({ props }) => {
             <section aria-label="Plan board" data-plan-board="">
                 <header data-plan-board-top>
                     <div>
-                        <h2 data-plan-board-title>{props.title}</h2>
+                        <div data-plan-title-row="" style="display: flex; align-items: center; gap: 6px; min-inline-size: 0">
+                            <h2 data-plan-board-title>{props.title}</h2>
+                            {props.plans
+                                ? <PlanSwitcher compact plans={props.plans} current={props.plans.find((p) => p.id === props.planId)} onSelect={(id: string) => props.onSelectPlan?.(id)} {...(props.onNewPlan ? { onNew: props.onNewPlan } : {})} />
+                                : null}
+                        </div>
                         <p data-plan-board-lede>Board by agent. Drag a card to assign it; the order in a column is the order they work.</p>
                     </div>
-                    <nav data-plan-views aria-label="Plan view">
-                        <Link to={`${base}?view=list`}>List</Link>
-                        <Link to={`${base}?view=board`} aria-current="page">Board</Link>
-                        <Link to={`${base}?view=graph`}>Graph</Link>
-                    </nav>
+                    {PlanViews(props.projectId, 'board', follow, props.plans && props.plans.length > 1 ? props.planId : undefined)}
                 </header>
 
                 <div data-plan-board-columns data-dragging={st.drag ? '' : undefined}>
