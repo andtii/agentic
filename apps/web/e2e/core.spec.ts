@@ -25,8 +25,9 @@ test.describe('core flow', () => {
         await page.goto('/');
         await expect(page.locator('[data-page="home"]')).toBeVisible();
         const needs = page.locator('[data-scope="ag-needs-item"][data-part="root"]');
-        const open = await needs.count();
-        expect(open).toBeGreaterThan(0);
+        // Every row counts: the requests and the pull requests whose move is yours (#967).
+        const open = await page.locator('[data-home-needs] [data-needs-row]').count();
+        expect(await needs.count()).toBeGreaterThan(0);
         await expect(page.locator('[data-scope="drawer"][data-part="panel"][data-l-dock-above] [data-scope="nav-list"] [data-scope="badge"]')).toHaveText(String(open));
         // Approvals first, then input, then interrupted.
         await expect(needs.first()).toHaveAttribute('data-kind', 'approval');

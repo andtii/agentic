@@ -9,10 +9,12 @@ import { machines } from './mock/data';
 import { topbarFor } from './components/topbar';
 import { clientConnection, LiveConnection } from './components/status';
 import { dataMode } from './data-mode';
-import { useViewer } from './actors/defs';
+import { useActorDefs, useViewer } from './actors/defs';
 import { signInOptions } from './api/sign-in.server';
 import { DEV_LOGIN_PATH } from './auth/dev-login';
-import { useNeedsSource } from './pages/inbox';
+import { pullsNeedingYou, useNeedsSource, type PullNeeds } from './pages/inbox';
+import { mockPullNeeds } from './pages/projects/work/pull/links';
+import { PullsFeed, createWorkspacePulls, livePullNeeds, type WorkspacePulls } from './pages/projects/work/pull/LivePulls';
 import { useDesktopNotifications } from './desktop';
 import { projectMenuFor, projectMenuSource } from './pages/projects/layout/menu';
 import { openProjectPicker } from './pages/projects/layout/ProjectPicker';
@@ -110,6 +112,18 @@ const FONTS_HREF = 'https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:w
  * contribution (`components/topbar.ts`) supplies the entity name, the
  * actions, the sub-line and the phone's one right slot.
  */
+/**
+ * The pull requests the shell's Home badge counts (#967): live, every Git project's Pulls actor through a
+ * `PullsFeed` the shell mounts (`feed`); on mock data the Work fixtures (`mockPullNeeds`), as Home reads them.
+ */
+export function useShellPulls(): { readonly needs: PullNeeds; readonly feed?: WorkspacePulls } {
+    if (dataMode() !== 'live') return { needs: mockPullNeeds() };
+    const defs = useActorDefs();
+    const viewer = useViewer()();
+    const feed = createWorkspacePulls();
+    return { needs: livePullNeeds(feed, defs, () => viewer.workspaceId, () => viewer.login), feed };
+}
+
 /** Routes that run edge to edge: the chat, and a session's views under their session bar (#564). */
 const FLUSH_ROUTES = new Set(['chat', 'project-chat', 'session', 'session-changes', 'session-files']);
 /** The desktop app's quick-ask window (#849): the page alone, no shell around it. */
@@ -137,11 +151,15 @@ export const App = component(() => {
     };
     const topbar = () => topbarFor(route);
     const trail = () => trailFor(route, topbar());
-    // The Home badge is "Needs you" itself (#151): the rows Home lists, read from the same source.
+    // The Home badge is "Needs you" itself (#151): the rows Home lists, read from the same source — and, since
+    // Home lists them (#865), the pull requests whose move is yours (#967), so the badge equals Home's "N open".
     const needs = useNeedsSource()().useRows();
+    const shellPulls = useShellPulls();
+    const pulls = shellPulls.needs.usePulls();
+    const badge = (): number => needs().length + pullsNeedingYou(pulls(), shellPulls.needs.me).length;
     // Inside the desktop app (#845): new Inbox notifications become native ones, and the badge follows Home's.
     // Not from the quick-ask window (#849): the main window's page already does it.
-    if (dataMode() === 'live' && route.name !== BARE_ROUTE) useDesktopNotifications(() => needs().length);
+    if (dataMode() === 'live' && route.name !== BARE_ROUTE) useDesktopNotifications(badge);
 
     return () => {
         if (route.name === BARE_ROUTE) return <ThemeProvider><RouterView /></ThemeProvider>;
@@ -151,7 +169,7 @@ export const App = component(() => {
             <ThemeProvider>
                 <AppShell
                     brand="agentic"
-                    groups={withSwitcher(NAV_GROUPS(needs().length, projectMenuFor(route)), route)}
+                    groups={withSwitcher(NAV_GROUPS(badge(), projectMenuFor(route)), route)}
                     currentPath={route.path}
                     flush={FLUSH_ROUTES.has(String(route.name ?? ''))}
                     title={titleOf(crumbs)}
@@ -186,6 +204,7 @@ export const App = component(() => {
                         user: () => (dataMode() === 'live' ? <UserFoot /> : mockUserFoot())
                     }}
                 >
+                    {shellPulls.feed ? <PullsFeed feed={shellPulls.feed} /> : null}
                     {clientConnection() === 'reconnecting' ? <OfflineBanner /> : null}
                     <RouterView />
                 </AppShell>
