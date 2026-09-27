@@ -153,20 +153,39 @@ describe('settings draft', () => {
 
     it('round-trips the actor settings through the draft to the patch', () => {
         const draft = toDraft(settings);
-        expect(draft).toEqual({ timeZone: 'Europe/Stockholm', environmentId: '', inbox: true, push: false, sessionLogDays: '90', artifactDays: '30' });
+        expect(draft).toEqual({ timeZone: 'Europe/Stockholm', runtime: 'anthropic-api', environmentId: '', inbox: true, push: false, sessionLogDays: '90', artifactDays: '30' });
         expect(settingsPatch(draft, ['Europe/Stockholm'])).toEqual({
             timeZone: 'Europe/Stockholm',
             notifications: { inbox: true, push: false },
             defaults: { runtime: 'anthropic-api', environmentId: undefined },
             retention: { sessionLogDays: 90, artifactDays: 30 }
         });
-        expect(settingsPatch({ ...draft, environmentId: 'env_1', sessionLogDays: '7' }, [])).toMatchObject({ defaults: { runtime: 'claude-code', environmentId: 'env_1' }, retention: { sessionLogDays: 7, artifactDays: 30 } });
+        expect(settingsPatch({ ...draft, runtime: 'claude-code', environmentId: 'env_1', sessionLogDays: '7' }, [])).toMatchObject({ defaults: { runtime: 'claude-code', environmentId: 'env_1' }, retention: { sessionLogDays: 7, artifactDays: 30 } });
     });
 
-    it('defaults to the runtime the chosen environment runs, not always Claude Code', () => {
-        const draft = { ...toDraft(settings), environmentId: 'env_copilot' };
-        expect(settingsPatch(draft, [], (id) => (id === 'env_copilot' ? 'copilot-cli' : undefined))?.defaults).toEqual({ runtime: 'copilot-cli', environmentId: 'env_copilot' });
-        expect(settingsPatch({ ...draft, environmentId: 'env_codex' }, [], (id) => (id === 'env_codex' ? 'codex-cli' : undefined))?.defaults).toEqual({ runtime: 'codex-cli', environmentId: 'env_codex' });
+    it('writes the chosen default runtime (#301); a draft without one falls back to the environment\'s runtime', () => {
+        const runtimeOf = (id: string) => (id === 'env_copilot' ? 'copilot-cli' : id === 'env_codex' ? 'codex-cli' : undefined);
+        // A runtime a later plugin adds is written as chosen, not derived from the environment.
+        expect(settingsPatch({ ...toDraft(settings), runtime: 'acme-runtime' }, [])?.defaults).toEqual({ runtime: 'acme-runtime', environmentId: undefined });
+        expect(settingsPatch({ ...toDraft(settings), runtime: 'copilot-cli', environmentId: 'env_copilot' }, [], { runtimeOf })?.defaults).toEqual({ runtime: 'copilot-cli', environmentId: 'env_copilot' });
+        expect(settingsPatch({ ...toDraft(settings), runtime: '', environmentId: 'env_codex' }, [], { runtimeOf })?.defaults).toEqual({ runtime: 'codex-cli', environmentId: 'env_codex' });
+        expect(settingsPatch({ ...toDraft(settings), runtime: '' }, [])?.defaults).toEqual({ runtime: 'anthropic-api', environmentId: undefined });
+    });
+
+    it('refuses a default runtime the default environment cannot run, with a message', () => {
+        const facts = { runtimeOf: (id: string) => (id === 'env_copilot' ? ('copilot-cli' as const) : undefined), daemonHosted: (r: string) => (r === 'anthropic-api' ? false : r === 'claude-code' ? true : undefined) };
+        // The environment runs another runtime.
+        const other = { ...toDraft(settings), runtime: 'claude-code', environmentId: 'env_copilot' };
+        expect(validateDraft(other, [], facts).runtime).toBe('That environment runs copilot-cli: choose copilot-cli, or no default environment.');
+        expect(settingsPatch(other, [], facts)).toBeNull();
+        // A platform runtime on a machine environment whose runtime is not known yet.
+        const platform = { ...toDraft(settings), runtime: 'anthropic-api', environmentId: 'env_new' };
+        expect(validateDraft(platform, [], facts).runtime).toBe('anthropic-api runs on the platform, not on a machine: choose a machine runtime, or no default environment.');
+        expect(settingsPatch(platform, [], facts)).toBeNull();
+        // A machine runtime there, any runtime without an environment, and a runtime nothing is known about pass.
+        expect(validateDraft({ ...platform, runtime: 'claude-code' }, [], facts).runtime).toBeUndefined();
+        expect(validateDraft({ ...platform, environmentId: '' }, [], facts).runtime).toBeUndefined();
+        expect(validateDraft({ ...platform, runtime: 'acme-runtime' }, [], facts).runtime).toBeUndefined();
     });
 
     it('refuses an unknown zone or a retention that is not whole days', () => {
