@@ -136,6 +136,10 @@ afterEach(() => {
 /** Mount a route as ONE browser tab would: refs over the harness transport, the viewer resolved, live mode on. */
 export async function mountLive(path: string, harness: LiveHarness, tree: JSXElement = <RouterView />): Promise<HTMLDivElement> {
     setDataMode('live');
+    // A new tab starts with no restored reads (#971): `useData` seeds a cell from the page-global `__SIGX_ASYNC__`
+    // map before it fetches, so an earlier mount's cached read (a Pulls `get` from before a poll) would otherwise be
+    // served here as is, and whether it ever freshened hung on this app's live stream beating the test's deadline.
+    delete (globalThis as { __SIGX_ASYNC__?: unknown }).__SIGX_ASYNC__;
     const router = createServerRouter(path);
     await router.isReady();
     const container = document.createElement('div');
