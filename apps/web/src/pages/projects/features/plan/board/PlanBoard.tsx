@@ -13,7 +13,8 @@ import { usePlanNav } from '../shared/parts';
 import { planOf } from '../shared/model';
 import { assignIndex, boardColumns, columnOf, moveItem, needsHandoff, type BoardSlot } from './model';
 
-const YOU: PlanActor = { kind: 'user', userId: 'me' };
+const ME = 'me';
+const YOU: PlanActor = { kind: 'user', userId: ME };
 
 /** On mock data: the board artboard's plan; drags change it for the page's lifetime. */
 const MockPlanBoard = component<ProjectPageProps>(({ props }) => {
@@ -24,7 +25,7 @@ const MockPlanBoard = component<ProjectPageProps>(({ props }) => {
         st.items = moveItem(st.items, id, slot, { you: YOU, at: Date.now(), ...(note ? { note } : {}) });
     };
     return () => (
-        <BoardView projectId={props.project.id} title={plan?.title ?? 'Plan'} items={st.items} members={props.project.members} lookup={agentNamed} you={USER.name} now={now} onMove={move} />
+        <BoardView projectId={props.project.id} title={plan?.title ?? 'Plan'} items={st.items} members={props.project.members} lookup={agentNamed} you={USER.name} me={ME} now={now} onMove={move} />
     );
 }, { name: 'MockPlanBoard' });
 
@@ -62,8 +63,8 @@ const LivePlanBoard = component<ProjectPageProps>(({ props }) => {
             void writes.handoff(id, to, note.trim());
             return;
         }
-        if (columnOf(item) === slot.column && slot.column === 'open') return;
-        void writes.assign(id, to, to === null ? undefined : assignIndex(item, slot, boardColumns(all, props.project.members, now)));
+        if (columnOf(item, me ?? '') === slot.column && slot.column === 'open') return;
+        void writes.assign(id, to, to === null ? undefined : assignIndex(item, slot, boardColumns(all, props.project.members, now, me ?? '')));
     };
     return () => {
         const doc = planOf(store.docs(), route.query.plan);
@@ -78,6 +79,7 @@ const LivePlanBoard = component<ProjectPageProps>(({ props }) => {
                     members={props.project.members}
                     lookup={directory.lookup}
                     you="You"
+                    me={viewer.userId ?? ''}
                     now={Date.now()}
                     onMove={move}
                     plans={store.docs().map((d) => d.plan)}

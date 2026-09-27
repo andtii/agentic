@@ -24,7 +24,7 @@ import { Icon, StatusPill } from '@agentic/ui';
 import { useActorDefs } from '../../../actors/defs';
 import { requestsKeyOf } from '../../../actors/keys';
 import { refIcon, refLabel } from '../../projects/features/plan/shared/model';
-import { requestPill } from '../../projects/requests/model';
+import { issueLinkOf, requestPill } from '../../projects/requests/model';
 import { usePlanItems } from '../../projects/work/live';
 
 /** An agent's display name by id, when the caller can resolve it. */
@@ -94,6 +94,7 @@ export const RequestCard = component<RequestCardProps>(({ props }) => () => {
     const home = props.homeProjectName?.toLowerCase();
     const waiting = home ? r.refs.flatMap((ref) => (ref.kind === 'project-item' && ref.project.toLowerCase() === home ? [projectItemRef(ref.project, ref.n)] : [])) : [];
     const filed = acceptedAt(r) !== undefined ? projectItemRef(props.toProjectName, r.resultItem!) : undefined;
+    const issue = issueLinkOf(r);
     const request = props.part !== 'result';
     const result = props.part !== 'request' && filed !== undefined;
     if (!request && !result) return null;
@@ -120,6 +121,7 @@ export const RequestCard = component<RequestCardProps>(({ props }) => () => {
                         <div data-requests-row-meta="">
                             <span data-requests-chip="project"><Icon name="folder" size={12} />{filed}</span>
                             <span data-requests-dim="">{r.triage?.proposedItem?.title ?? r.title}</span>
+                            {issue ? <a data-chat-request-issue="" href={issue.href} target="_blank" rel="noopener noreferrer"><Icon name="link" size={12} />{issue.label}</a> : null}
                             <span data-requests-detail-age=""><Link to="/projects/links">Track</Link></span>
                         </div>
                         <FiledItem projectId={r.toProject} n={r.resultItem!} projectName={props.toProjectName} {...(props.agentName ? { agentName: props.agentName } : {})} />

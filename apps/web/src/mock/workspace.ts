@@ -288,7 +288,40 @@ export const CHATS: readonly MockChatSummary[] = [
     { id: 'c6', title: 'Empty chat', members: [{ agentId: 'scout', status: 'idle', history: { access: 'all' } }], lastLine: '', unread: 0, waiting: false, updatedAt: hoursAgo(30) }
 ];
 
-export const chatSummary = (id: string): MockChatSummary | undefined => CHATS.find((c) => c.id === id);
+/** A project Chats row's chat (#731, #963): the summary, who spoke last (an agent id, or `you`), and whether it is archived. */
+export interface MockProjectChat extends MockChatSummary {
+    readonly speaker: string;
+    readonly archived?: boolean;
+}
+
+/** A project chat's members: the speaker waits on an open question or works, everyone else is idle. */
+const pcMembers = (agentIds: readonly string[], speaker: string, status: 'waiting' | 'active' | 'idle', coordinator?: string): MockChatMember[] =>
+    agentIds.map((agentId) => ({
+        agentId,
+        status: agentId === speaker ? status : 'idle',
+        ...(agentId === coordinator ? { coordinator: true } : {}),
+        history: { access: 'all' as const }
+    }));
+
+/**
+ * The chats the project Chats board lists (`mock/projects/chats.ts` draws its rows from these), loadable like any other
+ * mock chat so `/projects/:id/chats/pc1` opens it (#963). Not in `CHATS`: the global chat list keeps its own sample.
+ */
+export const PROJECT_CHATS: readonly MockProjectChat[] = [
+    { id: 'pc1', title: 'Release notes for 0.4', speaker: 'forge', lastLine: 'Should the plugin kind rename go under Breaking? It changes manifests.', members: pcMembers(['atlas', 'forge'], 'forge', 'waiting', 'atlas'), unread: 1, waiting: true, updatedAt: minutesAgo(12), projectId: 'p_agentic' },
+    { id: 'pc2', title: 'Usage rings on the member card', speaker: 'forge', lastLine: 'size-limit failed, trimming the ring SVG and pushing again', members: pcMembers(['forge'], 'forge', 'active'), unread: 0, waiting: false, updatedAt: minutesAgo(4), projectId: 'p_agentic' },
+    { id: 'pc3', title: 'Plan the Projects restructure', speaker: 'atlas', lastLine: 'Split into 4 tasks, Forge takes the nav, Lint the tests', members: pcMembers(['atlas', 'forge', 'lint'], 'atlas', 'active', 'atlas'), unread: 0, waiting: false, updatedAt: minutesAgo(9), projectId: 'p_agentic' },
+    { id: 'pc4', title: 'Drawer behaviour on tablets', speaker: 'you', lastLine: 'ok ship it as long as the spec covers 768', members: pcMembers(['forge', 'lint'], 'you', 'idle'), unread: 0, waiting: false, updatedAt: minutesAgo(120), projectId: 'p_agentic' },
+    { id: 'pc5', title: 'Why is nuc-lab offline?', speaker: 'atlas', lastLine: 'Daemon lost its token after the reboot. Re-pair when you are home.', members: pcMembers(['atlas'], 'atlas', 'idle', 'atlas'), unread: 0, waiting: false, updatedAt: minutesAgo(180), projectId: 'p_agentic' },
+    { id: 'pc6', title: 'Size budget for the shell', speaker: 'lint', lastLine: 'Budget raised to 42 kB, noted in the PR.', members: pcMembers(['lint'], 'lint', 'idle'), unread: 0, waiting: false, archived: true, updatedAt: minutesAgo(60 * 24 * 3), projectId: 'p_agentic' },
+    { id: 'pc7', title: 'Worktree per chat', speaker: 'forge', lastLine: 'Merged. Worktrees now park on release.', members: pcMembers(['forge'], 'forge', 'idle'), unread: 0, waiting: false, archived: true, updatedAt: minutesAgo(60 * 24 * 5), projectId: 'p_agentic' },
+    { id: 'pc8', title: 'Blog post outline', speaker: 'scout', lastLine: 'Three sections, draft by Friday.', members: pcMembers(['scout'], 'scout', 'idle'), unread: 0, waiting: false, updatedAt: minutesAgo(300), projectId: 'p_docs' },
+    { id: 'pc9', title: 'Try the new MCP inspector', speaker: 'forge', lastLine: 'It lists every tool agentic serves, with scopes.', members: pcMembers(['forge'], 'forge', 'idle'), unread: 0, waiting: false, updatedAt: minutesAgo(45) },
+    { id: 'pc10', title: 'Compare A2A clients', speaker: 'scout', lastLine: 'Two of them talk to agentic out of the box.', members: pcMembers(['scout'], 'scout', 'idle'), unread: 0, waiting: false, updatedAt: minutesAgo(200) },
+    { id: 'pc11', title: 'Lunch spots near the office', speaker: 'atlas', lastLine: 'The ramen place opens at 11.', members: pcMembers(['atlas'], 'atlas', 'idle', 'atlas'), unread: 0, waiting: false, updatedAt: minutesAgo(400) }
+];
+
+export const chatSummary = (id: string): MockChatSummary | undefined => CHATS.find((c) => c.id === id) ?? PROJECT_CHATS.find((c) => c.id === id);
 
 /** The transcript view of a chat: the messages, who wrote each, what each tool call's meta is, and the approval context. */
 export interface MockChatView {
@@ -383,6 +416,15 @@ function withCuts(view: Omit<MockChatView, 'chat' | 'tasks'>, cuts: readonly (re
         authors[id] = authorFor(agentId, minutes);
     });
     return { ...view, authors };
+}
+
+/** A project chat's thread (#963): its last line, by the person or the agent who wrote it. */
+function projectChatTranscript(c: MockProjectChat): Omit<MockChatView, 'chat' | 'tasks'> {
+    const minutes = Math.round((MOCK_NOW - c.updatedAt) / 60_000);
+    if (c.speaker !== 'you') return plainTranscript(c.id, c.speaker, minutes, c.lastLine);
+    const transcript = createTranscript(`s_chat_${c.id}`);
+    transcript.messages.push({ id: 'm1', role: 'user', author: USER.name, parts: [{ type: 'text', text: c.lastLine }] });
+    return { transcript, authors: { m1: { name: USER.name, person: true, time: at(minutes) } }, toolMeta: {}, approvals: {} };
 }
 
 // ---- sessions ---------------------------------------------------------------
@@ -627,8 +669,11 @@ export function loadChat(id: string): MockChatView | undefined {
             return { chat, tasks, ...withCuts(plainTranscript(id, 'lint', 300, 'Runbook section 3 reads fine now.'), tasks.flatMap((t) => (t.interruption ? [[t.agentId, Math.round((MOCK_NOW - t.createdAt) / 60_000), t.interruption] as const] : []))) };
         case 'c5':
             return { chat, tasks, ...plainTranscript(id, 'atlas', 27 * 60, 'Reminder set for 15:00.') };
-        default:
+        default: {
+            const pc = PROJECT_CHATS.find((c) => c.id === id);
+            if (pc) return { chat, tasks, ...projectChatTranscript(pc) };
             return { chat, tasks, ...plainTranscript(id, chat.members[0]?.agentId ?? 'atlas', 0, '') };
+        }
     }
 }
 

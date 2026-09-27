@@ -15,7 +15,7 @@ import { AgentTile, Button, Icon, Segmented, SelectField, StatusPill, Switch, Sw
 import { Age } from '../../../components/Age';
 import { refIcon, refLabel } from '../features/plan/shared/model';
 import {
-    BOX_LABELS, PRIORITY_LABELS, REQUEST_BOXES, actorName, boxCount, draftErrors, draftOf, entriesIn, githubRepoOf, itemMeta, itemOfDraft,
+    BOX_LABELS, PRIORITY_LABELS, REQUEST_BOXES, actorName, boxCount, draftErrors, draftOf, entriesIn, githubRepoOf, issueLinkOf, itemMeta, itemOfDraft,
     kindLine, phaseName, requestPill, senderLine, whyYou, type ActorNames, type ItemDraft, type RequestBox, type RequestEntry
 } from './model';
 
@@ -289,7 +289,15 @@ export const RequestsView = component<RequestsViewProps>(({ props }) => {
 
     const outcome = (e: RequestEntry) => {
         const r = e.request;
-        if (r.state === 'accepted') return <p data-requests-outcome="accepted">{`Accepted as ${e.toProjectName}#${r.resultItem ?? '?'}.`}</p>;
+        if (r.state === 'accepted') {
+            const issue = issueLinkOf(r);
+            return (
+                <p data-requests-outcome="accepted">
+                    {`Accepted as ${e.toProjectName}#${r.resultItem ?? '?'}.`}
+                    {issue ? <> Issue <a data-requests-issue="" href={issue.href} target="_blank" rel="noopener noreferrer">{issue.label}</a></> : null}
+                </p>
+            );
+        }
         if (r.state === 'declined') return <p data-requests-outcome="declined">{`Declined: ${r.declineReason ?? ''}`}</p>;
         if (r.state === 'asked-for-more') return <p data-requests-outcome="asked">{e.note ?? `${props.manager} asked ${e.fromProjectName} for more.`}</p>;
         return null;

@@ -198,3 +198,22 @@ export function decline(e: RequestEntry, reason: string, now: number): RequestEn
 export function nextItemNumber(entries: readonly RequestEntry[], floor: number): number {
     return Math.max(floor, ...entries.map((e) => e.request.resultItem ?? 0)) + 1;
 }
+
+// ---- the opened GitHub issue ---------------------------------------------------------------------------------------
+
+/** The GitHub issue an accepted request opened (#932), as a link: `owner/repo#12`, or the URL itself for any other https URL. */
+export interface IssueLink {
+    readonly href: string;
+    readonly label: string;
+}
+
+/**
+ * The issue link a request carries (#963): the platform's `issueUrl` (on the live read, not on the core record), only
+ * an `https:` one — anything else is not drawn as a link. `undefined` when the request has none.
+ */
+export function issueLinkOf(r: ProjectRequest): IssueLink | undefined {
+    const url = (r as ProjectRequest & { issueUrl?: unknown }).issueUrl;
+    if (typeof url !== 'string' || !/^https:\/\//i.test(url)) return undefined;
+    const m = /^https:\/\/github\.com\/([^/]+)\/([^/]+)\/issues\/(\d+)\/?$/i.exec(url);
+    return { href: url, label: m ? `${m[1]}/${m[2]}#${m[3]}` : url };
+}

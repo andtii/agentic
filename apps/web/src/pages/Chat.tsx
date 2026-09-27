@@ -1,20 +1,26 @@
 import { component, onMounted, onUnmounted, signal, watch } from 'sigx';
-import type { WorkdirRef } from '@agentic/core';
+import type { ProjectId, WorkdirRef } from '@agentic/core';
 import { Link, useRoute, useRouter } from '@sigx/router';
 import type { ToolPartState } from '@sigx/ai-agent';
 import { Drawer } from '@sigx/zero';
-import { Button, Composer, EmptyState, NOBODY_HINT, Tag, Thread, type ComposerInsert, type Mention } from '@agentic/ui';
+import { visitingManagers } from '@agentic/platform';
+import { Button, Composer, EmptyState, NOBODY_HINT, Tag, Thread, type ComposerInsert, type Mention, type RefSource } from '@agentic/ui';
 import { Page } from '../components/Page';
 import { defineTopbar, routeId, type TopbarContribution } from '../components/topbar';
 import { mockChatPosts } from '../mock/chat-posts';
-import { PROJECTS, USER, agentNamed, chatSessionOf, formatTime, loadChat, loadChats, mentionedIn, projectNamed, resolveAddressing, type MockChatSummary } from '../mock/workspace';
+import { MOCK_WORK } from '../mock/projects/work';
+import { mockPlansOf } from './projects/features/plan/shared/data';
+import { planItemsOf } from './projects/work/live';
+import { projectFeatureCatalogue } from '../plugins/features';
+import { AGENTS, PROJECTS, USER, agentNamed, chatSessionOf, formatTime, loadChat, loadChats, projectNamed, type MockChatSummary } from '../mock/workspace';
 import { ChatList, MemberTiles } from './chat/ChatList';
 import { ContextPanel } from './chat/ContextPanel';
 import { closeContextDrawer, contextDrawer, openContextDrawer } from './chat/context-drawer';
 import { dataMode } from '../data-mode';
 import { chatHead, openChatSettings, toggleChatSearch } from './chat/head';
 import { chatIdOfRoute, chatRedirect } from './chat/href';
-import { lookupOver } from './chat/live';
+import { lookupOver, type AgentLookup } from './chat/live';
+import { chatAddressing, chatRefSources, chipPrefixes, contextChips, type ChatFeatureView } from './chat/project-context';
 import { LiveChat } from './chat/LiveChat';
 import { chatPullLinks } from './projects/work/pull/links';
 import { mockWorkdirEnvironments } from './workdir/environments';
@@ -26,6 +32,24 @@ export function memberSummary(chat: Pick<MockChatSummary, 'members'>): string {
     const count = (status: string) => chat.members.filter((m) => m.status === status).length;
     const parts = [count('waiting') ? `${count('waiting')} waiting` : '', count('active') ? `${count('active')} active` : ''].filter(Boolean);
     return parts.length ? parts.join(' · ') : `${chat.members.length} ${chat.members.length === 1 ? 'member' : 'members'}`;
+}
+
+/** The sample workspace's agents as the live pages look them up. */
+const mockLookup: AgentLookup = lookupOver(Object.fromEntries(AGENTS.map((a) => [a.id, a])));
+
+/**
+ * The mock composer's `#` / `pr:` suggestions (#963, as the live page's #940): the prefixes the project's features add,
+ * over the project's mock plans' items (as the Plan pages draw them) and pull requests. None outside a project.
+ */
+export function mockChatRefs(projectId: string | undefined): RefSource[] {
+    const project = projectId ? projectNamed(projectId) : undefined;
+    if (!project) return [];
+    const enabled = Object.keys(project.features);
+    const views: ChatFeatureView[] = enabled.flatMap((id) => {
+        const manifest = projectFeatureCatalogue[id]?.manifest;
+        return manifest?.ui ? [{ id, name: manifest.name, ui: manifest.ui }] : [];
+    });
+    return chatRefSources(chipPrefixes(contextChips(enabled, views)), planItemsOf(mockPlansOf(project.id).map((d) => d.plan)), MOCK_WORK[project.id]?.pulls ?? []);
 }
 
 const tasksButton = () => <Button intent="icon" icon="tree" label="Tasks in this chat" class="ag-chat-tasks" onClick={openContextDrawer} />;
@@ -145,11 +169,18 @@ export const ChatScreen = component<{ id: string; projectId?: string }>(({ props
                 </Page>
             );
         }
-        const addressing = resolveAddressing(v.chat.members, mentionedIn(st.draft, v.chat.members));
+        // As the live page (#940): a visiting manager the draft `@`s shows in To with its project before it joins.
+        const managers = visitingManagers(PROJECTS, v.chat.projectId as ProjectId | undefined);
+        const addressing = chatAddressing(v.chat.members, st.draft, managers, mockLookup);
         const mentions: Mention[] = v.chat.members.map((m) => {
             const a = agentNamed(m.agentId);
             return { id: a.name, label: a.name, description: a.role };
         });
+        for (const m of managers) {
+            if (v.chat.members.some((x) => x.agentId === m.agentId)) continue;
+            const a = mockLookup(m.agentId);
+            mentions.push({ id: a.name, label: a.name, description: `${m.projectName} · project manager` });
+        }
         const empty = v.transcript.messages.length === 0;
         const project = v.chat.projectId ? projectNamed(v.chat.projectId) : undefined;
         return (
@@ -176,6 +207,7 @@ export const ChatScreen = component<{ id: string; projectId?: string }>(({ props
                             recipients={addressing.recipients}
                             hint={addressing.recipients.length ? addressing.hint : NOBODY_HINT}
                             mentions={mentions}
+                            refs={mockChatRefs(v.chat.projectId)}
                             placeholder="Message the chat. @ to address an agent, otherwise the coordinator answers."
                             {...(mention.insert ? { insert: mention.insert } : {})}
                             onDraft={(draft: string) => { st.draft = draft; }}
