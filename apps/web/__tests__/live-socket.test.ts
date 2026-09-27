@@ -1,5 +1,6 @@
 import type { ActorSubscription, ActorTransport } from '@sigx/actors/client';
-import { actorSocketPath, liveOverSockets } from '../src/actors/live-socket';
+import type { SocketHandlers } from '@sigx/actors-ws/client';
+import { actorSocketPath, liveOverSockets, reportingConnect } from '../src/actors/live-socket';
 
 /** A fake socket transport per actor, counting subscriptions and closes. */
 function fakeSockets() {
@@ -58,5 +59,53 @@ describe('liveOverSockets', () => {
 
     it('encodes both path segments', () => {
         expect(actorSocketPath('task', 'ws/1:t 2')).toBe('/_sigx/socket/task/ws%2F1%3At%202');
+    });
+
+    describe('reportingConnect (the connection pill, OPS-04)', () => {
+        /** A connection whose events the test fires by hand. */
+        function fakeLink() {
+            let handlers!: SocketHandlers;
+            const sent: string[] = [];
+            let closes = 0;
+            const connect = (h: SocketHandlers) => ((handlers = h), { send: (m: string) => void sent.push(m), close: () => void closes++ });
+            return { connect, sent, fire: () => handlers, closes: () => closes };
+        }
+
+        it('says open on open and dropped on a close nobody asked for, passing every event through', () => {
+            const said: string[] = [];
+            const events: string[] = [];
+            const link = fakeLink();
+            const conn = reportingConnect(link.connect, { onOpen: () => said.push('open'), onDrop: () => said.push('drop') })({
+                onOpen: () => events.push('open'),
+                onMessage: (m) => events.push(`msg ${m}`),
+                onClose: () => events.push('close')
+            });
+            link.fire().onOpen();
+            link.fire().onMessage('x');
+            conn.send('y');
+            link.fire().onClose();
+            expect(said).toEqual(['open', 'drop']);
+            expect(events).toEqual(['open', 'msg x', 'close']);
+            expect(link.sent).toEqual(['y']);
+        });
+
+        it('a close the transport made itself is not a drop', () => {
+            const said: string[] = [];
+            const link = fakeLink();
+            const conn = reportingConnect(link.connect, { onOpen: () => said.push('open'), onDrop: () => said.push('drop') })({ onOpen: () => {}, onMessage: () => {}, onClose: () => {} });
+            link.fire().onOpen();
+            conn.close();
+            link.fire().onClose();
+            expect(link.closes()).toBe(1);
+            expect(said).toEqual(['open']);
+        });
+
+        it('a dial that never opened is a drop: the transport is retrying', () => {
+            const said: string[] = [];
+            const link = fakeLink();
+            reportingConnect(link.connect, { onDrop: () => said.push('drop') })({ onOpen: () => {}, onMessage: () => {}, onClose: () => {} });
+            link.fire().onClose();
+            expect(said).toEqual(['drop']);
+        });
     });
 });
