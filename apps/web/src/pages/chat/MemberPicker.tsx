@@ -56,7 +56,7 @@ export const MemberPicker = component<MemberPickerProps>(({ props, emit }) => ()
                             {props.environments ? <span data-new-chat-quota><QuotaBadge {...memberQuota(a, props.quotaEnvironmentOf?.(a), props.environments, props.quotaMachine)} {...(a.model ? { model: a.model } : {})} /></span> : null}
                         </Checkbox.Root>
                         {picked && group ? (
-                            <RadioGroup.Root data-new-chat-coordinator-pick="" name="coordinator" model={() => bind.coordinator} onValueChange={(id: unknown) => emit('pickCoordinator', String(id))}>
+                            <RadioGroup.Root data-new-chat-coordinator-pick="" name="coordinator" model={() => bind.coordinator} onValueChange={(id: unknown) => { if (typeof id === 'string' && id) emit('pickCoordinator', id); }}>
                                 <RadioGroup.Item value={a.id}>Coordinator</RadioGroup.Item>
                             </RadioGroup.Root>
                         ) : null}

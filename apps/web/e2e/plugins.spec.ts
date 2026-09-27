@@ -52,7 +52,9 @@ test.describe('plugins', () => {
         expect(await boxes.count()).toBeGreaterThan(0);
         for (const box of await boxes.all()) await expect(box).not.toBeChecked();
         await expect(step.getByRole('button', { name: 'Add to agents' })).toBeDisabled();
-        await boxes.first().check();
+        // zero's checkbox keeps its input visually hidden: pick the agent by its row, as a user does.
+        await step.locator('[data-add-agent]').first().click();
+        await expect(boxes.first()).toBeChecked();
         await step.getByRole('button', { name: 'Add to 1 agent' }).click();
         await expect(page).toHaveURL(/\/plugins\/gmail$/);
     });
