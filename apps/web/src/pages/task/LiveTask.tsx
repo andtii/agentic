@@ -29,7 +29,7 @@ import { Panel } from '../../components/Panel';
 import { FailureNotice, failureOf, interruptionLine, interruptionOf, isResumeWait, machineOfflineDetail, machineOfflineText, useInterruptionReads, useMachineNames, type ClockText } from '../../components/status';
 import { useActorDefs, useViewer } from '../../actors/defs';
 import { routingKeyOf, taskKeyOf } from '../../actors/keys';
-import { formatTime } from '../../mock/workspace';
+import { useWorkspaceZone, zoneFormat } from '../../time';
 import { useAgentDirectory } from '../chat/directory';
 import { PullsFeed, createWorkspacePulls, taskPullOf } from '../projects/work/pull/LivePulls';
 
@@ -60,7 +60,7 @@ export function transitionText(t: TaskTransition): string {
  * The wait line under a node (`TaskNode.waitDetail`): a resume wait says the work is uncertain; a machine-offline
  * wait (#366) names the machine, since when, and when it fails.
  */
-export function waitDetailOf(wait: WaitReason | undefined, machineName?: (id: string) => string | undefined, time: ClockText = formatTime): string | undefined {
+export function waitDetailOf(wait: WaitReason | undefined, machineName?: (id: string) => string | undefined, time: ClockText = (at) => zoneFormat().time(at)): string | undefined {
     if (isResumeWait(wait)) return 'interrupted · uncertain';
     if (wait?.kind === 'environment-offline') return `${wait.environmentId} offline · ${wait.policy}`;
     if (wait?.kind === 'machine-offline') return machineOfflineDetail(wait, machineName?.(wait.machineId), time);
@@ -93,6 +93,8 @@ export const LiveTask = component<{ id: string }>(({ props }) => {
     const tree = useActorState(defs.TaskActor, () => { const k = key(); return k && ([k, 'tree'] as const); }, { live: true });
     const cuts = useInterruptionReads(defs, viewer, () => props.id);
     const machineName = useMachineNames(defs, viewer);
+    const zone = useWorkspaceZone(defs, viewer);
+    const time: ClockText = (at) => zoneFormat(zone()).time(at);
     const pulls = createWorkspacePulls();
     const st = signal({ error: '', recovering: false });
     const fail = (e: unknown): void => { st.error = e instanceof Error ? e.message : String(e); };
@@ -155,7 +157,7 @@ export const LiveTask = component<{ id: string }>(({ props }) => {
                     <div data-tree-nodes>
                         {nodes.map((n) => {
                             const a = directory.lookup(n.assignee);
-                            const detail = waitDetailOf(n.wait, machineName);
+                            const detail = waitDetailOf(n.wait, machineName, time);
                             const pull = taskPullOf(prs, n.id);
                             return (
                                 <TaskNode
@@ -176,7 +178,7 @@ export const LiveTask = component<{ id: string }>(({ props }) => {
                     </div>
                     {t.notStopped.length ? <p data-not-stopped role="status">Could not be stopped: {t.notStopped.join(', ')}</p> : null}
                     {failure ? <FailureNotice state={failure} onResume={() => { void resume(); }} busy={st.recovering} /> : null}
-                    {offline ? <p data-task-wait role="status">{machineOfflineText(offline, machineName(offline.machineId), formatTime)} <Link to={`/machines/${offline.machineId}`}>Open machine</Link></p> : null}
+                    {offline ? <p data-task-wait role="status">{machineOfflineText(offline, machineName(offline.machineId), time)} <Link to={`/machines/${offline.machineId}`}>Open machine</Link></p> : null}
                     {!failure && interruption?.resume === 'resumed' ? <p data-interruption-note role="note">{interruptionLine(interruption)}</p> : null}
                     {st.error ? <ErrorNote data-chat-error="">{st.error}</ErrorNote> : null}
                 </section>
@@ -195,7 +197,7 @@ export const LiveTask = component<{ id: string }>(({ props }) => {
                         ]} />
                     </Panel>
                     <Panel label="Transitions">
-                        <TimelineList label="Transitions" entries={t.transitions.map((row, i) => ({ id: `${t.id}-${i}`, text: transitionText(row), time: formatTime(row.at), tone: TONES[row.to] }))} />
+                        <TimelineList label="Transitions" entries={t.transitions.map((row, i) => ({ id: `${t.id}-${i}`, text: transitionText(row), time: time(row.at), tone: TONES[row.to] }))} />
                     </Panel>
                     <Panel label="Result" slots={{ aside: () => <StatusPill status={result?.verified ? 'verified' : 'not-verified'} /> }}>
                         <p data-result-text>{result?.text ?? (t.error ? `${t.error.code}: ${t.error.message}` : `No result yet. When ${assignee.name} reports one it stays “claimed” until a verification step or you confirm it.`)}</p>
