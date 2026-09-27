@@ -75,10 +75,11 @@ describe('the shell (live)', () => {
 });
 
 describe('the shell (mock)', () => {
-    it('keeps the design workspace: three need you, nobody to sign out', async () => {
+    it('keeps the design workspace: three requests and two pull requests need you, nobody to sign out', async () => {
         const dom = await mountAt('/', <App />);
         await tick();
-        expect(badge(dom)).toBe('3');
+        // The design workspace's three requests plus the Work fixtures' two pull requests whose move is yours (#967).
+        expect(badge(dom)).toBe('5');
         expect(signOut(dom)).toBeNull();
     });
 });
