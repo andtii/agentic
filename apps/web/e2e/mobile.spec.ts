@@ -36,6 +36,9 @@ test.describe('phone', () => {
     test.skip(({ viewport }) => (viewport?.width ?? 0) >= 768, 'the phone regime');
 
     test('no route scrolls horizontally at 400, and the app bar is 60 px on base-200 with page padding 16', async ({ page }) => {
+        // Every route is a full navigation against the Vite dev server, cold-compiling its modules on first hit:
+        // 21 of them ran 13-23 s locally and past the default 30 s on a busy CI runner. Budget per route, not per test.
+        test.setTimeout(ROUTES.length * 6_000);
         const errors: string[] = [];
         page.on('pageerror', (e) => errors.push(String(e)));
         for (const path of ROUTES) {
