@@ -5,6 +5,8 @@
  */
 import { component, signal, watch, type Define } from 'sigx';
 import { useRouter } from '@sigx/router';
+import { Select } from '@sigx/zero';
+import { Field } from '@sigx/zero-daisyui/components';
 import type { FsWorktreeEntry } from '@agentic/core';
 import { changesHref, displayRoot, filesHref, type SessionFiles, type SessionView } from './files';
 
@@ -52,17 +54,23 @@ export const WorktreePicker = component<WorktreePickerProps>(({ props }) => {
         // One worktree, or none known: nothing to switch between.
         if (st.entries.length < 2) return null;
         const shown = shownWorktree(st.entries, props.files);
+        // The route owns the choice: zero writes into this throwaway binding, `go` navigates.
+        const bind = signal<{ path: string | null }>({ path: shown?.path ?? null });
         return (
-            <label data-worktree-picker>
-                <span data-worktree-picker-label>Worktree</span>
-                <select data-scope="select" data-part="select" value={shown?.path ?? ''} onChange={(e: Event) => go((e.target as HTMLSelectElement).value)}>
-                    {st.entries.map((w) => (
-                        <option value={w.path} disabled={!!w.outside || !!w.prunable} title={displayRoot(w.path)}>
-                            {worktreeLabel(w)}
-                        </option>
-                    ))}
-                </select>
-            </label>
+            <div data-worktree-picker>
+                <Field.Root>
+                    <Field.Label data-worktree-picker-label="">Worktree</Field.Label>
+                    <Select.Root
+                        name="worktree"
+                        model={() => bind.path}
+                        items={st.entries}
+                        itemValue={(w: FsWorktreeEntry) => w.path}
+                        itemLabel={worktreeLabel}
+                        itemDisabled={(w: FsWorktreeEntry) => !!w.outside || !!w.prunable}
+                        onValueChange={(path: unknown) => { if (typeof path === 'string' && path) go(path); }}
+                    />
+                </Field.Root>
+            </div>
         );
     };
 });

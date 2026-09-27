@@ -17,7 +17,8 @@
  */
 import { component, onMounted, onUnmounted, signal, useHead, watch, type Define } from 'sigx';
 import { Link, useRoute, useRouter } from '@sigx/router';
-import { AgentTile, Button, CategoryMenu, ConnectorTile, Icon, Label, SearchField, Segmented, Tag, type AgentHue } from '@agentic/ui';
+import { Checkbox } from '@sigx/zero-daisyui/components';
+import { AgentTile, Button, CategoryMenu, ConnectorTile, ErrorNote, Icon, Label, SearchField, Segmented, Tag, type AgentHue } from '@agentic/ui';
 import { CONNECTOR_CATEGORIES, CONNECTOR_LISTINGS, categoryCounts, listingPluginId, listingsByCategory, type ConnectorListing } from '../../../plugins/listings';
 import { AddConnectorDialog, type AddConnectorRequest } from '../AddConnectorDialog';
 import type { ConnectorDraft, ConnectorProbe } from '../connector';
@@ -329,7 +330,7 @@ export const AddConnectorView = component<AddConnectorViewProps>(({ props }) => 
                     ) : (
                         <Button intent="primary" block loading={st.busy} disabled={st.busy} onClick={() => { void connect(listing); }}>Connect {listing.name}</Button>
                     )}
-                    {st.error ? <p data-chat-error role="alert">{st.error}</p> : null}
+                    {st.error ? <ErrorNote data-chat-error="">{st.error}</ErrorNote> : null}
                     <p data-dim>{isConnected ? 'Already connected. Add it to agents from their Config.' : 'Next: sign in, then choose which agents get it.'}</p>
                 </div>}
             </aside>
@@ -340,7 +341,6 @@ export const AddConnectorView = component<AddConnectorViewProps>(({ props }) => 
         // A listing renamed on the way in (Sentry → `sentry-eu`) was installed under its own id: name it by that, not the listing.
         const name = listing && listingPluginId(listing) === pluginId ? listing.name : pluginId;
         const agents = props.port.agents();
-        const toggle = (id: string, on: boolean): void => { st.picked = on ? [...st.picked.filter((x) => x !== id), id] : st.picked.filter((x) => x !== id); };
         return (
             <div data-add-main data-add-step="agents">
                 <header data-add-head>
@@ -353,16 +353,15 @@ export const AddConnectorView = component<AddConnectorViewProps>(({ props }) => 
                     <fieldset data-add-agents>
                         <legend data-visually-hidden>Agents that get {name}</legend>
                         {agents.map((a) => (
-                            <label data-add-agent={a.id}>
-                                <input type="checkbox" name="agent" value={a.id} checked={st.picked.includes(a.id)} onChange={(e: Event) => toggle(a.id, (e.target as HTMLInputElement).checked)} />
+                            <Checkbox.Root data-add-agent={a.id} name="agent" value={a.id} model={() => st.picked}>
                                 <AgentTile name={a.name} {...(a.hue ? { hue: a.hue } : {})} size={32} />
                                 <span data-add-agent-name>{a.name}</span>
                                 {a.role ? <span data-dim>{a.role}</span> : null}
-                            </label>
+                            </Checkbox.Root>
                         ))}
                     </fieldset>
                 )}
-                {st.saveError ? <p data-chat-error role="alert">{st.saveError}</p> : null}
+                {st.saveError ? <ErrorNote data-chat-error="">{st.saveError}</ErrorNote> : null}
                 <div data-add-step-actions>
                     <Button intent="primary" loading={st.saving} disabled={st.saving || st.picked.length === 0} onClick={() => { void save(pluginId, name); }}>
                         {st.picked.length ? `Add to ${st.picked.length} ${st.picked.length === 1 ? 'agent' : 'agents'}` : 'Add to agents'}

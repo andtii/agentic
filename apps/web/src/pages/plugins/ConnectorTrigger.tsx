@@ -17,7 +17,7 @@ import { component, signal, useData, watch, type Define, type JSXElement } from 
 import { actor } from '@sigx/actors';
 import { useActorState } from '@sigx/actors/app';
 import type { PluginView, ScheduleView } from '@agentic/platform';
-import { Button, Label, SelectField, Switch, TextareaField, TextField } from '@agentic/ui';
+import { Button, ErrorNote, Label, SelectField, Switch, TextareaField, TextField } from '@agentic/ui';
 import { useViewer, type ActorDefs } from '../../actors/defs';
 import { scheduleKeyOf, workspaceKeyOf } from '../../actors/keys';
 import { useAgentDirectory } from '../chat/directory';
@@ -77,7 +77,7 @@ export const ConnectorTriggerPanel = component<ConnectorTriggerPanelProps>(({ pr
                     >{exists ? 'Save' : 'Turn on'}</Button>
                 </div>
                 {props.notice ? <p data-plugin-saved role="status">{props.notice}</p> : null}
-                {props.error ? <p data-chat-error role="alert">{props.error}</p> : null}
+                {props.error ? <ErrorNote data-chat-error="">{props.error}</ErrorNote> : null}
             </section>
         );
     };

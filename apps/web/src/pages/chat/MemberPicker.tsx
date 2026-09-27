@@ -1,4 +1,6 @@
-import { component, type Define } from 'sigx';
+import { component, signal, type Define } from 'sigx';
+import { RadioGroup } from '@sigx/zero';
+import { Checkbox } from '@sigx/zero-daisyui/components';
 import { AgentTile, EnvironmentLine, Icon, QuotaBadge, type WorkdirEnvironment } from '@agentic/ui';
 import type { AgentIdentity } from './live';
 import { memberQuota, type QuotaMachine } from './quota';
@@ -36,10 +38,12 @@ export const MemberPicker = component<MemberPickerProps>(({ props, emit }) => ()
             <legend>{props.legend ?? 'Members'}</legend>
             {props.agents.length ? props.agents.map((a) => {
                 const picked = props.picked.includes(a.id);
+                // The parent owns the choice: zero writes into this throwaway binding, the events tell the parent.
+                const bind = signal({ picked, coordinator: props.coordinator === a.id ? a.id : '' });
                 return (
                     <div key={a.id} data-new-chat-agent={a.id} data-picked={picked ? '' : undefined}>
-                        <label data-new-chat-pick>
-                            <input data-visually-hidden type="checkbox" name="member" value={a.id} checked={picked} onChange={(e: Event) => emit('toggle', { id: a.id, on: (e.target as HTMLInputElement).checked })} />
+                        {/* The card is the checkbox's label; its own check mark stands in for zero's control. */}
+                        <Checkbox.Root data-new-chat-pick="" name="member" value={a.id} model={() => bind.picked} onCheckedChange={(on: boolean) => emit('toggle', { id: a.id, on })}>
                             <span data-new-chat-head>
                                 <AgentTile name={a.name} hue={a.hue} size={32} />
                                 <span data-new-chat-who>
@@ -50,12 +54,11 @@ export const MemberPicker = component<MemberPickerProps>(({ props, emit }) => ()
                             </span>
                             <EnvironmentLine tone="muted" {...a.environment} />
                             {props.environments ? <span data-new-chat-quota><QuotaBadge {...memberQuota(a, props.quotaEnvironmentOf?.(a), props.environments, props.quotaMachine)} {...(a.model ? { model: a.model } : {})} /></span> : null}
-                        </label>
+                        </Checkbox.Root>
                         {picked && group ? (
-                            <label data-new-chat-coordinator-pick>
-                                <input type="radio" name="coordinator" value={a.id} checked={props.coordinator === a.id} onChange={() => emit('pickCoordinator', a.id)} />
-                                <span>Coordinator</span>
-                            </label>
+                            <RadioGroup.Root data-new-chat-coordinator-pick="" name="coordinator" model={() => bind.coordinator} onValueChange={(id: unknown) => emit('pickCoordinator', String(id))}>
+                                <RadioGroup.Item value={a.id}>Coordinator</RadioGroup.Item>
+                            </RadioGroup.Root>
                         ) : null}
                     </div>
                 );

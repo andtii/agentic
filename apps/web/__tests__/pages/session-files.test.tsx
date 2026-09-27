@@ -249,7 +249,8 @@ describe('/sessions/:id/files', () => {
 
 describe('the worktree picker (#622)', () => {
     const picker = (dom: ParentNode) => dom.querySelector<HTMLSelectElement>('[data-worktree-picker] select');
-    const options = (dom: ParentNode) => [...picker(dom)!.querySelectorAll('option')].map((o) => ({ label: o.textContent, disabled: o.disabled, selected: o.value === picker(dom)!.value }));
+    // zero's Select posts through a hidden <select>; its empty first option is the placeholder, not a worktree.
+    const options = (dom: ParentNode) => [...picker(dom)!.querySelectorAll('option')].filter((o) => o.value !== '').map((o) => ({ label: o.textContent, disabled: o.disabled, selected: o.value === picker(dom)!.value }));
 
     it("lists the repo's worktrees on Changes, the session's own chosen, one outside the roots disabled", async () => {
         const dom = await mountRoute('/sessions/s1/changes');
@@ -259,6 +260,17 @@ describe('the worktree picker (#622)', () => {
             { label: '47-mobile-drawer (this session)', disabled: false, selected: true },
             { label: 'detached 1f0a9b3 (outside the working roots)', disabled: true, selected: false }
         ]);
+    });
+
+    it('choosing another worktree in the picker opens it through ?root=', async () => {
+        const main = 'C:\\Dev\\agentic\\main';
+        const dom = await mountRoute('/sessions/s1/changes');
+        await until(() => picker(dom) !== null, 'the picker');
+        picker(dom)!.value = main;
+        picker(dom)!.dispatchEvent(new Event('change', { bubbles: true }));
+        await until(() => options(dom).find((o) => o.selected)?.label === 'main', 'main chosen');
+        const hrefs = [...dom.querySelectorAll<HTMLAnchorElement>('[data-scope="ag-session-bar"][data-part="tab"]')].map((a) => a.getAttribute('href'));
+        expect(hrefs).toContain(changesHref('s1', { root: main }));
     });
 
     it('opens another worktree for a look through ?root=, the tabs keeping it; the session keeps its own folder', async () => {

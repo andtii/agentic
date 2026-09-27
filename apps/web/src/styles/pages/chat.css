@@ -121,6 +121,9 @@
 [data-new-chat-agent][data-picked] { border-color: color-mix(in oklab, var(--color-primary) 60%, transparent); background: var(--color-base-300); }
 [data-new-chat-agent]:has(input[name="member"]:focus-visible) { outline: 2px solid var(--color-primary); outline-offset: 2px; }
 [data-new-chat-pick] { display: flex; flex-direction: column; gap: var(--space-sm); padding: var(--space-md); cursor: pointer; min-inline-size: 0; }
+/* The card is zero's checkbox label: its own check mark ([data-new-chat-check]) stands in for zero's control. */
+[data-new-chat-pick] > [data-part="control"] { display: none; }
+[data-new-chat-pick] > [data-part="label"] { display: flex; flex-direction: column; gap: var(--space-sm); min-inline-size: 0; }
 [data-new-chat-head] { display: flex; align-items: center; gap: var(--space-sm); min-inline-size: 0; }
 [data-new-chat-who] { display: flex; flex-direction: column; min-inline-size: 0; flex: 1 1 auto; }
 [data-new-chat-name] { font-weight: var(--weight-semibold); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
