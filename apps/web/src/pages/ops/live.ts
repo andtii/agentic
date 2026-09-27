@@ -191,6 +191,8 @@ export function connectorWhere(c: ConnectorRecord): string {
 /** What the settings form edits; strings so the fields bind straight to it. */
 export interface SettingsDraft {
     timeZone: string;
+    /** The default runtime new agents start on (#301); `''` = worked out from the environment, as before. */
+    runtime: string;
     environmentId: string;
     inbox: boolean;
     push: boolean;
@@ -198,11 +200,22 @@ export interface SettingsDraft {
     artifactDays: string;
 }
 
-export type SettingsDraftErrors = Partial<Record<'timeZone' | 'sessionLogDays' | 'artifactDays', string>>;
+export type SettingsDraftErrors = Partial<Record<'timeZone' | 'runtime' | 'sessionLogDays' | 'artifactDays', string>>;
+
+/**
+ * What the form knows about the runtime / environment pair: `runtimeOf` names the runtime a machine
+ * environment runs (Claude Code, Copilot CLI, Codex, …), `daemonHosted` whether a runtime runs on a
+ * machine (its plugin declares `daemon-hosted`). `undefined` from either is "not known yet" and refuses nothing.
+ */
+export interface RuntimePairFacts {
+    readonly runtimeOf?: (environmentId: EnvironmentId) => RuntimeId | undefined;
+    readonly daemonHosted?: (runtime: string) => boolean | undefined;
+}
 
 export function toDraft(settings: WorkspaceSettings): SettingsDraft {
     return {
         timeZone: settings.timeZone,
+        runtime: settings.defaults.runtime,
         environmentId: settings.defaults.environmentId ?? '',
         inbox: settings.notifications.inbox,
         push: settings.notifications.push,
@@ -213,29 +226,42 @@ export function toDraft(settings: WorkspaceSettings): SettingsDraft {
 
 const days = (value: string): number | null => (/^\d{1,4}$/.test(value.trim()) ? Number(value.trim()) : null);
 
-export function validateDraft(draft: SettingsDraft, zones: readonly string[]): SettingsDraftErrors {
+/** Why the default runtime cannot run in the default environment (#301): a machine environment runs its own runtime, and only a machine runtime. */
+export function runtimePairError(runtime: string, environmentId: string, facts: RuntimePairFacts = {}): string | undefined {
+    const env = environmentId.trim();
+    if (!env || !runtime) return undefined;
+    const runs = facts.runtimeOf?.(env as EnvironmentId);
+    if (runs && runs !== runtime) return `That environment runs ${runs}: choose ${runs}, or no default environment.`;
+    if (!runs && facts.daemonHosted?.(runtime) === false) return `${runtime} runs on the platform, not on a machine: choose a machine runtime, or no default environment.`;
+    return undefined;
+}
+
+export function validateDraft(draft: SettingsDraft, zones: readonly string[], facts: RuntimePairFacts = {}): SettingsDraftErrors {
     const errors: SettingsDraftErrors = {};
     const tz = draft.timeZone.trim();
     if (!tz) errors.timeZone = 'Choose a time zone.';
     else if (zones.length && tz !== 'UTC' && !zones.includes(tz)) errors.timeZone = `Unknown time zone "${tz}".`;
+    const pair = runtimePairError(draft.runtime, draft.environmentId, facts);
+    if (pair) errors.runtime = pair;
     if (days(draft.sessionLogDays) === null) errors.sessionLogDays = 'Whole days.';
     if (days(draft.artifactDays) === null) errors.artifactDays = 'Whole days.';
     return errors;
 }
 
 /**
- * The draft as the one-level patch `Workspace.updateSettings` takes; `null` while it does not validate.
- * `runtimeOf` names the runtime a machine environment runs (Claude Code, Copilot CLI, Codex, …); an
- * environment it does not know yet keeps `claude-code`, the first daemon runtime.
+ * The draft as the one-level patch `Workspace.updateSettings` takes; `null` while it does not validate —
+ * including a runtime the default environment cannot run (#301). The chosen runtime is written as it is;
+ * a draft without one falls back to the environment's runtime (`claude-code` for one not known yet), or
+ * the platform runtime for no environment.
  */
-export function settingsPatch(draft: SettingsDraft, zones: readonly string[], runtimeOf: (environmentId: EnvironmentId) => RuntimeId | undefined = () => undefined): SettingsPatch | null {
-    if (Object.keys(validateDraft(draft, zones)).length) return null;
+export function settingsPatch(draft: SettingsDraft, zones: readonly string[], facts: RuntimePairFacts = {}): SettingsPatch | null {
+    if (Object.keys(validateDraft(draft, zones, facts)).length) return null;
     const environmentId = draft.environmentId.trim();
+    const runtime = draft.runtime.trim() || (environmentId ? (facts.runtimeOf?.(environmentId as EnvironmentId) ?? 'claude-code') : 'anthropic-api');
     return {
         timeZone: draft.timeZone.trim(),
         notifications: { inbox: draft.inbox, push: draft.push },
-        // The platform runtime for no environment; a machine environment runs its own.
-        defaults: environmentId ? { runtime: runtimeOf(environmentId as EnvironmentId) ?? 'claude-code', environmentId: environmentId as EnvironmentId } : { runtime: 'anthropic-api', environmentId: undefined },
+        defaults: environmentId ? { runtime, environmentId: environmentId as EnvironmentId } : { runtime, environmentId: undefined },
         retention: { sessionLogDays: days(draft.sessionLogDays)!, artifactDays: days(draft.artifactDays)! }
     };
 }

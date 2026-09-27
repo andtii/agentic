@@ -12,21 +12,22 @@
  * typed back. "Machine updates" (#367) sets the channel and policy machines
  * follow by default — `updateSettings({ updates })`, saved on its own.
  */
-import { component, effect, onUnmounted, signal, useHead, type Define, type JSXElement } from 'sigx';
+import { component, effect, onUnmounted, signal, useHead, watch, type Define, type JSXElement } from 'sigx';
 import { Link } from '@sigx/router';
 import { actor } from '@sigx/actors';
 import { useActorState } from '@sigx/actors/app';
-import { DEFAULT_UPDATE_SETTINGS, type UpdateSettings } from '@agentic/core';
+import { DAEMON_HOSTED_CAPABILITY, DEFAULT_UPDATE_SETTINGS, type UpdateSettings } from '@agentic/core';
 import type { RegistryOverview } from '@agentic/platform';
 import { virtualListbox } from '@sigx/zero/virtual-listbox';
-import { Button, ConfirmDialog, EmptyState, ErrorNote, Icon, Label, SelectField, StatusPill, Switch, TextField } from '@agentic/ui';
+import { Button, ConfirmDialog, EmptyState, ErrorNote, Icon, Label, SelectField, StatusPill, Switch, TextField, type RuntimeOption } from '@agentic/ui';
 import { useActorDefs, useViewer } from '../../actors/defs';
 import { registryKeyOf, workspaceKeyOf } from '../../actors/keys';
 import { formatAge } from '../../mock/workspace';
 import { useEnvironmentDirectory } from './environments';
 import { pluginHref } from '../plugins/model';
 import { useWorkspaceReadiness } from '../plugins/readiness';
-import { opStatus, settingsPatch, timeZoneOptions, toDraft, validateDraft, type SettingsDraft } from './live';
+import { runtimeOptions } from '../agent/runtimes';
+import { opStatus, settingsPatch, timeZoneOptions, toDraft, validateDraft, type RuntimePairFacts, type SettingsDraft } from './live';
 import { OpsPage } from './OpsPage';
 import { PushDevices } from '../../push/PushDevices';
 import { UpdateDefaults } from '../machines/UpdateDefaults';
@@ -55,15 +56,15 @@ export const LiveSettings = component(() => {
     const secrets = useActorState(defs.Registry, () => (viewer.workspaceId ? ([registryKeyOf(viewer.workspaceId), 'secrets'] as const) : null), { live: true });
     const plugins = useWorkspaceReadiness(defs, viewer);
 
-    const draft = signal<SettingsDraft & { loaded: boolean }>({ loaded: false, timeZone: 'UTC', environmentId: '', inbox: true, push: false, sessionLogDays: '90', artifactDays: '30' });
+    const draft = signal<SettingsDraft & { loaded: boolean }>({ loaded: false, timeZone: 'UTC', runtime: '', environmentId: '', inbox: true, push: false, sessionLogDays: '90', artifactDays: '30' });
     const st = signal({ saving: false, saved: false, error: '', deleting: false, typed: '', exporting: false, deleteAsked: false });
     const upd = signal({ busy: false, status: '', failed: false });
     let seenSettings: unknown;
     /** The draft as it was last synced from the actor: edits are what differs from it. */
     let synced: SettingsDraft | null = null;
-    const snapshot = (): SettingsDraft => ({ timeZone: draft.timeZone, environmentId: draft.environmentId, inbox: draft.inbox, push: draft.push, sessionLogDays: draft.sessionLogDays, artifactDays: draft.artifactDays });
+    const snapshot = (): SettingsDraft => ({ timeZone: draft.timeZone, runtime: draft.runtime, environmentId: draft.environmentId, inbox: draft.inbox, push: draft.push, sessionLogDays: draft.sessionLogDays, artifactDays: draft.artifactDays });
     const sameDraft = (a: SettingsDraft, b: SettingsDraft): boolean =>
-        a.timeZone === b.timeZone && a.environmentId === b.environmentId && a.inbox === b.inbox && a.push === b.push && a.sessionLogDays === b.sessionLogDays && a.artifactDays === b.artifactDays;
+        a.timeZone === b.timeZone && a.runtime === b.runtime && a.environmentId === b.environmentId && a.inbox === b.inbox && a.push === b.push && a.sessionLogDays === b.sessionLogDays && a.artifactDays === b.artifactDays;
     // The draft follows the actor while the form is clean; edits in progress survive another tab's write.
     // A save's own write matches the draft, so it syncs and the form reads clean again.
     const stopSync = effect(() => {
@@ -80,11 +81,32 @@ export const LiveSettings = component(() => {
 
     const fail = (e: unknown): void => { st.error = e instanceof Error ? e.message : String(e); };
     const zones = (): readonly string[] => timeZoneOptions(draft.timeZone || workspace.value?.settings.timeZone || 'UTC');
+    /** What the runtime / environment check knows (#301): each environment's runtime, and which runtimes run on a machine. */
+    const pairFacts: RuntimePairFacts = {
+        runtimeOf: (id) => environments.lookup(id)?.descriptor.runtime,
+        daemonHosted: (runtime) => {
+            const plugin = plugins.overview()?.plugins.find((p) => p.manifest.id === runtime);
+            return plugin ? plugin.manifest.capabilities.includes(DAEMON_HOSTED_CAPABILITY) : undefined;
+        }
+    };
+    // Picking an environment picks the runtime it runs, when that is known: the pair then always runs.
+    watch(
+        () => draft.environmentId,
+        (id) => {
+            const runs = id ? pairFacts.runtimeOf?.(id as never) : undefined;
+            if (runs && draft.runtime !== runs) draft.runtime = runs;
+        }
+    );
+    /** The enabled runtime plugins (the New agent dialog's list); the saved default stays listed, marked, when its plugin is off. */
+    const runtimeChoices = (current: string): readonly RuntimeOption[] => {
+        const overview = plugins.overview();
+        return (overview ? runtimeOptions(overview.plugins, plugins.byId(), current) : undefined) ?? (current ? [{ value: current, label: current }] : []);
+    };
 
     const save = async (): Promise<void> => {
         const k = wsKey();
         if (!k || st.saving) return;
-        const patch = settingsPatch(draft, zones(), (id) => environments.lookup(id)?.descriptor.runtime);
+        const patch = settingsPatch(draft, zones(), pairFacts);
         if (!patch) return;
         st.saving = true;
         st.error = '';
@@ -159,7 +181,9 @@ export const LiveSettings = component(() => {
                 </OpsPage>
             );
         }
-        const errors = validateDraft(draft, zones());
+        const errors = validateDraft(draft, zones(), pairFacts);
+        const runtimes = runtimeChoices(draft.runtime || ws.settings.defaults.runtime);
+        const runtimeHint = runtimes.find((r) => r.value === draft.runtime)?.hint;
         const exportOp = opStatus(ws.ops?.export, 'export');
         const deleteOp = opStatus(ws.ops?.delete, 'delete');
         const mismatch = st.deleteAsked && st.typed.trim() !== name;
@@ -177,6 +201,17 @@ export const LiveSettings = component(() => {
                                 description={environments.loading ? 'Reading your machines…' : undefined}
                             />
                         </div>
+                    </Section>
+
+                    <Section title="Defaults" hint="What a new agent starts on. Each agent can change it on its Config tab.">
+                        <SelectField
+                            name="default-runtime"
+                            label="Default runtime"
+                            model={() => draft.runtime}
+                            options={runtimes.map((r) => ({ value: r.value, label: r.label }))}
+                            error={errors.runtime}
+                            description={errors.runtime ? undefined : (runtimeHint ?? 'New agents start on it.')}
+                        />
                     </Section>
 
                     <Section title="Notifications" hint="Reminders, completed and failed work, approvals and input requests. Push needs this browser's permission on each device.">
