@@ -1110,7 +1110,20 @@ Both chat pages (mock `Chat.tsx`, live `chat/LiveChat.tsx`) render the conversat
 
 #### #1061 web: chat Lanes view
 
-_not yet_
+- `views/lanes/model.ts` (pure) reads the one `ChatViewModel`. The **top row** is the coordinator's latest message
+  meant for people (`audienceOf` over the members it `@`s). The **round** starts at the latest message that hands
+  work out (a turn with `delegate` steps). A **lane** per member at work (working, waiting on you, a live line) or
+  handed work this round, in member order; idle members get none, the coordinator only while it works itself. A
+  lane's body is its steps (`msg.steps`, the in-flight turn's tool parts, else its live line's step) and its
+  messages in order (a finished turn: its steps, then its answer), a message to another member labelled
+  `to <name>`; Messages detail leaves the steps out. Footer: `Done · #22 ticked` for a handed item the agent
+  finished, else its open question (a request its feed holds, else the chat's request when it is the one member
+  waiting on you).
+- `views/lanes/index.tsx` draws the row and the `ai-lane` columns (#1057): equal widths, sideways scroll past
+  three, `now` passed once a second. A single-choice question answers with its buttons (an `input` decision), a
+  permission with `Allow once` / `Deny`; a free-text question or a form offers `Answer in text`, which opens
+  `QuestionPrompt` under the lane. The hint `or @ an agent to post in its lane` sits under the lanes (the composer
+  is the page's). Below 1024 px the pin shows Team (`pick.ts`, #1058).
 
 ## 11. Zero feedback loop
 
