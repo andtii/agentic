@@ -5,8 +5,9 @@
  * request page instead. On mock data the fixtures; live (#790) the work items the Work view derives (#738), each with
  * its task, chat, session and plan item (`live.ts`).
  */
-import { component, type Define, type JSXElement } from 'sigx';
+import { component, signal, type Define, type JSXElement } from 'sigx';
 import { Link } from '@sigx/router';
+import { Checkbox } from '@sigx/zero-daisyui/components';
 import { formatRef, type Ref, type WorkStageState } from '@agentic/core';
 import { AgentTile, EmptyState, Icon, StageTrack, StatusPill, Tag, type Tone } from '@agentic/ui';
 import { dataMode } from '../../../../data-mode';
@@ -90,12 +91,15 @@ const DoneWhen = (d: WorkItemDetail) => {
         <section data-work-item-done-when="" aria-label="Done when">
             <h3>Done when <small>{doneWhenProgress(list)}</small></h3>
             <ul>
-                {list.map((c) => (
-                    <li key={c.text} data-checked={c.checked ? 'true' : 'false'}>
-                        <input type="checkbox" checked={c.checked} disabled aria-label={c.text} />
-                        <span>{c.text}</span>
-                    </li>
-                ))}
+                {list.map((c) => {
+                    // Read-only: a work item's done-when is ticked on its plan item; zero binds to a throwaway signal.
+                    const bind = signal({ checked: c.checked });
+                    return (
+                        <li key={c.text} data-checked={c.checked ? 'true' : 'false'}>
+                            <Checkbox.Root model={() => bind.checked} name="done-when" disabled>{c.text}</Checkbox.Root>
+                        </li>
+                    );
+                })}
             </ul>
         </section>
     );

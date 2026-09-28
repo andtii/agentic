@@ -8,7 +8,7 @@
  * `openProjectPicker()` (#727 draws the switcher).
  */
 import { component, signal, type Define, type JSXElement } from 'sigx';
-import { Dialog } from '@sigx/zero';
+import { Dialog, Input } from '@sigx/zero';
 import { useRouter } from '@sigx/router';
 import type { ProjectRecord } from '@agentic/core';
 import { Icon } from '@agentic/ui';
@@ -111,24 +111,21 @@ export const ProjectPicker = component<ProjectPickerProps>(({ props }) => {
                 <Dialog.Popup>
                     <Dialog.Title>Switch project</Dialog.Title>
                     <div data-project-picker="">
-                        <label data-project-picker-search="">
-                            <Icon name="search" size={15} />
-                            <input
-                                type="search"
-                                name="project-search"
-                                placeholder="Find a project"
-                                aria-label="Find a project"
-                                role="combobox"
-                                aria-expanded="true"
-                                aria-controls="project-picker-list"
-                                aria-autocomplete="list"
-                                aria-activedescendant={active ? optionId(active.id) : undefined}
-                                autofocus
-                                value={st.query}
-                                onInput={(e: Event) => { st.query = (e.target as HTMLInputElement).value; st.active = 0; }}
-                                onKeyDown={onKeyDown}
-                            />
-                        </label>
+                        <Input.Root data-project-picker-search="" model={() => st.query} type="search" name="project-search" autocomplete="off" onValueChange={() => { st.active = 0; }}>
+                            <Input.Label visuallyHidden>Find a project</Input.Label>
+                            <Input.Control>
+                                <span data-project-picker-icon=""><Icon name="search" size={15} /></span>
+                                <Input.Input
+                                    placeholder="Find a project"
+                                    role="combobox"
+                                    aria-expanded="true"
+                                    aria-controls="project-picker-list"
+                                    aria-autocomplete="list"
+                                    aria-activedescendant={active ? optionId(active.id) : undefined}
+                                    onKeydown={onKeyDown}
+                                />
+                            </Input.Control>
+                        </Input.Root>
                         <div id="project-picker-list" role="listbox" aria-label="Projects" data-project-picker-list="">
                             {sections.map((s) => (
                                 <div key={s.label} role="group" aria-label={s.label} data-project-picker-group="">

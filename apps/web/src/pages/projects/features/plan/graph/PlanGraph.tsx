@@ -9,7 +9,7 @@
 import { component, signal, type Define } from 'sigx';
 import { useRoute, useRouter } from '@sigx/router';
 import type { Plan } from '@agentic/core';
-import { ItemGlyph } from '@agentic/ui';
+import { ErrorNote, ItemGlyph } from '@agentic/ui';
 import { dataMode } from '../../../../../data-mode';
 import type { ProjectPageProps } from '../../../layout/types';
 import { usePlanStore } from '../shared/data';
@@ -110,7 +110,7 @@ export const PlanGraph = component<ProjectPageProps>(({ props }) => {
                     <PlanSwitcher plans={list} current={current} onSelect={select} onNew={() => void newPlan()} />
                     {PlanViews(props.project.id, 'graph', follow, list.length > 1 ? current?.id : undefined)}
                 </header>
-                {store?.note() ? <p data-plan-note="" role="alert">{store.note()}</p> : null}
+                {store?.note() ? <ErrorNote data-plan-note="">{store.note()}</ErrorNote> : null}
                 {current ? <PlanGraphCanvas plan={current} /> : <p data-plan-graph-empty="" role="status">No plans yet.</p>}
             </section>
         );

@@ -1,5 +1,6 @@
 import { component, signal } from 'sigx';
 import { useRoute } from '@sigx/router';
+import { ErrorNote } from '@agentic/ui';
 import { planItems, type AgentId, type PlanActor, type PlanItem } from '@agentic/core';
 import { useActorDefs, useViewer } from '../../../../../actors/defs';
 import { dataMode } from '../../../../../data-mode';
@@ -71,7 +72,7 @@ const LivePlanBoard = component<ProjectPageProps>(({ props }) => {
         const note = st.refused || store.note();
         return (
             <>
-                {note ? <p data-plan-note="" role="alert">{note}</p> : null}
+                {note ? <ErrorNote data-plan-note="">{note}</ErrorNote> : null}
                 <BoardView
                     projectId={props.project.id}
                     title={doc?.plan.title ?? 'Plan'}
