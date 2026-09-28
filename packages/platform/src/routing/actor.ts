@@ -527,12 +527,16 @@ export function defineRoutingActor(ports: RoutingPorts) {
 
             /** The items of `asked` the Plan of `projectId` still reads in the state named (#1081) — none when it cannot be read. */
             async function stillReleased(projectId: ProjectId, asked: readonly { readonly n: number; readonly reason: ProjectFeatureItemReleaseReason }[]): Promise<{ readonly n: number; readonly reason: ProjectFeatureItemReleaseReason }[]> {
-                if (!asked.length) return [];
-                const states = await as(PlanStore(), planKey(workspaceId, projectId))
-                    .itemStates(asked.map((i) => i.n))
-                    .catch(() => undefined);
-                if (!states) return [];
-                return asked.filter((i) => states[String(i.n)] === i.reason).map((i) => ({ n: i.n, reason: i.reason }));
+                const out: { n: number; reason: ProjectFeatureItemReleaseReason }[] = [];
+                // In `ITEM_STATES_MAX` chunks: the held releases of a project may add up to more than one read takes.
+                for (let from = 0; from < asked.length; from += ITEM_STATES_MAX) {
+                    const chunk = asked.slice(from, from + ITEM_STATES_MAX);
+                    const states = await as(PlanStore(), planKey(workspaceId, projectId))
+                        .itemStates(chunk.map((i) => i.n))
+                        .catch(() => undefined);
+                    if (states) for (const i of chunk) if (states[String(i.n)] === i.reason) out.push({ n: i.n, reason: i.reason });
+                }
+                return out;
             }
 
             /**
