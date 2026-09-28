@@ -72,12 +72,15 @@ const FollowDrawer = component<FollowDrawerProps>(({ props }) => {
 
 export const FollowPanel = component<FollowPanelProps>(({ props }) => {
     const st = signal({ width: undefined as number | undefined });
+    const sync = (): void => { st.width = window.innerWidth; };
     onMounted(() => {
         if (typeof window === 'undefined') return;
-        const sync = (): void => { st.width = window.innerWidth; };
         sync();
         window.addEventListener('resize', sync);
-        onUnmounted(() => window.removeEventListener('resize', sync));
+    });
+    // Registered at setup: sigx records lifecycle hooks only there (#1109).
+    onUnmounted(() => {
+        if (typeof window !== 'undefined') window.removeEventListener('resize', sync);
     });
     return () => {
         const f = props.follow;

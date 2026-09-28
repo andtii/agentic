@@ -37,7 +37,7 @@ export interface TeamHandoff {
 }
 
 export interface TeamWork {
-    /** The assignment: its task id when known, else the handoff, else the agent. */
+    /** A done card: its task id when known, else the handoff. A working card: `live:<agent>`, steady while the turn runs. */
     readonly key: string;
     readonly agentId: string;
     readonly state: CrewState;
@@ -249,7 +249,8 @@ export function teamRows(view: ChatViewModel, open: ReadonlySet<string> = new Se
         const rows = flight.get(w.agentId) ?? [];
         const steps = feed ? rows.flatMap((m) => stepsFromToolParts(m, feed.transcript).steps) : w.step ? [stepOfLine(w)] : [];
         work.push({
-            key: feed?.taskId ?? h?.taskId ?? h?.key ?? w.agentId,
+            // Keyed on the agent, not the task: a feed's taskId arrives mid-turn, and a changing key remounts the card (#1109).
+            key: `live:${w.agentId}`,
             agentId: w.agentId,
             state: 'working',
             task: assignmentText(h),
