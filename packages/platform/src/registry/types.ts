@@ -247,6 +247,8 @@ export interface AgentDependent {
     readonly id: AgentId;
     readonly name: string;
     readonly via: readonly DependencyVia[];
+    /** When the agent last started depending on the plugin (epoch ms): the first config version of its current unbroken run (#681). Absent when unknown. */
+    readonly since?: number;
 }
 
 export interface ScheduleDependent {

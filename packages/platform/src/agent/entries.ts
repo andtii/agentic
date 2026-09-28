@@ -156,6 +156,24 @@ function foldEntry(config: AgentConfig, entry: AgentConfigEntry): AgentConfig {
         : mergeAgentConfig(defaultAgentConfig(), entry.patch);
 }
 
+/** One version as it stood: when it was written and the whole config then. */
+export interface AgentConfigAt {
+    readonly version: number;
+    readonly at: number;
+    readonly config: AgentConfig;
+}
+
+/** Every version's whole config, oldest first — replayed from the defaults once (#681). */
+export function configHistory(versions: readonly AgentConfigEntry[]): AgentConfigAt[] {
+    const out: AgentConfigAt[] = [];
+    let config = defaultAgentConfig();
+    for (const entry of versions) {
+        config = foldEntry(config, entry);
+        out.push({ version: entry.v, at: entry.at, config });
+    }
+    return out;
+}
+
 /** The config as it stood at `version` — replayed from the defaults. */
 export function configAtVersion(versions: readonly AgentConfigEntry[], version: number): AgentConfig {
     if (!Number.isInteger(version) || version < 1 || version > versions.length) {

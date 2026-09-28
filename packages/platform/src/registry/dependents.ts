@@ -18,6 +18,8 @@ import type { AgentDependent, DependencyVia, Dependents, ScheduleDependent } fro
 export interface AgentRef {
     readonly id: AgentId;
     readonly config: AgentConfig;
+    /** Its config versions, oldest first, when the caller read them: `since` is dated from these (#681). */
+    readonly history?: readonly { readonly at: number; readonly config: AgentConfig }[];
 }
 
 export interface ScheduleRef {
@@ -57,12 +59,29 @@ export function dependencyOf(agent: AgentRef, manifest: PluginManifest): readonl
     return via;
 }
 
+/**
+ * When `agent` started depending on `manifest` (#681): the time of the oldest version in the unbroken run of versions,
+ * ending with the newest, that depend on it — a grant removed and added again dates from the re-add. `undefined`
+ * without a history, or when its newest version does not depend on it.
+ */
+export function dependentSince(agent: AgentRef, manifest: PluginManifest): number | undefined {
+    const history = agent.history ?? [];
+    let since: number | undefined;
+    for (let i = history.length - 1; i >= 0; i--) {
+        if (dependencyOf({ id: agent.id, config: history[i]!.config }, manifest).length === 0) break;
+        since = history[i]!.at;
+    }
+    return since;
+}
+
 export function computeDependents(manifest: PluginManifest, agents: readonly AgentRef[], schedules: readonly ScheduleRef[], options: { readonly workspaceWide?: boolean } = {}): Dependents {
     if (options.workspaceWide) return { pluginId: manifest.id, agents: [], schedules: [], workspaceWide: true };
     const dependentAgents: AgentDependent[] = [];
     for (const agent of agents) {
         const via = dependencyOf(agent, manifest);
-        if (via.length > 0) dependentAgents.push({ id: agent.id, name: agent.config.name, via });
+        if (via.length === 0) continue;
+        const since = dependentSince(agent, manifest);
+        dependentAgents.push({ id: agent.id, name: agent.config.name, via, ...(since !== undefined ? { since } : {}) });
     }
     const agentIds = new Set(dependentAgents.map((a) => a.id));
     const dependentSchedules: ScheduleDependent[] = [];

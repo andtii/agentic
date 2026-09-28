@@ -22,6 +22,7 @@ import {
 import { recordAudit } from '../audit/port.js';
 import { type AgentConfigPatch, assertAgentConfigPatch, clone } from './config.js';
 import {
+    type AgentConfigAt,
     type AgentConfigEntry,
     type AgentState,
     type AgentVersionInfo,
@@ -32,6 +33,7 @@ import {
     appendInstruction,
     applyAgentEntry,
     configAtVersion,
+    configHistory,
     initialAgentState,
     versionInfo
 } from './entries.js';
@@ -262,6 +264,11 @@ export const AgentActor = defineActor({
 
             async listVersions(): Promise<readonly AgentVersionInfo[]> {
                 return ctx.state.versions.map(versionInfo);
+            },
+
+            /** Every version's whole config, oldest first — what the Registry dates a plugin grant from (#681). */
+            async configHistory(): Promise<readonly AgentConfigAt[]> {
+                return ctx.snapshot(configHistory(ctx.state.versions));
             },
 
             /**

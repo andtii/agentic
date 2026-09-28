@@ -27,7 +27,7 @@ import { isSingleSlot, type PermissionScope, type PluginReadiness, type ToolMode
 import type { Dependents, PluginView } from '@agentic/platform';
 import { AgentTile, Button, ConfirmDialog, Icon, Label, ReadinessBadge, SchemaForm, SecretField, Tag, ToolPolicyRow, monogramOf, type AgentHue } from '@agentic/ui';
 import { dependentCount } from '../ops/live';
-import { asksBeforeRevoke, dependentLines, hasSettings, removeConsequence, scopeRows, toolsOfScope, type EndpointView, type ToolRow } from './detail-model';
+import { asksBeforeRevoke, dependentLines, formatDay, hasSettings, removeConsequence, scopeRows, toolsOfScope, type EndpointView, type ToolRow } from './detail-model';
 import { canActivate, featuresOf, kindLabel, workspaceWideConsequence } from './model';
 
 export interface SecretWrite {
@@ -279,7 +279,7 @@ export const PluginDetail = component<PluginDetailProps>(({ props, emit }) => {
                                                             <AgentTile name={a.name || who.name} hue={who.hue} size={28} />
                                                             <span data-dependent-name>
                                                                 <span>{a.name || who.name}</span>
-                                                                <span data-dependent-via>{a.via.join(', ')}</span>
+                                                                <span data-dependent-via>{a.since !== undefined ? `granted ${formatDay(a.since)}` : a.via.join(', ')}</span>
                                                             </span>
                                                         </li>
                                                     );
