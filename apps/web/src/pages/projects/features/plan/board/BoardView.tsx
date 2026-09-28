@@ -51,7 +51,7 @@ interface Drag {
 
 const KEY_STEPS: Readonly<Record<string, BoardStep>> = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right' };
 
-const GLYPH_STATES: Readonly<Record<PlanItem['state'], string>> = { ready: 'Ready', claimed: 'Claimed', 'needs-you': 'Needs you', blocked: 'Blocked', done: 'Done', stuck: 'Stuck' };
+const GLYPH_STATES: Readonly<Record<PlanItem['state'], string>> = { ready: 'Ready', claimed: 'Claimed', 'needs-you': 'Needs you', blocked: 'Blocked', done: 'Done', stuck: 'Stuck', dropped: 'Dropped' };
 
 export const BoardView = component<BoardViewProps>(({ props }) => {
     const follow = useFollow();
