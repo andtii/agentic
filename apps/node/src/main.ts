@@ -9,6 +9,9 @@
  * SIGINT / SIGTERM drain: new responses carry `connection: close`, the host
  * finishes its turns and flushes state, then the listener and the database
  * close.
+ *
+ * `main.js export …` / `main.js import …` move a Cloudflare deployment's
+ * state to this node instead of serving (`./import/cli.ts`, #994).
  */
 import { fileURLToPath } from 'node:url';
 import { sqliteStorage } from '@sigx/actors-sqlite';
@@ -17,12 +20,14 @@ import { fsBucket } from './fs-bucket';
 import { openHome } from './home';
 import { createNodeHost } from './host';
 import { claimUrl, fileLocalOwnerStore, LOCAL_LOGIN_PATH, prepareClaim } from './local-owner';
+import { IMPORT_COMMANDS, runImportCli } from './import/cli';
 import { createNodeServer } from './server';
 
 /** How long a shutdown waits for in-flight turns before it closes anyway. */
 const STOP_TIMEOUT_MS = 20_000;
 
 const home = openHome();
+if ((IMPORT_COMMANDS as readonly string[]).includes(process.argv[2] ?? '')) process.exit(await runImportCli(process.argv.slice(2), home));
 for (const name of home.generated) console.log(`[node] generated ${name} in ${home.envFile}`);
 
 // The local owner (#989): until someone claims the node, a single-use link to do it.
