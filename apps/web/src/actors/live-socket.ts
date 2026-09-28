@@ -33,22 +33,59 @@ export interface SocketReport {
 }
 
 /**
+ * How long a dropped socket may stay down before the pill says `reconnecting` (#1024). A woken Durable Object hands
+ * back every live socket with `1012` (#714), and the page redials within the first backoff window plus one dial.
+ * That is a handover, not a lost connection. The browser's own `offline` event still reports at once.
+ */
+export const DROP_GRACE_MS = 5_000;
+
+export interface ReportingOptions {
+    /** How long a drop may wait for a reopen before it is reported. Default `0`: at once. */
+    readonly graceMs?: number;
+    /** Timers; injected by tests. */
+    readonly setTimer?: (run: () => void, ms: number) => unknown;
+    readonly clearTimer?: (handle: unknown) => void;
+}
+
+/**
  * `connect`, reporting: an open says so, and so does a close nobody asked for.
  * A close the transport made itself (the actor's last subscription ended, the
  * app unmounted) is not a drop. A dial that never opened is one: the
  * transport retries it with backoff, so the reader is reconnecting.
+ *
+ * With `graceMs`, a drop is reported only when the actor's socket has not
+ * reopened by then (#1024). There is one pending report per `reportingConnect`,
+ * shared by every redial of that actor's transport. An open, or a close the
+ * transport made itself, cancels it.
  */
-export function reportingConnect(connect: SocketConnect, report: SocketReport): SocketConnect {
+export function reportingConnect(connect: SocketConnect, report: SocketReport, options: ReportingOptions = {}): SocketConnect {
+    const { graceMs = 0 } = options;
+    const setTimer = options.setTimer ?? ((run, ms) => setTimeout(run, ms));
+    const clearTimer = options.clearTimer ?? ((h) => clearTimeout(h as ReturnType<typeof setTimeout>));
+    let pending: unknown = null;
+    const cancel = (): void => {
+        if (pending === null) return;
+        clearTimer(pending);
+        pending = null;
+    };
+    const drop = (): void => {
+        if (graceMs <= 0) return report.onDrop?.();
+        pending ??= setTimer(() => {
+            pending = null;
+            report.onDrop?.();
+        }, graceMs);
+    };
     return (handlers) => {
         let closing = false;
         const link = connect({
             onOpen() {
+                cancel();
                 report.onOpen?.();
                 handlers.onOpen();
             },
             onMessage: (message) => handlers.onMessage(message),
             onClose() {
-                if (!closing) report.onDrop?.();
+                if (!closing) drop();
                 handlers.onClose();
             }
         });
@@ -56,6 +93,7 @@ export function reportingConnect(connect: SocketConnect, report: SocketReport): 
             send: (message) => link.send(message),
             close() {
                 closing = true;
+                cancel();
                 link.close();
             }
         };
@@ -216,8 +254,9 @@ const webSocketConnect =
 export function browserSocketFor(type: string, key: string, report: SocketReport = {}): ActorTransport {
     const url = new URL(actorSocketPath(type, key), location.href);
     url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
-    // The transport's own backoff is off: `resilientConnect` paces the redials (jittered, cut short by a wake).
-    return socketTransport({ connect: reportingConnect(resilientConnect(webSocketConnect(url.href)), report), retryMs: 0 });
+    // The transport's own backoff is off: `resilientConnect` paces the redials (jittered, cut short by a wake). A drop
+    // that a redial recovers from within `DROP_GRACE_MS` is a handover, and the pill does not hear about it (#1024).
+    return socketTransport({ connect: reportingConnect(resilientConnect(webSocketConnect(url.href)), report, { graceMs: DROP_GRACE_MS }), retryMs: 0 });
 }
 
 export interface LiveOverSocketsOptions {

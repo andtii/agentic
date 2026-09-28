@@ -107,5 +107,74 @@ describe('liveOverSockets', () => {
             link.fire().onClose();
             expect(said).toEqual(['drop']);
         });
+
+        describe('with a grace (#1024)', () => {
+            /** Timers the test runs by hand. */
+            function fakeTimers() {
+                const pending = new Map<number, () => void>();
+                let next = 0;
+                return {
+                    setTimer: (run: () => void) => (pending.set(++next, run), next),
+                    clearTimer: (h: unknown) => void pending.delete(h as number),
+                    pending: () => pending.size,
+                    fire() {
+                        const runs = Array.from(pending.values());
+                        pending.clear();
+                        for (const run of runs) run();
+                    }
+                };
+            }
+            const handlers = { onOpen: () => {}, onMessage: () => {}, onClose: () => {} };
+
+            it('a drop the socket recovers from within the grace is never reported: a handover after a wake', () => {
+                const said: string[] = [];
+                const timers = fakeTimers();
+                const first = fakeLink();
+                const second = fakeLink();
+                const links = [first, second];
+                const conn = reportingConnect((h) => links.shift()!.connect(h), { onOpen: () => said.push('open'), onDrop: () => said.push('drop') }, { graceMs: 5_000, ...timers });
+                conn(handlers);
+                first.fire().onOpen();
+                first.fire().onClose();
+                expect(timers.pending()).toBe(1);
+                conn(handlers);
+                second.fire().onOpen();
+                expect(timers.pending()).toBe(0);
+                timers.fire();
+                expect(said).toEqual(['open', 'open']);
+            });
+
+            it('a drop still down when the grace ends is reported', () => {
+                const said: string[] = [];
+                const timers = fakeTimers();
+                const first = fakeLink();
+                const retry = fakeLink();
+                const links = [first, retry];
+                const conn = reportingConnect((h) => links.shift()!.connect(h), { onOpen: () => said.push('open'), onDrop: () => said.push('drop') }, { graceMs: 5_000, ...timers });
+                conn(handlers);
+                first.fire().onOpen();
+                first.fire().onClose();
+                conn(handlers);
+                retry.fire().onClose();
+                expect(timers.pending()).toBe(1);
+                timers.fire();
+                expect(said).toEqual(['open', 'drop']);
+            });
+
+            it('a close the transport made itself cancels a pending drop', () => {
+                const said: string[] = [];
+                const timers = fakeTimers();
+                const first = fakeLink();
+                const second = fakeLink();
+                const links = [first, second];
+                const conn = reportingConnect((h) => links.shift()!.connect(h), { onDrop: () => said.push('drop') }, { graceMs: 5_000, ...timers });
+                conn(handlers);
+                first.fire().onOpen();
+                first.fire().onClose();
+                conn(handlers).close();
+                expect(timers.pending()).toBe(0);
+                expect(said).toEqual([]);
+            });
+        });
     });
 });
