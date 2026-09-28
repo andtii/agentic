@@ -13,6 +13,8 @@ const EVERYTHING = [/^pnpm-lock\.yaml$/, /^pnpm-workspace\.yaml$/, /^package\.js
 const LANES = {
     // Worker + ActorHost DO inside workerd, and the acceptance suite.
     workers: [/^apps\/web\//, /^packages\/(core|platform|runtimes|memory|learning|connectors|plugins-git|mcp|a2a|daemon-protocol)\//],
+    // The same acceptance suite against the Node host (#995): what workers covers, plus the host itself.
+    node: [/^apps\/(web|node)\//, /^packages\/(core|platform|runtimes|memory|learning|connectors|plugins-git|mcp|a2a|daemon-protocol)\//],
     // Playwright against the app: the app, the UI it renders, the data under it.
     e2e: [/^apps\/web\//, /^packages\/(ui|core|platform)\//],
     // .size-limit.json entries.
@@ -22,13 +24,13 @@ const LANES = {
 
 /**
  * @param {readonly string[]} files repo-relative, forward slashes
- * @returns {{ code: boolean, workers: boolean, e2e: boolean, size: boolean, scripts: boolean }}
+ * @returns {{ code: boolean, workers: boolean, node: boolean, e2e: boolean, size: boolean, scripts: boolean }}
  */
 export function lanesFor(files) {
     const paths = files.map((f) => f.replaceAll('\\', '/')).filter(Boolean);
-    const all = { code: true, workers: true, e2e: true, size: true, scripts: true };
+    const all = { code: true, workers: true, node: true, e2e: true, size: true, scripts: true };
     if (paths.some((p) => EVERYTHING.some((re) => re.test(p)))) return all;
     const code = paths.filter((p) => !DOCS.some((re) => re.test(p)));
     const hit = (lane) => code.some((p) => LANES[lane].some((re) => re.test(p)));
-    return { code: code.length > 0, workers: hit('workers'), e2e: hit('e2e'), size: hit('size'), scripts: hit('scripts') };
+    return { code: code.length > 0, workers: hit('workers'), node: hit('node'), e2e: hit('e2e'), size: hit('size'), scripts: hit('scripts') };
 }

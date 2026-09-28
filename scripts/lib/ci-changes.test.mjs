@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { lanesFor } from './ci-changes.mjs';
 
-const none = { code: false, workers: false, e2e: false, size: false, scripts: false };
+const none = { code: false, workers: false, node: false, e2e: false, size: false, scripts: false };
 
 test('docs-only changes need no lane', () => {
     assert.deepEqual(lanesFor(['docs/architecture.md', 'AGENTS.md', 'packages/ui/README.md', '.claude/skills/take-issue/SKILL.md']), none);
@@ -11,20 +11,24 @@ test('docs-only changes need no lane', () => {
 
 test('config, lockfile and workflow changes run every lane', () => {
     for (const f of ['pnpm-lock.yaml', 'package.json', 'tsconfig.json', 'vitest.config.ts', '.github/workflows/ci.yml', '.size-limit.json']) {
-        assert.deepEqual(lanesFor([f]), { code: true, workers: true, e2e: true, size: true, scripts: true }, f);
+        assert.deepEqual(lanesFor([f]), { code: true, workers: true, node: true, e2e: true, size: true, scripts: true }, f);
     }
 });
 
-test('a web page change runs workers and e2e, not size', () => {
-    assert.deepEqual(lanesFor(['apps/web/src/pages/Projects.tsx']), { ...none, code: true, workers: true, e2e: true });
+test('a web page change runs workers, node and e2e, not size', () => {
+    assert.deepEqual(lanesFor(['apps/web/src/pages/Projects.tsx']), { ...none, code: true, workers: true, node: true, e2e: true });
 });
 
 test('a ui change runs e2e and size, not workers', () => {
     assert.deepEqual(lanesFor(['packages/ui/src/kit/Tag.tsx']), { ...none, code: true, e2e: true, size: true });
 });
 
-test('a platform change runs workers and e2e', () => {
-    assert.deepEqual(lanesFor(['packages/platform/src/plan/actor.ts']), { ...none, code: true, workers: true, e2e: true });
+test('a platform change runs workers, node and e2e', () => {
+    assert.deepEqual(lanesFor(['packages/platform/src/plan/actor.ts']), { ...none, code: true, workers: true, node: true, e2e: true });
+});
+
+test('a node host change runs the node lane only', () => {
+    assert.deepEqual(lanesFor(['apps/node/src/host.ts']), { ...none, code: true, node: true });
 });
 
 test('a daemon change runs only the unit lane', () => {

@@ -16,6 +16,7 @@
     "deploy:preview": "pnpm run build && wrangler deploy --env preview",
     "deploy:preview:dry-run": "pnpm run build && wrangler deploy --env preview --dry-run",
     "test:workers": "tsc -p __tests__/workers && vitest run --config vitest.workers.config.ts",
+    "test:node": "vitest run --config vitest.node.config.ts",
     "test:acceptance": "tsc -p __tests__/acceptance && vitest run --config vitest.acceptance.config.ts && vitest run --root ../.. apps/web/__tests__/acceptance"
   },
   "dependencies": {
