@@ -1946,8 +1946,9 @@ export function defineRoutingActor(ports: RoutingPorts) {
                 },
 
                 /**
-                 * A chat leaves project `projectId` (#623), or is deleted from it (#674, `reason: 'deleted'`, only once the
-                 * chat reads as deleted): every enabled feature plugin with `onChatReleased` hears it once
+                 * A chat leaves project `projectId` (#623), is deleted from it (#674, `reason: 'deleted'`, only once the
+                 * chat reads as deleted), or its pull request merged while it stays in it (#675, `reason: 'merged'`,
+                 * from `pullMergeRelease`): every enabled feature plugin with `onChatReleased` hears it once
                  * per environment the project has a folder on whose machine is online, with that folder and its daemon;
                  * every call — or an offline machine it could not reach — is audited `project.chat-released`.
                  *
@@ -1969,6 +1970,8 @@ export function defineRoutingActor(ports: RoutingPorts) {
                     if (before ? summary!.projectId !== projectId : reason === 'project-changed' && (!summary || summary.projectId === projectId)) return;
                     // A deletion (#674) is released only once the chat itself says it is deleted, from the project it was in.
                     if (reason === 'deleted' && (summary?.deleted !== true || summary.projectId !== projectId)) return;
+                    // A merge (#675) releases a chat that is still in the project and not deleted: its work there is done, not the chat.
+                    if (reason === 'merged' && (!summary || summary.deleted === true || summary.projectId !== projectId)) return;
                     const project = await as(Workspace, workspaceKey(workspaceId))
                         .projects()
                         .then((all) => all.find((p) => p.id === projectId), () => undefined);
@@ -2011,7 +2014,7 @@ export function defineRoutingActor(ports: RoutingPorts) {
                                 kind: 'project.chat-released',
                                 at,
                                 by: ROUTER,
-                                summary: `chat ${chatId} ${reason === 'deleted' ? 'deleted from' : 'left'} project ${project.name}: ${id} on ${environmentId}: ${error ?? outcome}`,
+                                summary: `chat ${chatId} ${reason === 'deleted' ? 'deleted from' : reason === 'merged' ? 'merged its branch in' : 'left'} project ${project.name}: ${id} on ${environmentId}: ${error ?? outcome}`,
                                 data: { chatId, projectId, pluginId: id, environmentId, reason, ...(outcome !== undefined ? { outcome } : {}), ...(error !== undefined ? { error } : {}) }
                             }).catch(() => undefined);
                         }

@@ -13,7 +13,7 @@ Design: `docs/architecture.md` §9 (project feature plugins) and §7 (feature ho
 | `detect(folder)` | true when the daemon's listing gave the folder a git badge (a repo or a worktree) |
 | `identityOf(folder)` | the badge's `origin`: the repo's identity across machines (compared with `sameOrigin`); the project form fills the `origin` setting from it |
 | `instructions(ctx)` | the project's `instructions` text, trimmed, into every session's `## Project` section |
-| `onChatReleased(input)` | with `worktreeCleanup: 'on-chat-leave'`, remove the chat's worktree when the chat leaves the project (#623) or is deleted (#674) |
+| `onChatReleased(input)` | with `worktreeCleanup: 'on-chat-leave'`, remove the chat's worktree when the chat leaves the project (#623) or is deleted (#674); with `on-merge`, also when its pull request merged (#675) |
 | `beforeSession(input)` | with `worktreePerChat` on and a task from a chat: one `worktree` op per chat and environment, and the session opens in the worktree |
 
 ## Per-project settings (`features['agentic.feature.git']`)
@@ -28,7 +28,7 @@ Design: `docs/architecture.md` §9 (project feature plugins) and §7 (feature ho
 | `worktreeStrategy` | `builtin` \| `command` | `builtin` | `builtin`: the daemon's `worktree` op (`git worktree add`); `command`: the project's own `worktreeCreate` makes it |
 | `worktreeCreate` | string | — | the create command, run in the project folder, as a template: every folder token plus `{path}`; quotes group an argument, nothing else is shell syntax |
 | `worktreeSetup` | string[] | — | commands run in order in a worktree just made (never in a reused one), same tokens |
-| `worktreeCleanup` | `never` \| `on-chat-leave` | `never` | `on-chat-leave`: when a chat is moved out of the project or deleted, its worktree is removed on every online machine — never one with uncommitted changes |
+| `worktreeCleanup` | `never` \| `on-chat-leave` \| `on-merge` | `never` | `on-merge`: as `on-chat-leave`, and also once the chat's pull request merged (#675; the Pulls actor says so, squash merges included). `on-chat-leave`: when a chat is moved out of the project or deleted, its worktree is removed on every online machine — never one with uncommitted changes |
 | `worktreeDeleteBranch` | boolean | `false` | with cleanup on, delete the chat's branch afterwards if it is merged |
 | `worktreeRemove` | string | — | with cleanup on, the project's own remove command (e.g. `pnpm wt rm {branchSlug}`), run in the project folder; empty = the daemon's `worktree-remove` |
 | `reuseExisting` | boolean | `true` | a session folder other than the project's own that is already a linked worktree is used as it is |
@@ -63,6 +63,8 @@ Commands are split into argv (`splitCommand`) and expanded one argument at a tim
 ### Cleanup (#623)
 
 When a chat leaves the project (`Chat.setProject` to another project or none) or is deleted (`Workspace.deleteChat`, #674, `reason: 'deleted'`), the router calls `onChatReleased` once for every environment where the project has a folder and the machine is online. With `worktreeCleanup: 'on-chat-leave'`, the plugin removes the chat's own worktree: the one `chatWorktreeFor` names, never a worktree the user picked.
+
+With `worktreeCleanup: 'on-merge'` (#675) it does the same, and also when the pull request of the chat's branch merged while the chat stays in the project (`reason: 'merged'`). The project's Pulls actor reports the merge, and GitHub's own state counts squash merges. `git branch -d` refuses a squash-merged branch, so that branch is kept and only the worktree goes. The chat's next session makes the worktree again. A branch merged without a pull request is left alone. `docs/decisions.md` 2026-09-28 has the reasoning.
 
 It removes it in one of two ways:
 - **Built in:** the daemon's `worktree-remove`, never forced. A worktree with uncommitted or untracked changes is `dirty` and stays. With `worktreeDeleteBranch` it then runs `git branch -d`, so an unmerged branch is kept.

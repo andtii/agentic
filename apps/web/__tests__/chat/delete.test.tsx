@@ -23,6 +23,7 @@ describe('deleteChatText', () => {
 
     it('names what the cleanup policy does with the chat’s worktree', () => {
         expect(deleteChatText(project({ worktreePerChat: true, worktreeCleanup: 'on-chat-leave' }))).toMatch(/worktree in Agentic is removed .* unless it has uncommitted changes/);
+        expect(deleteChatText(project({ worktreePerChat: true, worktreeCleanup: 'on-merge' }))).toMatch(/worktree in Agentic is removed/);
         expect(deleteChatText(project({ worktreePerChat: true }))).toMatch(/worktree in Agentic stays/);
         expect(deleteChatText(project({ worktreePerChat: true, worktreeCleanup: 'never' }))).toMatch(/worktree in Agentic stays/);
     });

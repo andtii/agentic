@@ -102,6 +102,7 @@ import {
     type PullSourcePort,
     pmSummaryTrigger,
     pullMergeNotices,
+    pullMergeRelease,
 
     definePlanActor,
 
@@ -302,7 +303,7 @@ function platformActors(host: HostPorts, defaultPorts: PlatformPorts, ports: Pla
     // falling back to the workspace's token (#793); no credential → the view says `needs-sign-in`.
     // Autopilot (#820): turns in the PR's chat through the router, rows to the Inbox, the merge through the same adapter and credential (#915).
     // A merge tells the requesters whose request became the plan item it finishes, in their chat, as the manager (#868).
-    const Pulls = definePullsActor({ sources: ports.pulls ?? githubPullSources({ registry, workspace: () => Workspace }), autopilot: pullsAutopilot({ routing: () => Routing, inbox: () => Inbox, registry, workspace: () => Workspace }), merged: pullMergeNotices(), inbox: () => Inbox });
+    const Pulls = definePullsActor({ sources: ports.pulls ?? githubPullSources({ registry, workspace: () => Workspace }), autopilot: pullsAutopilot({ routing: () => Routing, inbox: () => Inbox, registry, workspace: () => Workspace }), merged: pullMergeRelease({ routing: () => Routing, then: pullMergeNotices() }), inbox: () => Inbox });
     const Workspace = defineWorkspace({ ...(sink ? { sink } : {}), ...(store ? { store } : {}), ...withFiles });
     // Removing a member ends its session through the router (#399, architecture §6). A chat titles itself (#460): the
     // runtime's title when one reports it, else the platform's own model call with the workspace's Anthropic key.
