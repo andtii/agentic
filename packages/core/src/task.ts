@@ -73,6 +73,13 @@ export interface TaskContract {
      */
     readonly resumeFrom?: SessionId;
     /**
+     * The plan item (`#n` of `projectId`'s plans) this task carries out (#1047): the plan wake starts one task per
+     * independent item and claims the item for it (`PlanClaim.taskId`). A task carries at most one item; delegated
+     * children do not inherit it. The router hands it to the project's features (`ProjectFeatureSessionInput.planItem`),
+     * so parallel items can each open in a folder of their own.
+     */
+    readonly planItem?: number;
+    /**
      * The model and permission mode the task's session runs with (#450): copied from the chat member by the activation
      * contract. Over the agent's config; a live session reused for the task is configured to them before its prompt.
      */

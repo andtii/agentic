@@ -137,6 +137,8 @@ export interface ProjectFeatureSessionInput extends ProjectFeatureContext {
     readonly machineId?: MachineId;
     /** The folder the router resolved for this session (the project's for the environment unless overridden). */
     readonly cwd: string;
+    /** The plan item the task carries out (`TaskContract.planItem`, #1047), when it carries one: e.g. a worktree per item. */
+    readonly planItem?: number;
     readonly fs: ProjectFeatureFs;
 }
 
