@@ -173,3 +173,5 @@ One slot per sub-issue of [#722](https://github.com/andtii/agentic/issues/722). 
 - #766: none — an e2e spec and media-query fixes; the per-route no-horizontal-scroll check repeats `mobile.spec.ts`'s and could become a shared e2e helper.
 
 - #767: none — removing the old projects pages leaves nothing generic behind.
+
+- #983: none — the combobox recipe patch (`packages/ui/src/design-system/patches/combobox.ts`) makes the control height a floor (`height: auto` + `min-height`) so wrapped multi-select tags grow it; zero-daisyui has the same fixed height upstream (signalxjs/zero#407, fix in signalxjs/zero#408), and our `fieldBase` height keeps needing this override after the bump.

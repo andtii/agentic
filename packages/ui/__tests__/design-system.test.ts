@@ -151,6 +151,13 @@ describe('the agentic design system', () => {
         expect(badge.parts['root']!.base!['fontFamily']).toBe('var(--font-mono)');
     });
 
+    it('lets the combobox control grow when multi-select tags wrap: the input height is a floor, not a cap (#983)', () => {
+        const combobox = designSystem.recipes.find((r) => r.component === 'combobox')!;
+        const control = combobox.parts['control']!.base!;
+        expect(control['height']).toBe('auto');
+        expect(control['minHeight']).toBe('var(--ag-input-h)');
+    });
+
     it('marks the active tab once: our square underline, daisy\'s border-flavor bar and rounding dropped (#700)', () => {
         const tabs = designSystem.recipes.find((r) => r.component === 'tabs')!;
         expect(tabs.defaultVariants?.['variant']).toBe('border');
