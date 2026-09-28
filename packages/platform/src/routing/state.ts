@@ -4,7 +4,7 @@
  * `ctx.save()` at the end of every mutating turn.
  */
 
-import type { AccountKey, AgentId, ApprovalRule, ChatId, EnvironmentId, FrozenAgentConfig, MachineId, OfflinePolicy, ProjectId, PromptPart, RuntimeId, SessionId, SessionOptions, TaskId } from '@agentic/core';
+import type { AccountKey, AgentId, ApprovalRule, ChatId, EnvironmentId, FrozenAgentConfig, MachineId, OfflinePolicy, ProjectFeatureItemReleaseReason, ProjectId, PromptPart, RuntimeId, SessionId, SessionOptions, TaskId } from '@agentic/core';
 import type { TaskReport } from '@agentic/runtimes';
 import type { RegistryGate } from '../registry/types.js';
 
@@ -151,6 +151,25 @@ export interface RoutingState {
      * release (`itemSessionsOf`, #1081). Absent in state saved before #1078.
      */
     itemSessions?: Record<string, ItemSession>;
+    /**
+     * Plan items done or dropped while a route still carries them (#1091, `route.planItem`), by
+     * `pendingItemReleaseKey(projectId, n)`: their release — the item's sessions closed, the features'
+     * `onPlanItemReleased` run — waits until the last such route is gone, so a turn that ticks its own item done keeps
+     * its worktree and session to the end. Absent when none waits.
+     */
+    pendingItemReleases?: Record<string, PendingItemRelease>;
+}
+
+/** A plan item release the router holds back while a task on the item still runs (#1091). */
+export interface PendingItemRelease {
+    readonly projectId: ProjectId;
+    readonly n: number;
+    readonly reason: ProjectFeatureItemReleaseReason;
+}
+
+/** The key of a held-back item release in `RoutingState.pendingItemReleases` (#1091). */
+export function pendingItemReleaseKey(projectId: ProjectId, n: number): string {
+    return `${projectId}|${n}`;
 }
 
 /** A plan item task's session in a chat (#1078). */
