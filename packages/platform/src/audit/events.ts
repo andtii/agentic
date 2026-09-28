@@ -10,7 +10,7 @@
  * contract the history page and other emitters (delegation, #39) build on.
  */
 
-import type { AccountKey, AgentId, ChatId, EnvErrorCode, EnvironmentId, Limits, MachineId, OfflinePolicy, PermissionScope, PlanActor, ProjectFeatureReleaseReason, ProjectId, ReleaseChannel, RequestState, RuntimeId, SessionClosedCode, SessionId, TaskId, TaskStatus, ToolMode, UpdatePolicy, WaitReason } from '@agentic/core';
+import type { AccountKey, AgentId, ChatId, EnvErrorCode, EnvironmentId, Limits, MachineId, OfflinePolicy, PermissionScope, PlanActor, ProjectFeatureItemReleaseReason, ProjectFeatureReleaseReason, ProjectId, ReleaseChannel, RequestState, RuntimeId, SessionClosedCode, SessionId, TaskId, TaskStatus, ToolMode, UpdatePolicy, WaitReason } from '@agentic/core';
 
 export const AUDIT_KINDS = [
     'approval.requested',
@@ -51,6 +51,7 @@ export const AUDIT_KINDS = [
     'plugin.activated',
     'project.changed',
     'project.chat-released',
+    'project.item-released',
     'secret.opened',
     'session.interrupted',
     'session.resumed',
@@ -435,6 +436,22 @@ export interface ProjectChatReleasedData {
 }
 
 /**
+ * `project.item-released` (#1081): a plan item of the project was done or dropped, and one of the project's feature
+ * plugins tidied up after it on one environment (`onPlanItemReleased`) — what it said it did, or why it could not.
+ */
+export interface ProjectItemReleasedData {
+    readonly projectId: ProjectId;
+    readonly planItem: number;
+    readonly pluginId: string;
+    readonly environmentId: EnvironmentId;
+    readonly reason: ProjectFeatureItemReleaseReason;
+    /** What the plugin did, as it said. */
+    readonly outcome?: string;
+    /** Why it could not: the plugin's error, or the machine being offline. */
+    readonly error?: string;
+}
+
+/**
  * `session.interrupted` (#366; OPS-05, OPS-06): the machine stopped hosting a session mid-turn and the turn was cut
  * short (`Session.hostEnded`). `host` is the daemon's close code (`restart`, `update`, …), `closed` when it gave none.
  */
@@ -547,6 +564,7 @@ export interface AuditDataByKind {
     readonly 'plugin.activated': PluginActivatedData;
     readonly 'project.changed': ProjectChangedData;
     readonly 'project.chat-released': ProjectChatReleasedData;
+    readonly 'project.item-released': ProjectItemReleasedData;
     readonly 'secret.opened': SecretOpenedData;
     readonly 'session.interrupted': SessionInterruptedData;
     readonly 'session.resumed': SessionResumedData;

@@ -82,7 +82,7 @@
  * machine, and the machine may not drive sessions.
  */
 
-import { accountKeyFor, accountRefOf, actorKey, enabledProjectFeatures, type ProjectFeatureReleaseReason, type ProjectId, BYPASS_PERMISSIONS_MODE, createId, environmentsForAccount, hasScope, isChatFilePart, isTerminal, parseProjectFolderKey, pathWithin, projectFolderFor, projectFolderIsShared, SESSION_EVENTS_TOPIC, type AccountKey, type AccountRef, type AgentId, type ApprovalRule, type Author, type ChatEntry, type ChatFilePart, type ChatId, type ChatRoster, type EnvironmentDescriptor, type EnvironmentId, type FrozenAgentConfig, type FsOp, type SessionOptions, type HostOs, type MachineId, type OpenSpec, type OpenSpecPolicy, type Principal, type ProjectRecord, type PromptPart, type RuntimeId, type SessionClosedCode, type SessionEvent, type SessionId, type TaskError, type TaskId, type ToolGrant, type WaitReason, type WorkdirRef, type WorkspaceId } from '@agentic/core';
+import { accountKeyFor, accountRefOf, actorKey, enabledProjectFeatures, type ProjectFeatureItemReleaseReason, type ProjectFeatureReleaseReason, type ProjectId, BYPASS_PERMISSIONS_MODE, createId, environmentsForAccount, hasScope, isChatFilePart, isTerminal, parseProjectFolderKey, pathWithin, projectFolderFor, projectFolderIsShared, SESSION_EVENTS_TOPIC, type AccountKey, type AccountRef, type AgentId, type ApprovalRule, type Author, type ChatEntry, type ChatFilePart, type ChatId, type ChatRoster, type EnvironmentDescriptor, type EnvironmentId, type FrozenAgentConfig, type FsOp, type SessionOptions, type HostOs, type MachineId, type OpenSpec, type OpenSpecPolicy, type Principal, type ProjectRecord, type PromptPart, type RuntimeId, type SessionClosedCode, type SessionEvent, type SessionId, type TaskError, type TaskId, type ToolGrant, type WaitReason, type WorkdirRef, type WorkspaceId } from '@agentic/core';
 import { buildSystemPrompt, type TaskReport } from '@agentic/runtimes';
 import { actor, defineActor, topic, type ActorClientWith, type ActorContext, type ActorPolicy, type AnyActorDefinition } from '@sigx/actors';
 import type { AgentEvent, AgentTranscript } from '@sigx/ai-agent';
@@ -108,7 +108,9 @@ import { hydrateChatFiles, withChatFileRead } from './files.js';
 import { parseRoutingKey, ROUTING_TYPE } from './key.js';
 import { locateEnvironment, readMachine, type LocatedEnvironment } from './locate.js';
 import type { RoutingPorts } from './ports.js';
-import { forgetItemSession, isItemSession, itemSessionKey, recordItemSession } from './bindings.js';
+import { forgetItemSession, isItemSession, itemSessionKey, itemSessionsOf, recordItemSession } from './bindings.js';
+import { definePlanActor, ITEM_STATES_MAX } from '../plan/actor.js';
+import { planKey } from '../plan/key.js';
 import { initialRoutingState, type Route, type RoutingState } from './state.js';
 
 /** How far back (entries) the router looks for a chat task's triggering message, for its attachments. */
@@ -253,6 +255,11 @@ const machineOnly: ActorPolicy = (principal: Principal | null) => principal?.kin
 const ownTask: ActorPolicy = (principal: Principal | null) => principal?.kind === 'agent' && principal.taskId !== undefined;
 /** `endSession`: a person, or an external client acting for one — never an agent, which must not wipe its own or another's conversation (#399). */
 const userOrExternal: ActorPolicy = (principal: Principal | null) => principal?.kind === 'user' || principal?.kind === 'external';
+const userOnly: ActorPolicy = (principal: Principal | null) => principal?.kind === 'user';
+
+/** The Plan actor as a client handle (#1081), made on first use: `plan/actor` reaches this module back through the Workspace. */
+let planStore: ReturnType<typeof definePlanActor> | undefined;
+const PlanStore = () => (planStore ??= definePlanActor());
 
 /** The final assistant text of one turn (sub-agent output stays nested under its call). */
 function finalText(transcript: AgentTranscript | undefined, turnId: string): string {
@@ -402,7 +409,7 @@ export function defineRoutingActor(ports: RoutingPorts) {
     const definition = defineActor({
         type: ROUTING_TYPE,
         authorize: [sameWorkspace],
-        methodAuthorize: { run: taskDriver, turnEnded: taskDriver, deliverAnswer: taskDriver, questionCancelled: taskDriver, machineOnline: machineOnly, machineOffline: machineOnly, autoResume: taskDriver, expireOffline: taskDriver, recheck: taskDriver, sessionOpened: machineOnly, sessionClosed: machineOnly, slotFreed: machineOnly, promptRefused: machineOnly, report: ownTask, endSession: userOrExternal },
+        methodAuthorize: { run: taskDriver, turnEnded: taskDriver, deliverAnswer: taskDriver, questionCancelled: taskDriver, machineOnline: machineOnly, machineOffline: machineOnly, autoResume: taskDriver, expireOffline: taskDriver, recheck: taskDriver, sessionOpened: machineOnly, sessionClosed: machineOnly, slotFreed: machineOnly, promptRefused: machineOnly, report: ownTask, endSession: userOrExternal, planItemReleased: userOnly },
         state: (): RoutingState => initialRoutingState(),
         /** The machine-lost reminder (#366): `expireOffline` runs as its own turn under the driver, one-way. */
         onReminder: async (ctx, name) => {
@@ -1314,6 +1321,31 @@ export function defineRoutingActor(ports: RoutingPorts) {
             const readPairedMachine = (machineId: MachineId) => readMachine(workspaceId, machineId, { machines: ports.machines, driver });
 
             /**
+             * The folders of `project` a release runs on (#623, #1081), each with where it lives: an override or a pre-#702
+             * entry names its environment; a machine's folder (#702) runs once, on the first environment of that machine whose
+             * roots hold it and has no override — and is skipped when none does. `located` is null when no machine reports the
+             * environment; the caller audits an offline one rather than calling it.
+             */
+            async function releaseFolders(project: ProjectRecord): Promise<{ readonly cwd: string; readonly environmentId: EnvironmentId; readonly located: LocatedEnvironment | null }[]> {
+                const out: { cwd: string; environmentId: EnvironmentId; located: LocatedEnvironment | null }[] = [];
+                for (const [key, cwd] of Object.entries(project.folders)) {
+                    if (!cwd) continue;
+                    const parsed = parseProjectFolderKey(key);
+                    if (!parsed) continue;
+                    let located: LocatedEnvironment | null = null;
+                    if (parsed.machineId === undefined) located = await locate(parsed.environmentId!).catch(() => null);
+                    else {
+                        const m = await readPairedMachine(parsed.machineId).catch(() => null);
+                        const env = m?.environments.find((e) => (parsed.environmentId !== undefined ? e.id === parsed.environmentId : projectFolderIsShared(project, e.id, parsed.machineId!) && pathWithin(cwd, e.cwdRoots, osOf(m))));
+                        if (m && env) located = { machine: m, env };
+                        else if (parsed.environmentId === undefined) continue;
+                    }
+                    out.push({ cwd, environmentId: located?.env.id ?? parsed.environmentId!, located });
+                }
+                return out;
+            }
+
+            /**
              * The one question to the Registry before NEW work on `runtime` (§9, AC-13): `undefined` when the app has no
              * Registry — nothing is gated. A plugin that is missing or turned off, or a Registry that cannot be asked,
              * comes back as the error the task fails with; running work is never touched.
@@ -2019,25 +2051,13 @@ export function defineRoutingActor(ports: RoutingPorts) {
                     if (!project) return;
                     const at = now();
                     const failures: string[] = [];
+                    let folders: Awaited<ReturnType<typeof releaseFolders>> | undefined;
                     for (const id of enabledProjectFeatures(project)) {
                         const plugin = Object.hasOwn(projectFeatures, id) ? projectFeatures[id] : undefined;
                         if (!plugin?.onChatReleased) continue;
+                        folders ??= await releaseFolders(project);
                         const settings = featureSettings(plugin, project, id);
-                        for (const [key, cwd] of Object.entries(project.folders)) {
-                            if (!cwd) continue;
-                            // Where the folder lives (#702): an override or a pre-#702 entry names its environment; a machine's
-                            // folder runs once, on the first environment of that machine whose roots hold it and has no override.
-                            const parsed = parseProjectFolderKey(key);
-                            if (!parsed) continue;
-                            let located: LocatedEnvironment | null = null;
-                            if (parsed.machineId === undefined) located = await locate(parsed.environmentId!).catch(() => null);
-                            else {
-                                const m = await readPairedMachine(parsed.machineId).catch(() => null);
-                                const env = m?.environments.find((e) => (parsed.environmentId !== undefined ? e.id === parsed.environmentId : projectFolderIsShared(project, e.id, parsed.machineId!) && pathWithin(cwd, e.cwdRoots, osOf(m))));
-                                if (m && env) located = { machine: m, env };
-                                else if (parsed.environmentId === undefined) continue;
-                            }
-                            const environmentId = located?.env.id ?? parsed.environmentId!;
+                        for (const { cwd, environmentId, located } of folders) {
                             let outcome: string | undefined;
                             let error: string | undefined;
                             if (!located?.machine.online) error = `environment ${environmentId} is offline or no machine reports it`;
@@ -2061,6 +2081,86 @@ export function defineRoutingActor(ports: RoutingPorts) {
                         }
                     }
                     if (before && failures.length) throw new ServerFnError(409, failures.join('; ').slice(0, 1_000));
+                },
+
+                /**
+                 * Plan items of project `projectId` done or dropped (#1081, from the Plan actor's `PlanReleasePort`,
+                 * `routerPlanRelease`): an item is released only while the Plan still reads it in the state named — so a stray or
+                 * late call (the item reopened since) changes nothing. Then, for each: its sessions (`itemSessionsOf`, #1078) are
+                 * forgotten, and each is closed unless something still needs it — a route running on it, the chat's binding naming
+                 * it (an item run without its own worktree shares the chat's session, which lives on), or another item's record;
+                 * and every enabled feature plugin with `onPlanItemReleased` hears it once per folder of the project, the walk
+                 * `chatReleased` makes — an offline machine audited, not called. Every call is audited `project.item-released`.
+                 * Best effort: a throw is audited and never reaches the caller. A user only (the port calls as the workspace user).
+                 */
+                async planItemReleased(projectId: ProjectId, items: readonly { readonly n: number; readonly reason: ProjectFeatureItemReleaseReason }[]): Promise<void> {
+                    if (!Array.isArray(items) || items.length > ITEM_STATES_MAX) throw new ServerFnError(400, 'routing: planItemReleased takes a list of released items');
+                    const asked = items.filter((i) => Number.isSafeInteger(i?.n) && (i.reason === 'done' || i.reason === 'dropped'));
+                    if (!asked.length) return;
+                    const states = await as(PlanStore(), planKey(workspaceId, projectId))
+                        .itemStates(asked.map((i) => i.n))
+                        .catch(() => undefined);
+                    if (!states) return;
+                    const released = asked.filter((i) => states[String(i.n)] === i.reason);
+                    if (!released.length) return;
+
+                    // The items' sessions first: forget their records, then close what nothing else needs.
+                    const records = itemSessionsOf(ctx.state, projectId, released.map((i) => i.n));
+                    if (records.length) {
+                        for (const r of records) delete ctx.state.itemSessions![itemSessionKey(r.chatId, r.agentId, r.projectId, r.planItem)];
+                        await ctx.save();
+                        const closing = new Set<SessionId>();
+                        for (const r of records) {
+                            if (closing.has(r.sessionId) || isItemSession(ctx.state, r.sessionId)) continue;
+                            if (Object.values(ctx.state.routes).some((route) => route.sessionId === r.sessionId)) continue;
+                            const bound = await chat(r.chatId)
+                                .get()
+                                .then((summary) => summary.sessions[r.agentId]?.sessionId, () => r.sessionId);
+                            if (bound === r.sessionId) continue;
+                            closing.add(r.sessionId);
+                        }
+                        for (const sessionId of closing) {
+                            await session(sessionId)
+                                .close()
+                                .catch(() => undefined);
+                        }
+                    }
+
+                    const project = await as(Workspace, workspaceKey(workspaceId))
+                        .projects()
+                        .then((all) => all.find((p) => p.id === projectId), () => undefined);
+                    if (!project) return;
+                    const at = now();
+                    let folders: Awaited<ReturnType<typeof releaseFolders>> | undefined;
+                    for (const id of enabledProjectFeatures(project)) {
+                        const plugin = Object.hasOwn(projectFeatures, id) ? projectFeatures[id] : undefined;
+                        if (!plugin?.onPlanItemReleased) continue;
+                        const settings = featureSettings(plugin, project, id);
+                        folders ??= await releaseFolders(project);
+                        for (const { n: planItem, reason } of released) {
+                            for (const { cwd, environmentId, located } of folders) {
+                                let outcome: string | undefined;
+                                let error: string | undefined;
+                                if (!located?.machine.online) error = `environment ${environmentId} is offline or no machine reports it`;
+                                else {
+                                    try {
+                                        outcome = await plugin.onPlanItemReleased({ project, settings, planItem, reason, environmentId, cwd, fs: machineFs(machine(located.machine.machineId), environmentId, { now }) });
+                                    } catch (e) {
+                                        error = (e instanceof Error ? e.message : String(e)).slice(0, 500);
+                                    }
+                                    if (outcome === undefined && error === undefined) continue;
+                                }
+                                await audit.record(ctx, workspaceId, {
+                                    key: `${ctx.key}:item-released:${projectId}:${planItem}:${id}:${located ? `${located.machine.machineId}/` : ''}${environmentId}:${at}`,
+                                    kind: 'project.item-released',
+                                    at,
+                                    by: ROUTER,
+                                    summary: `item #${planItem} of project ${project.name} ${reason === 'done' ? 'done' : 'dropped'}: ${id} on ${environmentId}: ${error ?? outcome}`,
+                                    data: { projectId, planItem, pluginId: id, environmentId, reason, ...(outcome !== undefined ? { outcome } : {}), ...(error !== undefined ? { error } : {}) }
+                                }).catch(() => undefined);
+                            }
+                        }
+                    }
                 },
 
                 /**
