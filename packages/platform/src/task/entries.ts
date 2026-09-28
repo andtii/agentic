@@ -56,6 +56,7 @@ export function applyTaskEntry(state: TaskState, entry: unknown): void {
             if (c.workdir !== undefined) state.workdir = c.workdir;
             if (c.projectId !== undefined) state.projectId = c.projectId;
             if (c.resumeFrom !== undefined) state.resumeFrom = c.resumeFrom;
+            if (c.planItem !== undefined) state.planItem = c.planItem;
             if (c.options !== undefined) state.options = { ...c.options };
             state.owner = e.owner;
             state.depth = e.depth;

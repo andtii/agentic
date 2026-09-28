@@ -86,6 +86,8 @@ export interface FeatureHooksInput {
     readonly environmentId?: EnvironmentId;
     readonly machineId?: MachineId;
     readonly cwd?: string;
+    /** The plan item the task carries out (#1073, `TaskContract.planItem`): handed to `beforeSession`. */
+    readonly planItem?: number;
     readonly fs: ProjectFeatureFs;
 }
 
@@ -119,7 +121,7 @@ export async function runFeatureHooks(input: FeatureHooksInput): Promise<Feature
         const settings = featureSettings(plugin, project, id);
         try {
             if (plugin.beforeSession && input.environmentId !== undefined && cwd !== undefined) {
-                const effect = await plugin.beforeSession({ project, settings, taskId: input.taskId, ...(input.chatId ? { chatId: input.chatId } : {}), environmentId: input.environmentId, ...(input.machineId !== undefined ? { machineId: input.machineId } : {}), cwd, fs: input.fs });
+                const effect = await plugin.beforeSession({ project, settings, taskId: input.taskId, ...(input.chatId ? { chatId: input.chatId } : {}), environmentId: input.environmentId, ...(input.machineId !== undefined ? { machineId: input.machineId } : {}), ...(input.planItem !== undefined ? { planItem: input.planItem } : {}), cwd, fs: input.fs });
                 if (typeof effect?.cwd === 'string' && effect.cwd.trim()) cwd = effect.cwd.trim();
                 if (typeof effect?.instructions === 'string' && effect.instructions.trim()) fragments.push(effect.instructions.trim());
             }
