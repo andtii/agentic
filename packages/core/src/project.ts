@@ -161,6 +161,24 @@ export interface ProjectFeatureChatReleaseInput extends ProjectFeatureContext {
     readonly fs: ProjectFeatureFs;
 }
 
+/**
+ * Why a plan item's work in a project is released (#1075): it is `done` (marked done, or its pull request merged) or
+ * `dropped` (#1041). A reopened item's next task simply starts over.
+ */
+export type ProjectFeatureItemReleaseReason = 'done' | 'dropped';
+
+/**
+ * A plan item's work ended (#1075), for one environment the project has a folder on — `ProjectFeatureChatReleaseInput`
+ * for the item `planItem` a task carried (`ProjectFeatureSessionInput.planItem`): `cwd` is that folder, `fs` its daemon.
+ */
+export interface ProjectFeatureItemReleaseInput extends ProjectFeatureContext {
+    readonly planItem: number;
+    readonly reason: ProjectFeatureItemReleaseReason;
+    readonly environmentId: EnvironmentId;
+    readonly cwd: string;
+    readonly fs: ProjectFeatureFs;
+}
+
 /** What `beforeSession` may change: the folder the session opens in, and text appended to its system prompt. */
 export interface ProjectFeatureSessionEffect {
     readonly cwd?: string;
@@ -206,6 +224,8 @@ export interface ProjectFeaturePreviewLine {
  * - `onChatReleased` (#623): a chat left the project, once per environment the project has a folder on whose
  *   machine is online. Best effort: it never blocks the move, a throw is audited with its message, and the text it
  *   returns (what it did, if anything) goes on the audit record.
+ * - `onPlanItemReleased` (#1075): a plan item is done or dropped, run like `onChatReleased` — once per environment the
+ *   project has a folder on whose machine is online, best effort, audited — for what a plugin made for the item's tasks.
  * - `presets`, `settingsErrors`, `previewSettings` (#621): what the settings form offers beside the schema — named
  *   starting points, the problems a schema cannot express (a template's unknown token) by settings key, and what the
  *   settings would do for a folder of the project. Pure: the form runs them on every edit.
@@ -219,6 +239,7 @@ export interface ProjectFeaturePlugin {
     settingsErrors?(settings: Readonly<Record<string, unknown>>): Readonly<Record<string, string>>;
     previewSettings?(input: ProjectFeaturePreviewInput): readonly ProjectFeaturePreviewLine[];
     onChatReleased?(input: ProjectFeatureChatReleaseInput): Promise<string | undefined>;
+    onPlanItemReleased?(input: ProjectFeatureItemReleaseInput): Promise<string | undefined>;
 }
 
 /** `settings` with a preset's fields laid over them (#621): a `null` field cleared, an `undefined` one ignored, every other field kept as it was. */
