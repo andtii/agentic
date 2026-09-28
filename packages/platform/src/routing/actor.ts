@@ -844,9 +844,9 @@ export function defineRoutingActor(ports: RoutingPorts) {
              * chat's binding (`ChatSummary.sessions[agentId]`) when `reusable`, with the chat's `seenSeq` for the prompt;
              * otherwise — and always for a chatless route — a fresh id. A binding refused is ended first — unless another
              * route still runs on it (#1073) — its `session-ended` drops the chat's row, and the new session's
-             * `session-started` replaces it either way. A plan item task (#1078) binds its item's session instead
-             * (`state.itemSessions`), and a task with no item never takes or ends one — it opens a fresh session when the
-             * chat's binding is an item's.
+             * `session-started` replaces it either way. A plan item task (#1078) binds its item's session first
+             * (`state.itemSessions`), and a task with no item never ends one — it opens a fresh session when the chat's
+             * binding is an item's it cannot reuse.
              * Idempotent: a route already bound (a retry) keeps its id. Called once the placement is final (the folder
              * included), since that is what reuse is judged on.
              */
@@ -882,8 +882,10 @@ export function defineRoutingActor(ports: RoutingPorts) {
                             .catch(() => undefined);
                     };
                     if (route.planItem !== undefined) {
-                        // An item task (#1078) takes its item's session, wherever the chat's binding points now; the chat's
-                        // own session (a binding no item holds) is refused and ended as before, another item's left alone.
+                        // An item task (#1078) takes its item's session, wherever the chat's binding points now; else the
+                        // chat's binding when it can go on (the same folder, or an item session opened before #1078), which
+                        // becomes the item's. A binding refused is ended as before, unless it is another item's.
+                        const record = (sessionId: SessionId): void => recordItemSession(ctx.state, { sessionId, chatId, agentId: route.agentId, ...(route.projectId ? { projectId: route.projectId } : {}), planItem: route.planItem! });
                         const own = ctx.state.itemSessions?.[itemSessionKey(chatId, route.agentId, route.projectId, route.planItem)];
                         if (own && (await reusable(route, own.sessionId))) {
                             route.sessionId = own.sessionId;
@@ -891,19 +893,28 @@ export function defineRoutingActor(ports: RoutingPorts) {
                             return own.sessionId;
                         }
                         if (own) await release(own.sessionId);
-                        if (row && row.sessionId !== own?.sessionId && !isItemSession(ctx.state, row.sessionId)) await release(row.sessionId);
+                        if (row && row.sessionId !== own?.sessionId) {
+                            if (await reusable(route, row.sessionId)) {
+                                route.sessionId = row.sessionId;
+                                route.seenSeq = row.seenSeq;
+                                record(row.sessionId);
+                                return row.sessionId;
+                            }
+                            if (!isItemSession(ctx.state, row.sessionId)) await release(row.sessionId);
+                        }
                         route.sessionId = newSessionId();
-                        recordItemSession(ctx.state, { sessionId: route.sessionId, chatId, agentId: route.agentId, ...(route.projectId ? { projectId: route.projectId } : {}), planItem: route.planItem });
+                        record(route.sessionId);
                         return route.sessionId;
                     }
-                    // A task with no item (#1078) never takes or ends an item's session: it lives on for the item's next task.
-                    if (row && !isItemSession(ctx.state, row.sessionId)) {
+                    // A task with no item (#1078) takes the chat's binding when it can go on — an item's session too, when
+                    // the item runs in the same folder — but never ends an item's session: it lives on for the item's next task.
+                    if (row) {
                         if (await reusable(route, row.sessionId)) {
                             route.sessionId = row.sessionId;
                             route.seenSeq = row.seenSeq;
                             return row.sessionId;
                         }
-                        await release(row.sessionId);
+                        if (!isItemSession(ctx.state, row.sessionId)) await release(row.sessionId);
                     }
                 }
                 route.sessionId = newSessionId();

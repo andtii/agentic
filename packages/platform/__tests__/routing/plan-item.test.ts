@@ -354,3 +354,26 @@ describe("an item task's session is the item's, not the chat's (#1078)", () => {
         expect((await session(first).get()).status).not.toBe('closed');
     });
 });
+
+describe('an item task in the chat\'s own folder (#1078)', () => {
+    const chatOrigin = (chatId: ChatId, n: number) => ({ kind: 'user', chatId, messageId: `msg_${n}` as never }) as const;
+
+    it("without an item worktree, item and non-item tasks share the chat's session and none closes it", async () => {
+        await onlineMachine();
+        const a = await agent('agent_a', { runtime: 'in-memory', defaultEnvironmentId: E1 });
+        const projectId = await project();
+        const { chatId } = await workspace().createChat({ projectId });
+        await chat(chatId).addAgent(a, 'all');
+        const ids: SessionId[] = [];
+        for (const [i, planItem] of [[1, undefined], [2, 4], [3, undefined]] as const) {
+            await createTask(`t${i}`, a, { origin: chatOrigin(chatId, i), projectId, ...(planItem !== undefined ? { planItem } : {}) });
+            await routing().run(`t${i}` as TaskId);
+            await settled(`t${i}`);
+            expect((await task(`t${i}`).get()).status).toBe('completed');
+            ids.push((await task(`t${i}`).get()).sessionId as SessionId);
+            await until(async () => (await chat(chatId).get()).sessions[a]?.sessionId === ids[0], "the chat's binding");
+        }
+        expect(new Set(ids).size).toBe(1);
+        expect((await session(ids[0]!).get()).status).not.toBe('closed');
+    });
+});
