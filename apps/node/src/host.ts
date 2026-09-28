@@ -1,0 +1,176 @@
+/**
+ * The platform on one Node process (#988, architecture §3 "Hosts").
+ *
+ * `createNodeHost` builds the host-neutral platform (`createPlatform`, #987)
+ * over this host's ports — the secrets from `NodeHostEnv`, `fsBucket` files,
+ * the local purge, the `Map` of daemon sockets — and runs every actor in ONE
+ * `@sigx/actors` host on the given storage (`sqliteStorage` in production),
+ * with the default timer scheduler, sharded reminders and roster task
+ * liveness. Unlike a Durable Object, the process lives on: `onDeactivate`
+ * runs, idle activations are swept, and `host.stop()` drains on shutdown.
+ *
+ * `fetch` serves every HTTP route in the Worker's order (`entry.cloudflare.ts`):
+ *
+ *     dev login / auth / A2A / files / connectors  ->  actor mount (`/_sigx/actor`)
+ *                    ->  `fallback` (server functions, then the document render)
+ *
+ * Static assets are the server's (`server.ts`), before this. The sockets are
+ * transport-free here: `openActorSocket` builds the `@sigx/actors` socket
+ * session for `/_sigx/socket/*`, and `daemon` accepts, feeds and closes a
+ * daemon socket with the host-neutral checks from `apps/web/src/daemon`.
+ */
+import type { AnyActorDefinition, ActorStorage, Host } from '@sigx/actors';
+import { defineActorApp, type ActorApp, type HostDefaults } from '@sigx/actors/host';
+import { createActorSocketSession, createFetchHandler, type ActorSocketSession } from '@sigx/actors/server';
+import { asPrincipal, machinePrincipal, type MachineActor } from '@agentic/platform';
+import { createA2aMount } from '../../web/src/a2a/mount';
+import { observeSlowTurns } from '../../web/src/actors/slow-turns';
+import { devLoginEnabled, devLoginRouteFor } from '../../web/src/auth/dev-login';
+import { createAuthMount, githubEnabled } from '../../web/src/auth/mount';
+import { setSignInOptions } from '../../web/src/auth/sign-in';
+import { createConnectorMount } from '../../web/src/connectors/routes';
+import { DAEMON_PING, identifyDaemon, verifyDaemonToken, type DaemonIdentity } from '../../web/src/daemon';
+import { createFilesMount, type WaitUntilLike } from '../../web/src/files/route';
+import { runWithHost } from '../../web/src/host-scope';
+import { createPlatform, machineDefinition, pairingWiring, stampServerApp, type HostPorts, type PlatformPorts } from '../../web/src/platform.app';
+import { conduitConnectorCatalogue } from '../../web/src/plugins/catalogue';
+import { r2ArtifactSink, type R2BucketLike } from '../../web/src/retention';
+import { nodeDaemonSockets, type DaemonSocketLike, type NodeDaemonSockets } from './daemon-sockets';
+import type { NodeHostEnv } from './home';
+
+export interface NodeHostOptions {
+    /** The actors' durable storage — `sqliteStorage` in production. The purge clears records on it directly. */
+    readonly storage: ActorStorage;
+    /** Chat attachments and exports — `fsBucket(<home>/files)` in production. */
+    readonly bucket: R2BucketLike;
+    readonly env: NodeHostEnv;
+    /** What the actor mount does not own: server functions, then the document render (`apps/web/src/entry.node.ts`). */
+    readonly fallback?: (request: Request) => Response | Promise<Response>;
+    /** Host defaults (`callTimeoutMs`, `reminderTickMs`, …); the `@sigx/actors` defaults otherwise. */
+    readonly defaults?: HostDefaults;
+    /** Overrides of the platform's default ports (tests). */
+    readonly ports?: Partial<PlatformPorts>;
+    /** The actor registry instead of the platform's (tests). */
+    readonly actors?: (platformActors: (ports?: PlatformPorts) => readonly AnyActorDefinition[]) => readonly AnyActorDefinition[];
+}
+
+/** A daemon socket the host accepted — handed back on every message and on close. */
+export interface AcceptedDaemon {
+    readonly who: DaemonIdentity;
+}
+
+export interface NodeDaemonEndpoint {
+    /** Check an upgrade at `/_agentic/daemon/{id}`: the identity to accept, or the refusal to write. */
+    verify(request: Request): Promise<DaemonIdentity | Response>;
+    /** The upgrade completed: `ws` is the machine's socket now. */
+    opened(who: DaemonIdentity, ws: DaemonSocketLike): void;
+    /** One text frame from the daemon. */
+    message(who: DaemonIdentity, ws: DaemonSocketLike, text: string): Promise<void>;
+    /** The socket closed; the machine goes offline unless a redial replaced it. */
+    closed(who: DaemonIdentity, ws: DaemonSocketLike): Promise<void>;
+}
+
+export interface NodeHost {
+    readonly app: ActorApp;
+    readonly host: Host;
+    readonly actors: readonly AnyActorDefinition[];
+    readonly daemonSockets: NodeDaemonSockets;
+    /** Every HTTP route but the static assets. */
+    fetch(request: Request, ctx?: WaitUntilLike): Promise<Response>;
+    /** The client socket session for an upgrade at `/_sigx/socket/*`. Rejects (after `close`) when the upgrade is refused. */
+    openActorSocket(request: Request, send: (message: string) => void, close: (code: number, reason: string) => void): Promise<ActorSocketSession>;
+    readonly daemon: NodeDaemonEndpoint;
+    /** Drain turns and flush state (`host.stop()`). */
+    stop(options?: { timeoutMs?: number }): Promise<void>;
+}
+
+/** Start the platform's actors on `options.storage` and return its routes and socket endpoints. */
+export async function createNodeHost(options: NodeHostOptions): Promise<NodeHost> {
+    const { env, storage } = options;
+    const daemonSockets = nodeDaemonSockets();
+    // Resolved once the host exists; the purge and `runWithHost` read it at call time.
+    let started: Host | undefined;
+    const need = (): Host => {
+        if (!started) throw new Error('[node] the actor host is not started');
+        return started;
+    };
+
+    const hostPorts: HostPorts = {
+        secrets: {
+            sessionSecret: () => env.SESSION_SECRET,
+            workspaceKek: () => env.WORKSPACE_KEK,
+            appOrigin: () => env.APP_ORIGIN
+        },
+        files: () => options.bucket,
+        artifacts: r2ArtifactSink(() => options.bucket),
+        // `deleteAll` / "new session": deactivate the live activation first, so nothing re-saves, then clear the record.
+        workspaceStore: {
+            async purge(ref) {
+                await need().deactivate({ type: ref.type, key: ref.key }, 'explicit');
+                const record = await storage.load(ref.type, ref.key);
+                if (record) await storage.clear(ref.type, ref.key, record.etag);
+            }
+        },
+        daemonSockets: daemonSockets.port,
+        runWithHost
+    };
+
+    const platform = createPlatform(hostPorts);
+    const ports: PlatformPorts = { ...platform.defaultPorts, ...options.ports };
+    const actors = options.actors ? options.actors((p) => platform.actors(p ?? ports)) : platform.actors(ports);
+    const Machine: MachineActor = machineDefinition(actors);
+    stampServerApp(env.SESSION_SECRET, actors);
+
+    const app = defineActorApp({ storage, actors: [...actors], ...(options.defaults ? { defaults: options.defaults } : {}) });
+    const actorFetch = createFetchHandler(app, options.fallback ? { fallback: options.fallback } : {});
+    const host = await app.start();
+    started = host;
+    observeSlowTurns(host);
+
+    const authRoute = createAuthMount({ pairing: pairingWiring(actors), actors, files: platform.files });
+    const filesRoute = createFilesMount({ store: platform.files });
+    const a2aRoute = createA2aMount({ actors });
+    const connectorsRoute = createConnectorMount({ connectors: conduitConnectorCatalogue });
+
+    const asMachine = (who: DaemonIdentity) => host.actor(Machine, who.key).with({ context: asPrincipal(machinePrincipal(who.workspaceId, who.machineId)) });
+
+    return {
+        app,
+        host,
+        actors,
+        daemonSockets,
+        fetch(request, ctx) {
+            // One host in the process, but the same scope the Worker enters: an ambient hop inside resolves to it.
+            return runWithHost(host, async () => {
+                setSignInOptions({ github: githubEnabled(env, request), devLogin: devLoginEnabled(env) });
+                const route = devLoginRouteFor(request, env) ?? authRoute(request, env) ?? a2aRoute(request, env) ?? filesRoute(request, env, ctx) ?? connectorsRoute(request, env);
+                return route ? route(request) : actorFetch(request);
+            });
+        },
+        openActorSocket: (request, send, close) => runWithHost(host, () => createActorSocketSession({ host, request, send, close })),
+        daemon: {
+            async verify(request) {
+                const who = identifyDaemon(request);
+                if (who instanceof Response) return who;
+                return (await runWithHost(host, () => verifyDaemonToken(who, host, Machine))) ?? who;
+            },
+            opened(who, ws) {
+                daemonSockets.add(who.key, ws);
+            },
+            async message(who, ws, text) {
+                // The keepalive is the host's to answer (#984) — it never reaches the actor.
+                if (text === DAEMON_PING) {
+                    daemonSockets.pinged(who.key, ws);
+                    ws.send(DAEMON_PING);
+                    return;
+                }
+                await runWithHost(host, () => asMachine(who).socketMessage(text));
+            },
+            async closed(who, ws) {
+                if (!daemonSockets.remove(who.key, ws)) return;
+                await runWithHost(host, () => asMachine(who).socketClosed());
+            }
+        },
+        stop: (opts) => app.stop(opts)
+    };
+}
