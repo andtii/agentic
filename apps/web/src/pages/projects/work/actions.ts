@@ -36,6 +36,8 @@ export const workNotice = signal({ text: '', undo: false, error: '' });
 export const workHidden = signal({ ids: [] as string[] });
 
 let pending: { readonly action: 'stop' | 'dismiss'; readonly taskId: TaskId; readonly actions: WorkActions; timer?: ReturnType<typeof setTimeout> } | undefined;
+/** Bumped by every action: a late failure only speaks when no newer action has taken the notice. */
+let noticeSeq = 0;
 
 const hide = (id: string): void => {
     if (!workHidden.ids.includes(id)) workHidden.ids = [...workHidden.ids, id];
@@ -45,23 +47,37 @@ const show = (id: string): void => {
 };
 const failed = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
-/** Send a stop still waiting on its Undo window now (another action, or the notice closing, ends the window). */
+/**
+ * End the Undo window of the last Stop or Dismiss (another action, or the notice closing, ends it): a Stop is sent
+ * now. Either way the row stops being hidden here once the server has it — the index then leaves it out on its own —
+ * so hidden ids do not pile up or outlive a dismissal someone else undoes.
+ */
 export function flushWorkAction(): void {
     const p = pending;
     pending = undefined;
-    if (!p || p.action !== 'stop') return;
+    if (!p) return;
     clearTimeout(p.timer);
-    p.actions.stop(p.taskId).catch((e: unknown) => {
+    if (p.action === 'dismiss') {
         show(p.taskId);
-        workNotice.text = '';
-        workNotice.undo = false;
-        workNotice.error = `Could not stop it: ${failed(e)}`;
-    });
+        return;
+    }
+    const seq = noticeSeq;
+    p.actions.stop(p.taskId).then(
+        () => show(p.taskId),
+        (e: unknown) => {
+            show(p.taskId);
+            if (seq !== noticeSeq) return;
+            workNotice.text = '';
+            workNotice.undo = false;
+            workNotice.error = `Could not stop it: ${failed(e)}`;
+        }
+    );
 }
 
 /** Run one action on a task's row; `title` names it in the notice. */
 export async function runWorkAction(actions: WorkActions, action: WorkAction, taskId: TaskId, title: string): Promise<void> {
     flushWorkAction();
+    const seq = ++noticeSeq;
     workNotice.error = '';
     if (action === 'stop') {
         hide(taskId);
@@ -78,16 +94,21 @@ export async function runWorkAction(actions: WorkActions, action: WorkAction, ta
     try {
         if (action === 'dismiss') {
             await actions.dismiss(taskId, true);
+            // A newer action took the notice meanwhile: this one is done, with no Undo left to offer.
+            if (seq !== noticeSeq) return show(taskId);
             pending = { action, taskId, actions };
             workNotice.text = `Dismissed “${title}”`;
             workNotice.undo = true;
         } else {
             await actions.retry(taskId);
+            show(taskId);
+            if (seq !== noticeSeq) return;
             workNotice.text = `Started “${title}” again`;
             workNotice.undo = false;
         }
     } catch (e) {
         show(taskId);
+        if (seq !== noticeSeq) return;
         workNotice.text = '';
         workNotice.undo = false;
         workNotice.error = `Could not ${action} it: ${failed(e)}`;
@@ -96,6 +117,7 @@ export async function runWorkAction(actions: WorkActions, action: WorkAction, ta
 
 /** Undo the last Stop (not sent yet) or Dismiss. */
 export async function undoWorkAction(): Promise<void> {
+    ++noticeSeq;
     const p = pending;
     pending = undefined;
     workNotice.text = '';
