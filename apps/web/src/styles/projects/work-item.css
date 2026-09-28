@@ -29,6 +29,7 @@
 
 [data-work-item-next] { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-sm); font-size: var(--text-sm); }
 [data-work-item-next] [data-owner="agent"] { display: inline-flex; align-items: center; gap: var(--space-xs); }
+[data-work-item-next] [data-work-actions] { margin-inline-start: auto; }
 
 [data-work-item-body] {
     display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--space-lg); align-items: start;

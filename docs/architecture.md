@@ -682,6 +682,17 @@ Cancelled, closed and older done work is left out. Live, a task is the project's
 `chatId` ∩ the project's chats), the stages come from `Registry.projectFeatures()`, and `usePulls` / `usePlanItems`
 return `[]` until the git PR store (G2) and the Plan store (PL1) exist.
 
+**Row actions (#1040, COL-12).** A task row without a pull request offers actions (`workActionsOf`): **Stop** while it
+is queued, running or waiting, **Retry** and **Dismiss** once it failed; the work item page shows the same buttons and
+goes back to Work after one. Stop is `TaskActor.cancel('user')` (the COL-12 cascade; the cancelled row is hidden);
+Dismiss is `TaskActor.dismiss(by)` — a `dismissed` log entry on a settled task, `dismissedAt` on its `TaskView` and
+TaskIndex row, so it holds for every viewer and reload (`undismiss` reverses it); Retry reads the failed task and runs
+the Start task path (`startTaskWith`, now with the project's `projectId`) for the same agent, objective, machine and
+folder, then dismisses the failure. Stop and Dismiss need no confirm but raise an Undo toast (`work/actions.ts`,
+`UNDO_MS`): a Stop only reaches the task when its Undo runs out (or on `flush`/`pagehide`), since a cancel cannot be
+taken back. `workItemsOf` and `tallyProjectWork` skip dismissed tasks and failed ones older than `WEEK_MS`, as done work
+ages out.
+
 #### #739 web: work item page for non-Git work
 
 `pages/projects/work/item/`: `WorkItemRoute` sends `pr:<n>` to the pull request page and anything else here. `findWorkItem` resolves the `:item` param — a work item id (`task:<ref>`, `item:<n>`), a bare task ref (`t_52a1`) or plan ref (`#12`), never a pull request — against `WorkItemDetail`s: the `WorkItem` plus its task, chat, session and, when it comes from Plan, the plan title, phase and `PlanItem`. The header draws `StageTrack` and a labelled stepper (`stepsOf`: passed / current in the item's `stageState` / later, over the item's stages or `WORK_STAGES_FALLBACK`) and the owner (YOU or the agent tile) with the next step; the body holds the done-when checklist (plan-backed items only) and the linked task, chat and session. Mock data lives beside the page (`item/fixtures.ts`); live, the page shows an empty state until the Work view (#738) derives work items.

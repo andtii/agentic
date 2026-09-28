@@ -6,7 +6,7 @@
  * The groups follow the Work view's rules (`apps/web/src/pages/projects/work/model.ts`, HANDOFF "Work and pull
  * requests"): one item per open pull request (its task, or a merged one's, folded in), one per task without a pull
  * request, one per plan item no task carries out yet that needs a person or holds a live claim; the owner is whoever
- * acts next. Done work is not counted. Only the group and, for your move, a short verb are kept, so the index stays cheap. Pure.
+ * acts next. Done work, dismissed tasks and failed tasks older than a week (#1040) are not counted. Only the group and, for your move, a short verb are kept, so the index stays cheap. Pure.
  */
 import { isTerminal, planClaimLive, type PlanItem, type PullRequest } from '@agentic/core';
 import type { TaskIndexRow } from '../task/task-index.js';
@@ -25,6 +25,9 @@ export interface ProjectWorkTally {
 
 /** How many moves `next` carries: the card's `Next:` line. */
 export const NEXT_MOVES_MAX = 3;
+
+/** As the Work view: done work and failed tasks older than this leave it (#1040). */
+const WEEK_MS = 7 * 24 * 3_600_000;
 
 /** As the Work view: a PR with no checks reported waits this long for CI before it is treated as a repo without CI. */
 const NO_CHECKS_GRACE_MS = 10 * 60_000;
@@ -101,6 +104,8 @@ export function tallyProjectWork(tasks: readonly TaskIndexRow[], pulls: readonly
     }
     for (const t of tasks) {
         if (usedTasks.has(t.id)) continue;
+        // Dismissed tasks are cleared off Work, and failed ones age out after a week (#1040).
+        if (t.dismissedAt !== undefined || (t.status === 'failed' && now - t.updatedAt > WEEK_MS)) continue;
         const p = placeTask(t);
         if (!p || p.group === 'done') continue;
         placed.push({ placed: p, updatedAt: t.updatedAt });

@@ -11,6 +11,8 @@ import { useAgentDirectory } from '../../../chat/directory';
 import { useChatRows } from '../../../chat/LiveChats';
 import { featuresOf, planItemsOf, projectTasks, useFeatureUi, usePlans, usePulls, useTaskIndexRows } from '../live';
 import { workItemsOf } from '../model';
+import type { WorkActionPorts } from '../actions';
+import { workActionPorts } from '../LiveWork';
 import type { WorkAgentLookup } from '../WorkView';
 import type { WorkItemDetail, WorkItemPlan } from './model';
 
@@ -67,6 +69,8 @@ export function detailsOf(
 export interface LiveWorkItems {
     details(): readonly WorkItemDetail[];
     readonly agentOf: WorkAgentLookup;
+    /** The task actions' live calls (#1040); `undefined` until the workspace is known. */
+    ports(): WorkActionPorts | undefined;
     readonly loading: boolean;
 }
 
@@ -99,6 +103,7 @@ export function useLiveWorkItems(project: () => ProjectRecord): LiveWorkItems {
             const a = directory.lookup(id);
             return { name: a.name, hue: a.hue };
         },
+        ports: () => (viewer.workspaceId ? workActionPorts(defs, viewer.workspaceId, project().id, directory.lookup) : undefined),
         get loading() {
             return index.loading || chats.loading || plans.loading;
         }

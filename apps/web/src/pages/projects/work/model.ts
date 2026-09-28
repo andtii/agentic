@@ -18,6 +18,8 @@ export interface WorkTask {
     readonly branch?: string;
     /** What it is doing now, one line ("Writing tests"). */
     readonly activity?: string;
+    /** When a person cleared it off Work (#1040): a dismissed task is not a work item. */
+    readonly dismissedAt?: number;
     readonly updatedAt: number;
 }
 
@@ -145,7 +147,7 @@ const itemUpdatedAt = (item: PlanItem, now: number): number => (item.activity.le
 /**
  * Every work item of a project, newest first: one per open or recently merged pull request (its task folded in), one
  * per task without a pull request, and one per plan item no task carries out yet that needs a person or holds a claim.
- * Done items older than a week and cancelled or closed work are left out.
+ * Done items and failed tasks older than a week, dismissed tasks (#1040) and cancelled or closed work are left out.
  */
 export function workItemsOf(tasks: readonly WorkTask[], pulls: readonly PullRequest[], planItems: readonly PlanItem[], features: WorkFeatures, now: number = Date.now()): WorkItem[] {
     const stages = workStagesFor(features.enabled, features.uiOf);
@@ -175,9 +177,9 @@ export function workItemsOf(tasks: readonly WorkTask[], pulls: readonly PullRequ
         });
     }
     for (const t of tasks) {
-        if (usedTasks.has(t.id)) continue;
+        if (usedTasks.has(t.id) || t.dismissedAt !== undefined) continue;
         const placed = placeTask(t, stages);
-        if (!placed || (placed.group === 'done' && !recent(t.updatedAt))) continue;
+        if (!placed || ((placed.group === 'done' || t.status === 'failed') && !recent(t.updatedAt))) continue;
         const item = itemOfTask.get(t.id);
         out.push({ id: `task:${t.id}`, title: t.title, taskId: t.id, ...(item ? { itemRef: `#${item.id}` } : {}), stages, ...placed, updatedAt: t.updatedAt });
     }
@@ -189,6 +191,27 @@ export function workItemsOf(tasks: readonly WorkTask[], pulls: readonly PullRequ
         out.push({ id: `item:${item.id}`, title: item.title, itemRef: `#${item.id}`, stages, ...placed, updatedAt });
     }
     return out.sort((a, b) => b.updatedAt - a.updatedAt);
+}
+
+/** What a person can do to a task row from Work (#1040): stop work in flight; retry or dismiss a failure. */
+export type WorkAction = 'stop' | 'retry' | 'dismiss';
+
+/**
+ * The actions a work item offers, in the order the row draws them: a task without a pull request that is queued,
+ * running or waiting can be stopped; a failed one retried or dismissed. Pull requests and plan items offer none here.
+ */
+export function workActionsOf(item: Pick<WorkItem, 'pull' | 'taskId'>, task: Pick<WorkTask, 'id' | 'status'> | undefined): WorkAction[] {
+    if (item.pull !== undefined || !item.taskId || task?.id !== item.taskId) return [];
+    switch (task.status) {
+        case 'queued':
+        case 'active':
+        case 'waiting':
+            return ['stop'];
+        case 'failed':
+            return ['retry', 'dismiss'];
+        default:
+            return [];
+    }
 }
 
 /** The agent a row shows: whoever acts next, else the agent doing the work. */

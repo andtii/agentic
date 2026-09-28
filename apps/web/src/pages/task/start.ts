@@ -10,7 +10,7 @@
  */
 import { signal } from 'sigx';
 import { actor } from '@sigx/actors';
-import { createId, type AgentId, type ChatId, type MachineId, type TaskId, type WorkdirRef } from '@agentic/core';
+import { createId, type AgentId, type ChatId, type MachineId, type ProjectId, type TaskId, type WorkdirRef } from '@agentic/core';
 import type { ActorDefs } from '../../actors/defs';
 import { chatKeyOf, routingKeyOf, taskKeyOf, workspaceKeyOf } from '../../actors/keys';
 import { runActivation, type AgentLookup } from '../chat/live';
@@ -30,6 +30,8 @@ export interface StartTaskInput {
     readonly workdir: WorkdirRef | null;
     /** The machine the chat runs on (#414): the folder's, else the last used one; `null` names none. */
     readonly machineId?: string | null;
+    /** The project the chat belongs to (#1040: Retry from a project's Work view keeps the new task there). */
+    readonly projectId?: string;
 }
 
 export type StartTaskErrors = Partial<Record<'agentId' | 'objective', string>>;
@@ -48,7 +50,10 @@ export function validateStartTask(input: StartTaskInput): StartTaskErrors {
 export async function startTaskWith(defs: ActorDefs, ws: string, input: StartTaskInput, lookup: AgentLookup): Promise<{ readonly chatId: string; readonly taskId: string | null }> {
     const agentId = input.agentId as AgentId;
     const objective = input.objective.trim();
-    const { chatId } = await actor(defs.Workspace, workspaceKeyOf(ws)).createChat(input.machineId ? { machineId: input.machineId as MachineId } : {});
+    const { chatId } = await actor(defs.Workspace, workspaceKeyOf(ws)).createChat({
+        ...(input.machineId ? { machineId: input.machineId as MachineId } : {}),
+        ...(input.projectId ? { projectId: input.projectId as ProjectId } : {})
+    });
     const chat = actor(defs.Chat, chatKeyOf(ws, chatId));
     await chat.addAgent(agentId, 'all');
     await chat.setCoordinator(agentId);

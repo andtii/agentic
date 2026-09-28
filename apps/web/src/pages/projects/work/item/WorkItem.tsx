@@ -3,18 +3,21 @@
  * (the item's stages, else Ready → Do → Review → Done), who acts next and what they do, the task, chat and session it
  * links to, and — when the item comes from Plan — its done-when checklist, refs and activity (#890). `WorkItemRoute` sends `pr:<n>` to the pull
  * request page instead. On mock data the fixtures; live (#790) the work items the Work view derives (#738), each with
- * its task, chat, session and plan item (`live.ts`).
+ * its task, chat, session and plan item (`live.ts`). A task item offers the Work row's actions — Stop, or Retry and
+ * Dismiss when it failed (#1040) — and goes back to Work once one is taken.
  */
 import { component, signal, type Define, type JSXElement } from 'sigx';
-import { Link } from '@sigx/router';
-import { Checkbox } from '@sigx/zero';
+import { Link, useRouter } from '@sigx/router';
+import { Checkbox, Toast } from '@sigx/zero';
 import { formatRef, type Ref, type WorkStageState } from '@agentic/core';
 import { AgentTile, EmptyState, Icon, StageTrack, StatusPill, Tag, type Tone } from '@agentic/ui';
 import { dataMode } from '../../../../data-mode';
 import { AGENTS, formatAge } from '../../../../mock/workspace';
 import { clockNow } from '../../../../time';
 import type { ProjectPageProps } from '../../layout/types';
-import type { WorkAgentLookup } from '../WorkView';
+import { WorkActionButtons, liveRowActions, type WorkAgentLookup, type WorkRowActions } from '../WorkView';
+import { workActionsOf } from '../model';
+import type { TaskStatus, TaskId } from '@agentic/core';
 import { refIcon, refLabel } from '../../features/plan/shared/model';
 import { MOCK_WORK_ITEMS } from './fixtures';
 import { useLiveWorkItems } from './live';
@@ -31,7 +34,20 @@ const mockAgent: WorkAgentLookup = (id) => {
 
 const TONE_OF: Readonly<Record<WorkStageState, Tone>> = { working: 'working', 'needs-you': 'needs-you', failed: 'failed', done: 'live' };
 
-const Header = (d: WorkItemDetail, agentOf: WorkAgentLookup) => {
+/** A task item's actions (#1040), when the page has them (live). */
+interface ItemActions {
+    readonly row: WorkRowActions;
+    /** After an action: back to the Work list, where its Undo toast shows. */
+    readonly done: () => void;
+}
+
+const Actions = (d: WorkItemDetail, actions: ItemActions | undefined) => {
+    if (!actions || !d.task) return null;
+    const list = workActionsOf(d.item, { id: d.task.id as TaskId, status: d.task.status as TaskStatus });
+    return <WorkActionButtons actions={list} task={{ id: d.task.id, title: d.item.title }} rowActions={actions.row} onDone={actions.done} />;
+};
+
+const Header = (d: WorkItemDetail, agentOf: WorkAgentLookup, actions?: ItemActions) => {
     const { item } = d;
     const agentName = (id: string): string => agentOf(id).name;
     const steps = stepsOf(item);
@@ -60,6 +76,7 @@ const Header = (d: WorkItemDetail, agentOf: WorkAgentLookup) => {
                     )}
                 <span data-next-step="">{item.nextStep}</span>
                 <StatusPill status={item.stageState} tone={TONE_OF[item.stageState]} />
+                {Actions(d, actions)}
             </div>
         </header>
     );
@@ -150,12 +167,12 @@ const missing = (item: string) => (
 );
 
 /** The page over one detail, or the not-found state; `pending` while the live reads have not landed. */
-const render = (projectId: string, param: string, d: WorkItemDetail | undefined, agentOf: WorkAgentLookup, pending = false): JSXElement => (
+const render = (projectId: string, param: string, d: WorkItemDetail | undefined, agentOf: WorkAgentLookup, pending = false, actions?: ItemActions): JSXElement => (
     <section aria-label={d?.item.title ?? param} data-work-item={param} data-plan-backed={d?.plan ? 'true' : undefined}>
         {d
             ? (
                 <>
-                    {Header(d, agentOf)}
+                    {Header(d, agentOf, actions)}
                     <div data-work-item-body="">
                         {DoneWhen(d)}
                         {Refs(d, projectId)}
@@ -170,9 +187,16 @@ const render = (projectId: string, param: string, d: WorkItemDetail | undefined,
 
 const LiveWorkItem = component<WorkItemProps>(({ props }) => {
     const live = useLiveWorkItems(() => props.project);
+    const router = useRouter();
+    const actions: ItemActions = { row: liveRowActions(live.ports), done: () => void router.push(`/projects/${props.project.id}/work`) };
     return () => {
         const d = findWorkItem(live.details(), props.item);
-        return render(props.project.id, props.item, d, live.agentOf, !d && live.loading);
+        return (
+            <>
+                {render(props.project.id, props.item, d, live.agentOf, !d && live.loading, actions)}
+                <Toast.Viewport label="Work" />
+            </>
+        );
     };
 }, { name: 'LiveWorkItem' });
 

@@ -54,6 +54,8 @@ export interface TaskIndexRow {
     readonly branch?: string;
     /** What the task is on now, one line (#937): the latest status line. */
     readonly activity?: string;
+    /** When a person cleared the settled task off the Work view (#1040); absent while it shows. */
+    readonly dismissedAt?: number;
     readonly createdAt: number;
     readonly updatedAt: number;
     /** The Task's transition count when the row was written — the forward-only clock. */
@@ -107,6 +109,7 @@ export function taskIndexRowOf(s: TaskState, at: number): TaskIndexRow {
         ...(s.sessionId !== undefined ? { sessionId: s.sessionId } : {}),
         ...(s.branch !== undefined ? { branch: s.branch } : {}),
         ...(s.activity !== undefined ? { activity: s.activity } : {}),
+        ...(s.dismissed !== undefined ? { dismissedAt: s.dismissed.at } : {}),
         createdAt,
         updatedAt: at,
         n: s.transitions.length

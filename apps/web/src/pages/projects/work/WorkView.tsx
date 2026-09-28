@@ -4,11 +4,11 @@
  * reviewer, Done this week (the last two collapsed). Filters: agent, stage, search. The same view with Git on
  * (Ready → Code → PR → Checks → Review → Merge) and without (Ready → Do → Review → Done): the stages are the
  * features', never named here (docs/design/projects/HANDOFF.md, "Work and pull requests"; boards ProjectCode,
- * ProjectPlain).
+ * ProjectPlain). A task row offers Stop, or Retry and Dismiss when it failed (#1040, `actions.ts`).
  */
 import { component, signal, type Define } from 'sigx';
 import { Link } from '@sigx/router';
-import { Field, Input, Select } from '@sigx/zero';
+import { Field, Input, Select, Toast } from '@sigx/zero';
 import type { PlanItem, PullRequest, WorkGroup, WorkItem } from '@agentic/core';
 import { WORK_STAGES_FALLBACK, workStagesFor } from '@agentic/core';
 import { AgentTile, Button, ChecksBar, StageTrack, type AgentHue } from '@agentic/ui';
@@ -22,10 +22,11 @@ import { projectTrail } from '../layout/trail';
 import type { ProjectPageProps } from '../layout/types';
 import { LiveStartTask } from '../../task/LiveStartTask';
 import { openStartTask } from '../../task/start';
+import { workActions, type WorkActionPorts } from './actions';
 import { useLiveWork } from './LiveWork';
 import { PullsSignIn } from './pull/PullsSignIn';
 import { mockWorkFeatures, mockWorkTasks, usePlanItems, usePulls } from './live';
-import { WORK_GROUPS, filterWork, groupWork, isStale, workAgentOf, workItemsOf, type WorkFeatures, type WorkFilter, type WorkTask } from './model';
+import { WORK_GROUPS, filterWork, groupWork, isStale, workActionsOf, workAgentOf, workItemsOf, type WorkAction, type WorkFeatures, type WorkFilter, type WorkTask } from './model';
 
 defineTopbar('project-work', (route) => ({ trail: projectTrail(route, { label: 'Work', href: `/projects/${String(route.params.id)}/work` }) }));
 
@@ -37,6 +38,59 @@ export const workItemParam = (item: WorkItem): string => (item.pull !== undefine
 
 const ALL = '*';
 
+/** What a task row's buttons do (#1040): live, the shared `workActions()` over the Task actor; absent on mock data. */
+export interface WorkRowActions {
+    hidden(taskId: string): boolean;
+    busy(taskId: string): boolean;
+    /** Take an action; `false` when it was not taken (no workspace yet, or the row is busy). */
+    run(action: WorkAction, task: { readonly id: string; readonly title: string }): boolean;
+}
+
+/** The row actions over the shared `workActions()`, calling through `ports` (none yet: the buttons do nothing). */
+export function liveRowActions(ports: () => WorkActionPorts | undefined): WorkRowActions {
+    const actions = workActions();
+    return {
+        hidden: actions.hidden,
+        busy: actions.busy,
+        run: (action, task) => {
+            const p = ports();
+            if (!p || actions.busy(task.id)) return false;
+            void actions.run(action, task, p);
+            return true;
+        }
+    };
+}
+
+const ACTION_VIEW: Readonly<Record<WorkAction, { readonly label: string; readonly icon: 'stop' | 'history' | 'close' }>> = {
+    stop: { label: 'Stop', icon: 'stop' },
+    retry: { label: 'Retry', icon: 'history' },
+    dismiss: { label: 'Dismiss', icon: 'close' }
+};
+
+/** The buttons for a task's actions — on a Work row and on the work item page. */
+export const WorkActionButtons = component<{ actions: readonly WorkAction[]; task: { id: string; title: string }; rowActions: WorkRowActions; onDone?: () => void }>(({ props }) => () => {
+    if (!props.actions.length) return null;
+    const busy = props.rowActions.busy(props.task.id);
+    return (
+        <div data-work-actions="">
+            {props.actions.map((a) => (
+                <Button
+                    intent="default"
+                    icon={ACTION_VIEW[a].icon}
+                    label={`${ACTION_VIEW[a].label} ${props.task.title}`}
+                    disabled={busy}
+                    data-work-action={a}
+                    onClick={() => {
+                        if (props.rowActions.run(a, props.task)) props.onDone?.();
+                    }}
+                >
+                    {ACTION_VIEW[a].label}
+                </Button>
+            ))}
+        </div>
+    );
+}, { name: 'WorkActionButtons' });
+
 export type WorkBoardProps =
     & Define.Prop<'projectId', string, true>
     & Define.Prop<'tasks', readonly WorkTask[], true>
@@ -46,9 +100,11 @@ export type WorkBoardProps =
     & Define.Prop<'agentOf', WorkAgentLookup, true>
     & Define.Prop<'now', number, true>
     /** "New task" opens the Start task dialog; absent (mock data), the button is disabled. */
-    & Define.Prop<'onNewTask', () => void>;
+    & Define.Prop<'onNewTask', () => void>
+    /** Stop, Retry and Dismiss on task rows (#1040); absent (mock data), rows have no buttons. */
+    & Define.Prop<'actions', WorkRowActions>;
 
-const WorkRow = component<{ item: WorkItem; projectId: string; tasks: readonly WorkTask[]; pulls: readonly PullRequest[]; agentOf: WorkAgentLookup; now: number }>(({ props }) => () => {
+const WorkRow = component<{ item: WorkItem; projectId: string; tasks: readonly WorkTask[]; pulls: readonly PullRequest[]; agentOf: WorkAgentLookup; now: number; actions?: WorkRowActions }>(({ props }) => () => {
     const i = props.item;
     const pr = i.pull !== undefined ? props.pulls.find((p) => p.number === i.pull) : undefined;
     const task = i.taskId ? props.tasks.find((t) => t.id === i.taskId) : undefined;
@@ -83,6 +139,7 @@ const WorkRow = component<{ item: WorkItem; projectId: string; tasks: readonly W
                         return <span data-work-agent><AgentTile name={a.name} hue={a.hue} size={20} /><strong>{a.name}</strong></span>;
                     })()}
                 <span data-work-next title={i.nextStep}>{i.nextStep}</span>
+                {props.actions && task ? <WorkActionButtons actions={workActionsOf(i, task)} task={{ id: task.id, title: i.title }} rowActions={props.actions} /> : null}
             </div>
             <Age at={i.updatedAt} now={props.now} class={stale ? 'is-stale' : undefined} />
         </li>
@@ -94,7 +151,9 @@ export const WorkBoard = component<WorkBoardProps>(({ props }) => {
     const st = signal({ agent: ALL as string | null, stage: ALL as string | null, q: '', open: { 'your-move': true, agents: true, waiting: false, done: false } as Record<WorkGroup, boolean> });
     const filter = (): WorkFilter => ({ agent: st.agent && st.agent !== ALL ? st.agent : '', stage: st.stage && st.stage !== ALL ? st.stage : '', q: st.q });
     return () => {
-        const { tasks, pulls, now } = props;
+        const { pulls, now } = props;
+        // A row an action holds off the board (a Stop counting down, a dismissed failure) is left out at once.
+        const tasks = props.actions ? props.tasks.filter((t) => !props.actions!.hidden(t.id)) : props.tasks;
         const all = workItemsOf(tasks, pulls, props.planItems, props.features, now);
         const stages = workStagesFor(props.features.enabled, props.features.uiOf);
         const plain = stages === WORK_STAGES_FALLBACK;
@@ -142,7 +201,7 @@ export const WorkBoard = component<WorkBoardProps>(({ props }) => {
                             </button>
                             {open
                                 ? rows.length
-                                    ? <ul data-work-rows>{rows.map((item) => <WorkRow item={item} projectId={props.projectId} tasks={tasks} pulls={pulls} agentOf={props.agentOf} now={now} />)}</ul>
+                                    ? <ul data-work-rows>{rows.map((item) => <WorkRow item={item} projectId={props.projectId} tasks={tasks} pulls={pulls} agentOf={props.agentOf} now={now} actions={props.actions} />)}</ul>
                                     : <p data-work-empty>{g.id === 'your-move' ? 'Nothing waits on you.' : 'No agent is on anything here.'}</p>
                                 : null}
                         </section>
@@ -177,6 +236,7 @@ const MockWork = component<ProjectPageProps>(({ props }) => {
 
 const LiveWork = component<ProjectPageProps>(({ props }) => {
     const live = useLiveWork(() => props.project);
+    const actions = liveRowActions(live.ports);
     return () => (
         <>
             {live.loading && !live.tasks().length ? <p data-panel-note aria-busy="true">Loading work…</p> : null}
@@ -190,8 +250,10 @@ const LiveWork = component<ProjectPageProps>(({ props }) => {
                 agentOf={live.agentOf}
                 now={Date.now()}
                 onNewTask={() => openStartTask()}
+                actions={actions}
             />
             <LiveStartTask />
+            <Toast.Viewport label="Work" />
         </>
     );
 }, { name: 'LiveWork' });

@@ -134,6 +134,15 @@
 
 [data-work-next] { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+/* Row actions (#1040): compact, at the end of the owner cell; shown on hover or focus, always on touch. */
+[data-work-actions] { display: inline-flex; flex: none; gap: var(--space-2xs); margin-inline-start: auto; }
+[data-work-row] [data-work-actions] { opacity: 0; transition: opacity 120ms ease; }
+[data-work-row]:hover [data-work-actions], [data-work-row]:focus-within [data-work-actions] { opacity: 1; }
+[data-work-row] [data-work-actions] [data-scope="button"] { min-block-size: 0; block-size: auto; padding: 2px var(--space-xs); font-size: var(--text-xs); }
+@media (hover: none) {
+    [data-work-row] [data-work-actions] { opacity: 1; }
+}
+
 [data-work-row] > [data-age] { justify-self: end; font-size: var(--text-xs); color: var(--ag-text-dim); }
 [data-work-row] > [data-age].is-stale { color: var(--color-warning); }
 
