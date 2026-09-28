@@ -58,6 +58,7 @@ import {
     addItems,
     addPhase,
     addRef,
+    answer,
     assign,
     checkActor,
     claim,
@@ -106,6 +107,8 @@ export interface PlanState extends PlanBook {
     auditSeq: number;
     /** When the lease reminder is armed for; absent when none is. */
     leaseAlarm?: number;
+    /** The chat a wake opened for an agent no other chat reached (#1043), by agent label: tried again next time. */
+    wakeChats?: Record<string, ChatId>;
 }
 
 /** What the actor reads of a project: its manager, members and limits, and the Plan feature's settings. */
@@ -267,7 +270,8 @@ export function definePlanActor(options: PlanActorOptions = {}) {
     const turnOf = (ctx: Ctx, caller: PlanActor | null): Turn => {
         const tasks = new Map<number, TaskId>();
         for (const i of Object.values(ctx.state.items)) {
-            const t = i.claim?.taskId ?? i.handedOff?.taskId ?? i.finishedClaim?.taskId;
+            // A question's task first: its answer belongs in the chat that asked (#1043).
+            const t = i.claim?.taskId ?? (i.state === 'needs-you' ? i.ask?.taskId : undefined) ?? i.handedOff?.taskId ?? i.finishedClaim?.taskId;
             if (t !== undefined) tasks.set(i.id, t);
         }
         const p = ctx.principal as Principal | null;
@@ -300,8 +304,12 @@ export function definePlanActor(options: PlanActorOptions = {}) {
                 }
             }
             add(tasks, turn.callerTask);
+            const label = labelOf(notices[0]!.to);
+            add(chats, s.wakeChats?.[label]);
             try {
-                if (await wakePort.wake({ workspaceId: s.workspaceId, projectId: s.projectId, to: notices[0]!.to, notices, tasks, chats })) for (const n of notices) woken.add(n.seq);
+                const reached = await wakePort.wake({ workspaceId: s.workspaceId, projectId: s.projectId, to: notices[0]!.to, notices, tasks, chats });
+                if (reached) for (const n of notices) woken.add(n.seq);
+                if (typeof reached === 'object') (s.wakeChats ??= {})[label] = reached.chatId;
             } catch (error) {
                 console.warn(`[plan] waking ${labelOf(notices[0]!.to)} failed:`, error);
             }
@@ -378,7 +386,8 @@ export function definePlanActor(options: PlanActorOptions = {}) {
 
             /** `write` as `actor` (`null`: the platform itself). */
             const writeAs = async <T,>(actor: PlanActor | null, rule: (book: PlanBook, call: PlanCall) => Outcome<T>): Promise<T> => {
-                const call = await callOf(actor);
+                const p = ctx.principal as Principal | null;
+                const call = { ...(await callOf(actor)), ...(actor?.kind === 'agent' && p?.kind === 'agent' && p.taskId ? { taskId: p.taskId as TaskId } : {}) };
                 const s = ctx.state;
                 const turn = turnOf(ctx, actor);
                 const changes: PlanChange[] = [...expireLeases(s, call)];
@@ -582,6 +591,14 @@ export function definePlanActor(options: PlanActorOptions = {}) {
                 /** Tick done-when lines, add a note, change the state; `done` is a person's. */
                 async update(itemId: number, patch: PlanItemPatch): Promise<PlanItem> {
                     return viewOf(await write((b, c) => update(b, c, itemId, patch)));
+                },
+
+                /**
+                 * Answer the question a `needs-you` item waits on (#1043): it is `ready` again and the agent that asked is
+                 * woken with the answer. People and the project manager.
+                 */
+                async answer(itemId: number, text: string): Promise<PlanItem> {
+                    return viewOf(await write((b, c) => answer(b, c, itemId, text)));
                 },
 
                 /** Attach a ref (object or its text form). */

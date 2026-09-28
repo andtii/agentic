@@ -119,6 +119,8 @@ export interface PlanItemView {
     readonly touches: readonly string[];
     readonly refs: readonly string[];
     readonly doneWhen: readonly PlanDoneWhen[];
+    /** While it needs a person (#1043): who asked, and the question. */
+    readonly ask?: { readonly by: string; readonly text?: string };
 }
 
 const same = (a: PlanActor | undefined, b: PlanActor): boolean => a !== undefined && (a.kind === 'agent' ? b.kind === 'agent' && a.agentId === b.agentId : b.kind === 'user' && a.userId === b.userId);
@@ -166,7 +168,8 @@ export function planItemView(board: PlanBoard, { item, plan, phase }: Located, n
         waitsOn: planItemWaitsOn(item, allItems(board)),
         touches: item.touches,
         refs: item.refs.map(formatRef),
-        doneWhen: item.doneWhen
+        doneWhen: item.doneWhen,
+        ...(item.ask ? { ask: { by: handleOf(board, item.ask.by), ...(item.ask.text !== undefined ? { text: item.ask.text } : {}) } } : {})
     };
 }
 
@@ -280,7 +283,7 @@ export const planUpdateInput = z.object({
     check: z.array(z.number().int().min(0)).optional().describe('Done-when lines to tick, 0-based.'),
     uncheck: z.array(z.number().int().min(0)).optional().describe('Done-when lines to untick, 0-based.'),
     note: z.string().min(1).optional().describe('A note for the item’s History; refs in the shared syntax (`#9`, `pr:604`, `path/file.ts:38-41`) are linked.'),
-    state: z.enum(['ready', 'needs-you', 'blocked', 'done', 'stuck']).optional().describe('A new state. `done` needs every done-when ticked, and the project letting agents tick; use plan_claim to start an item.'),
+    state: z.enum(['ready', 'needs-you', 'blocked', 'done', 'stuck']).optional().describe('A new state. `done` needs every done-when ticked, and the project letting agents tick; use plan_claim to start an item. `needs-you` asks a person: put the question in `note`.'),
     after: z
         .array(z.union([z.number().int().min(1), z.string().min(1).max(300)]))
         .max(50)
@@ -376,7 +379,7 @@ export function planTools(port: PlanPort | undefined) {
         }),
         defineTool({
             name: UPDATE,
-            description: 'Tick or untick done-when lines, add a note to the item’s History, change its state, or (project manager only) replace what it waits on with `after` — including `project#n` items of other projects. `done` needs every done-when ticked; otherwise a person marks it done. Where the project does not let agents tick, a person ticks and marks it done: add a note or set needs-you to ask.',
+            description: 'Tick or untick done-when lines, add a note to the item’s History, change its state, or (project manager only) replace what it waits on with `after` — including `project#n` items of other projects. `done` needs every done-when ticked; otherwise a person marks it done. Where the project does not let agents tick, a person ticks and marks it done: add a note or set needs-you to ask. To ask a person, set `needs-you` with the question as `note` and move on to other work: the answer comes back to you as a Plan message, and the item is ready for you again.',
             input: planUpdateInput,
             annotations: WRITE,
             execute: async (input, ctx) => {

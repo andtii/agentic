@@ -1,7 +1,8 @@
 /**
  * A plan handoff wakes its target on the real `ActorHost` (#938): Forge hands the item it works to Lint, and Lint is
  * told in the plan's chat — a message addressed to Lint, which starts Lint's task — instead of the notice waiting on
- * the Plan actor for Lint's next plan call.
+ * the Plan actor for Lint's next plan call. A person's answer to a needs-you item reaches the agent that asked, and a
+ * note naming an agent no chat reaches opens a project chat with it (#1043).
  */
 import { SELF } from 'cloudflare:test';
 import type { AgentId, ChatId, Principal, SessionId, WorkspaceId } from '@agentic/core';
@@ -20,8 +21,8 @@ const Plan = definePlanActor();
 const TEST_MS = 120_000;
 
 /** A client that calls as `agentId` with a sealed agent token, as a daemon relaying a tool call does. */
-async function asAgent<D extends AnyActorDefinition>(def: D, key: string, agentId: AgentId): Promise<ActorClient<D>> {
-    const principal: Principal & { kind: 'agent' } = { kind: 'agent', workspaceId, agentId, sessionId: `sess_${agentId}` as SessionId };
+async function asAgent<D extends AnyActorDefinition>(def: D, key: string, agentId: AgentId, ws: WorkspaceId = workspaceId): Promise<ActorClient<D>> {
+    const principal: Principal & { kind: 'agent' } = { kind: 'agent', workspaceId: ws, agentId, sessionId: `sess_${agentId}` as SessionId };
     const token = await sealAgentToken(principal, TEST_SESSION_SECRET);
     const transport = fetchTransport({
         endpoint: `${ORIGIN}/_sigx/actor`,
@@ -59,5 +60,38 @@ describe('worker: a plan handoff wakes its target', () => {
         expect(JSON.stringify(wake)).toContain('handed #1 to you: tests pass, review it');
         // Woken, so not delivered a second time on Lint's next plan call.
         expect(await (await asAgent(Plan, key, lint)).takeNotices()).toEqual([]);
+    }, TEST_MS);
+});
+
+describe('worker: a person answers a plan item that needs them (#1043)', () => {
+    it('the asker hears the answer in the plan’s chat; a mention with no chat opens one', async () => {
+        const cookie = await signIn('gh_10430');
+        const ws = 'gh_10430' as WorkspaceId;
+        const workspace = overHttp(Workspace, workspaceKey(ws), cookie);
+        const forge = (await workspace.createAgent({ name: 'Forge' })).agentId as AgentId;
+        const lint = (await workspace.createAgent({ name: 'Lint' })).agentId as AgentId;
+        const project = await workspace.upsertProject({ name: 'ask', members: { agentIds: [forge, lint], coordinator: null } });
+        const { chatId } = await workspace.createChat({ projectId: project.id });
+        const chat = overHttp(Chat, chatKeyOf(ws, chatId as ChatId), cookie);
+        await chat.addAgent(forge, 'all');
+
+        const key = planKey(ws, project.id);
+        const plan = overHttp(Plan, key, cookie);
+        await plan.create({ title: 'Ship', originChatId: chatId as ChatId, phases: [{ title: 'One', items: [{ title: 'store' }] }] });
+        const asForge = await asAgent(Plan, key, forge, ws);
+        await asForge.claim(1);
+        await asForge.update(1, { state: 'needs-you', note: 'which port?' });
+
+        const answered = await plan.answer(1, '8787');
+        expect(answered.state).toBe('ready');
+        const { entries } = await chat.history(null, 20);
+        const told = entries.map((e) => e.entry).filter((e) => e.t === 'msg' && e.mentions.includes(forge));
+        expect(JSON.stringify(told.at(-1))).toContain('which port?');
+        expect(JSON.stringify(told.at(-1))).toContain('8787');
+
+        // Lint is in no chat of the plan: naming it opens a project chat with it.
+        const before = (await workspace.get()).chats.length;
+        await plan.update(1, { note: 'Lint, check the port', mentions: [lint] });
+        expect((await workspace.get()).chats.length).toBe(before + 1);
     }, TEST_MS);
 });

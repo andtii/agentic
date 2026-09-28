@@ -8,6 +8,7 @@ import {
     addItems,
     addPhase,
     addRef,
+    answer,
     assign,
     claim,
     claimRefusal,
@@ -26,6 +27,7 @@ import {
     takeNotices,
     update,
     viewState,
+    watchMembers,
     type PlanBook,
     type PlanCall,
     type PlanItemInput
@@ -307,6 +309,89 @@ describe('update states', () => {
         expect(code(() => update(b, call(person), 1, { taskId: 't_1' as never }))).toBe('forbidden');
         update(b, call(agent(FORGE)), 1, { taskId: 't_1' as never });
         expect(itemOf(b, 1).claim!.taskId).toBe('t_1');
+    });
+});
+
+describe('a question for a person (#1043)', () => {
+    /** Forge claims #1 in task t_1 and asks a person. */
+    function asked(): PlanBook {
+        const b = book();
+        claim(b, call(agent(FORGE)), 1, { taskId: 't_1' as never });
+        update(b, call(agent(FORGE)), 1, { state: 'needs-you', note: 'keep a2a as its own kind?' });
+        takeNotices(b, agent(PM));
+        return b;
+    }
+
+    it('needs-you records who asked, the question and the task; the view carries it', () => {
+        const b = asked();
+        expect(itemOf(b, 1).ask).toEqual({ by: agent(FORGE), text: 'keep a2a as its own kind?', at: T0, taskId: 't_1' });
+        expect(itemView(b, itemOf(b, 1), T0).ask).toMatchObject({ by: agent(FORGE), text: 'keep a2a as its own kind?' });
+    });
+
+    it('an agent asking from a task without a claim records the call’s task', () => {
+        const b = book();
+        assign(b, call(person), 1, agent(FORGE));
+        update(b, call(agent(FORGE), { taskId: 't_9' as never }), 1, { state: 'needs-you' });
+        expect(itemOf(b, 1).ask).toEqual({ by: agent(FORGE), at: T0, taskId: 't_9' });
+    });
+
+    it('a person answers: noted, ready again, the asker told the question and the answer — once', () => {
+        const b = asked();
+        const { changes } = answer(b, call(person), 1, 'yes, keep it');
+        expect(changes).toMatchObject([{ op: 'updated' }]);
+        const item = itemOf(b, 1);
+        expect(item.state).toBe('ready');
+        expect(item.ask).toBeUndefined();
+        expect(item.activity.at(-1)).toMatchObject({ actor: person, text: 'answered: yes, keep it' });
+        watchMembers(b, call(null));
+        const told = takeNotices(b, agent(FORGE));
+        expect(told.map((n) => n.kind)).toEqual(['answer']);
+        expect(told[0]!.text).toContain('"keep a2a as its own kind?": yes, keep it');
+        expect(told[0]!.text).toContain('#1 is ready again');
+        expect(claimRefusal(b, call(agent(FORGE)), FORGE, item)).toBeNull();
+    });
+
+    it('with no asker recorded, the assigned agent hears it', () => {
+        const b = book();
+        assign(b, call(person), 1, agent(LINT));
+        update(b, call(person), 1, { state: 'needs-you' });
+        answer(b, call(person), 1, 'go');
+        expect(takeNotices(b, agent(LINT)).map((n) => n.kind)).toContain('answer');
+    });
+
+    it('only people and the manager answer, and only an item waiting on a person', () => {
+        const b = asked();
+        expect(code(() => answer(b, call(agent(FORGE)), 1, 'me'))).toBe('forbidden');
+        expect(code(() => answer(b, call(person), 2, 'x'))).toBe('invalid');
+        expect(code(() => answer(b, call(person), 1, '  '))).toBe('invalid');
+        answer(b, call(agent(PM)), 1, 'from the manager');
+        expect(itemOf(b, 1).state).toBe('ready');
+    });
+
+    it('leaving needs-you any other way drops the question', () => {
+        const b = asked();
+        update(b, call(person), 1, { state: 'done' });
+        expect(itemOf(b, 1).ask).toBeUndefined();
+    });
+});
+
+describe('mentions in a note (#1043)', () => {
+    it('each named member hears the note; the writer does not', () => {
+        const b = book();
+        update(b, call(person), 1, { note: 'please look at #1', mentions: [FORGE, LINT, FORGE] });
+        expect(takeNotices(b, agent(FORGE))).toMatchObject([{ kind: 'mention', itemId: 1, text: '@u1 mentioned you on #1 (one): please look at #1' }]);
+        expect(takeNotices(b, agent(LINT)).map((n) => n.kind)).toEqual(['mention']);
+        assign(b, call(person), 1, agent(FORGE));
+        update(b, call(agent(FORGE)), 1, { note: 'me and lint', mentions: [FORGE, LINT] });
+        expect(takeNotices(b, agent(FORGE)).filter((n) => n.kind === 'mention')).toEqual([]);
+        expect(takeNotices(b, agent(LINT)).map((n) => n.kind)).toEqual(['mention']);
+    });
+
+    it('refuses a non-member, and mentions without a note', () => {
+        const b = book();
+        expect(code(() => update(b, call(person), 1, { note: 'x', mentions: [OUTSIDER] }))).toBe('invalid');
+        expect(code(() => update(b, call(person), 1, { mentions: [FORGE] }))).toBe('invalid');
+        expect(code(() => update(b, call(person), 1, { note: 'x', mentions: 'agent_forge' as never }))).toBe('invalid');
     });
 });
 
