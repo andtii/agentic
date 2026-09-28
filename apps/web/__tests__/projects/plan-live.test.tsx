@@ -125,6 +125,21 @@ describe('the Plan views on the live Plan store (#926)', () => {
         await until(() => dom.querySelector(`[data-plan-board-column="agent:${scout}"] [data-plan-card="${first.id}"]`) !== null, 'the card in Scout’s column', 10_000);
     });
 
+    it('a board card opens its details, and a comment there is the actor’s `update` (#1037)', { timeout: 30_000 }, async () => {
+        const { project, first, items } = await setUp();
+        const dom = await mountLive(`/projects/${project.id}/plan?view=board`, h, <PlanBoard project={project} />);
+        await until(() => dom.querySelector(`[data-plan-card="${first.id}"]`) !== null, 'the card on the board', 10_000);
+        dom.querySelector<HTMLElement>(`[data-plan-card="${first.id}"]`)!.click();
+        await tick();
+        expect(dom.querySelector('[data-plan-detail-title]')!.textContent).toBe('Collapse the rail');
+        const comment = dom.querySelector<HTMLInputElement>('[data-plan-comment] input')!;
+        comment.value = 'From the board';
+        comment.dispatchEvent(new Event('input', { bubbles: true }));
+        await tick();
+        dom.querySelector<HTMLFormElement>('[data-plan-comment]')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+        await until(async () => (await items()).find((i) => i.id === first.id)!.activity.some((a) => a.text.includes('From the board')), 'the comment in the store', 10_000);
+    });
+
     it('New plan in the graph creates one, and the Overview card reads the plan', { timeout: 30_000 }, async () => {
         const { project, store } = await setUp();
         const dom = await mountLive(`/projects/${project.id}/plan?view=graph`, h, <PlanGraph project={project} />);

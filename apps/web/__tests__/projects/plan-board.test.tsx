@@ -243,4 +243,31 @@ describe('the Plan board on mock data (#755)', () => {
         expect(document.querySelector('[data-plan-board-handoff]')).toBeNull();
         expect(dom.querySelector('[data-plan-board-live]')!.textContent).toContain('handoff note');
     });
+
+    it('a click or Enter opens the card’s details beside the board; Space still picks it up; × closes (#1037)', async () => {
+        const dom = await mountRoute('/projects/p_agentic/plan?view=board');
+        const detail = () => dom.querySelector<HTMLElement>('[data-plan-detail]');
+        expect(detail()).toBeNull();
+        expect(dom.querySelector('[data-plan-board-body]')!.getAttribute('data-detail')).toBe('closed');
+        card(dom, 13).click();
+        await tick();
+        expect(detail()!.querySelector('[data-plan-detail-title]')!.textContent).toBe('Migration for stored manifests');
+        expect(card(dom, 13).hasAttribute('data-open')).toBe(true);
+        expect(dom.querySelector('[data-plan-board-body]')!.getAttribute('data-detail')).toBe('open');
+        await key(card(dom, 14), 'Enter');
+        expect(detail()!.querySelector('[data-plan-detail-title]')!.textContent).toBe('Plugin detail shows declared slots');
+        expect(card(dom, 13).hasAttribute('data-open')).toBe(false);
+        await key(card(dom, 16), ' ');
+        expect(card(dom, 16).hasAttribute('data-lifted')).toBe(true);
+        expect(detail()!.querySelector('[data-plan-detail-title]')!.textContent).toBe('Plugin detail shows declared slots');
+        await key(card(dom, 16), 'Escape');
+        detail()!.querySelector<HTMLButtonElement>('[data-plan-detail-close]')!.click();
+        await tick();
+        expect(detail()).toBeNull();
+    });
+
+    it('opens on `?item=` (#1037)', async () => {
+        const dom = await mountRoute('/projects/p_agentic/plan?view=board&item=12');
+        expect(dom.querySelector('[data-plan-detail-title]')!.textContent).toBe('Decide: keep a2a as its own kind?');
+    });
 });
