@@ -197,6 +197,9 @@ describe('deleting a chat (#674)', () => {
         const stranger = userPrincipal('u2');
         await expect(app.as(stranger).actor(Workspace, workspaceKey(WS)).deleteChat(chatId)).rejects.toMatchObject({ status: 403 });
         await expect(chat(chatId, stranger).delete()).rejects.toMatchObject({ status: 403 });
+        // A user principal carrying this workspace but not its owner's id is refused by the Chat itself.
+        const guest: Principal = { kind: 'user', userId: 'u2', workspaceId: WS };
+        await expect(chat(chatId, guest).delete()).rejects.toMatchObject({ status: 403 });
         expect((await chat(chatId).get()).deleted).toBeUndefined();
         expect((await workspace().get()).chats).toEqual([chatId]);
         await expect(workspace().deleteChat('chat_nope' as ChatId)).rejects.toMatchObject({ status: 404 });

@@ -9,7 +9,7 @@
  * (`methodReentrancy`) and copy what they need before their first `await`.
  */
 
-import { defineActor, topic, type ActorContext, type AnyActorDefinition, type Topic, type TopicEvent } from '@sigx/actors';
+import { defineActor, topic, type ActorContext, type ActorPolicy, type AnyActorDefinition, type Topic, type TopicEvent } from '@sigx/actors';
 import {
     CHAT_FILE_MAX_BYTES,
     CHAT_FILE_SCHEME,
@@ -193,8 +193,8 @@ const toParts = (input: string | readonly PromptPart[]): readonly PromptPart[] =
 
 /** Membership and coordination are the user's call (CHT-04, CHT-07). */
 const userOrExternal = (principal: Principal | null): boolean => principal?.kind === 'user' || principal?.kind === 'external';
-/** Deleting a chat is the workspace owner's alone (#674): never an agent, a machine or an external client. */
-const ownerOnly = (principal: Principal | null): boolean => principal?.kind === 'user';
+/** Deleting a chat is the workspace owner's alone (#674): never an agent, a machine, an external client or another user. */
+const ownerOnly: ActorPolicy = (principal: Principal | null, _rq, op) => principal?.kind === 'user' && !!op.resource && workspaceOfKey(op.resource.key) === principal.userId;
 /** An external client needs the `chats` tool family (§9); every other principal kind passes. */
 const chatsScope = (principal: Principal | null): boolean => principal !== null && hasScope(principal, 'chats');
 /** Machines never speak in a chat. */
