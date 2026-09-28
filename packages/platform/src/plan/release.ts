@@ -6,6 +6,9 @@
  * the change. A reopened item that finishes again is released again.
  */
 import type { ProjectFeatureItemReleaseReason, ProjectId, WorkspaceId } from '@agentic/core';
+import { actor, type AnyActorDefinition } from '@sigx/actors';
+import { asPrincipal, userPrincipal } from '../auth/index.js';
+import { routingKey } from '../routing/key.js';
 import type { StoredItem } from './rules.js';
 
 /** One item whose work ended, and why. */
@@ -32,4 +35,28 @@ export function newlyFinished(before: ReadonlyMap<number, ProjectFeatureItemRele
         .filter(([n, reason]) => before.get(n) !== reason)
         .sort(([a], [b]) => a - b)
         .map(([n, reason]) => ({ n, reason }));
+}
+
+export interface RouterPlanReleaseOptions {
+    /** The Routing actor definition (`defineRoutingActor`), as a thunk like `pullMergeRelease`'s. */
+    readonly routing: () => AnyActorDefinition;
+}
+
+interface ItemReleaseClient {
+    planItemReleased(projectId: ProjectId, items: readonly PlanItemRelease[]): Promise<void>;
+}
+
+/**
+ * The production `PlanReleasePort` (#1081): tells the router `planItemReleased(projectId, items)` one-way, as the
+ * workspace user (the Plan's turn may carry an agent, whom the router refuses), like `pullMergeRelease`. The router
+ * checks each item is still done or dropped, closes the items' sessions and runs every feature's `onPlanItemReleased`
+ * on each online folder of the project, audited `project.item-released`.
+ */
+export function routerPlanRelease(options: RouterPlanReleaseOptions): PlanReleasePort {
+    return {
+        async released({ workspaceId, projectId, items }) {
+            const router = actor(options.routing(), routingKey(workspaceId)).with({ context: asPrincipal(userPrincipal(workspaceId, workspaceId)), oneWay: true }) as unknown as ItemReleaseClient;
+            await router.planItemReleased(projectId, items);
+        }
+    };
 }

@@ -105,6 +105,7 @@ import {
     pullMergeRelease,
 
     definePlanActor,
+    routerPlanRelease,
 
     defineRequestsActor,
 } from '@agentic/platform';
@@ -315,7 +316,9 @@ function platformActors(host: HostPorts, defaultPorts: PlatformPorts, ports: Pla
 
         Pulls,
 
-        definePlanActor(),
+        // A plan item done or dropped (#1081): the router closes its sessions and runs the features' `onPlanItemReleased`
+        // on each online folder of the project (the git feature removes the item's worktree).
+        definePlanActor({ release: routerPlanRelease({ routing: () => Routing }) }),
 
         // An accept with "open GitHub issue" opens it with the project's GitHub credential (#932).
         defineRequestsActor({ issues: githubRequestIssues({ registry, workspace: () => Workspace }) }),
