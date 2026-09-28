@@ -99,6 +99,7 @@ import {
     type TouchesWarning
 } from './rules.js';
 import { planLimitOf, planSettings } from './settings.js';
+import { finishedStates, newlyFinished, type PlanReleasePort } from './release.js';
 import { chatPlanWake, type PlanWakePort } from './wake.js';
 
 // ---------------------------------------------------------------------------
@@ -155,6 +156,8 @@ export interface PlanActorOptions {
     readonly audit?: AuditPort;
     /** How a notice wakes its addressee (#938). Default: `chatPlanWake()` — a chat message for an agent, an Inbox row for a person. */
     readonly wake?: PlanWakePort;
+    /** Told of the items a turn leaves done or dropped (#1075): features tidy up after them. Absent: nobody is told. */
+    readonly release?: PlanReleasePort;
 }
 
 /** The most item numbers one `itemStates` call reads. */
@@ -459,6 +462,7 @@ export function definePlanActor(options: PlanActorOptions = {}) {
                 const call = { ...(await callOf(actor)), ...(actor?.kind === 'agent' && p?.kind === 'agent' && p.taskId ? { taskId: p.taskId as TaskId } : {}) };
                 const s = ctx.state;
                 const turn = turnOf(ctx, actor, call);
+                const finished = options.release ? finishedStates(s.items) : undefined;
                 const changes: PlanChange[] = [...expireLeases(s, call)];
                 renewLeases(s, call);
                 try {
@@ -466,11 +470,23 @@ export function definePlanActor(options: PlanActorOptions = {}) {
                     changes.push(...out.changes);
                     tellIdle(s, call);
                     await commit(ctx, changes, call.now, turn);
+                    if (finished) await released(finished);
                     return out.value;
                 } catch (error) {
                     tellIdle(s, call);
                     await commit(ctx, changes, call.now, turn);
                     return toServerError(error);
+                }
+            };
+
+            /** Tell the release port of the items this turn finished (#1075), after it is saved; never a gate. */
+            const released = async (before: ReadonlyMap<number, 'done' | 'dropped'>): Promise<void> => {
+                const items = newlyFinished(before, ctx.state.items);
+                if (!items.length) return;
+                try {
+                    await options.release!.released({ workspaceId: ctx.state.workspaceId, projectId: ctx.state.projectId, items });
+                } catch (error) {
+                    console.warn(`[plan] releasing ${items.map((i) => `#${i.n}`).join(', ')} failed:`, error);
                 }
             };
 
