@@ -1,7 +1,6 @@
 import { component, effect, onUnmounted, signal, type Define } from 'sigx';
 import { Link, useRoute } from '@sigx/router';
-import { Select } from '@sigx/zero';
-import { Badge, Field, Input, Menu } from '@sigx/zero-daisyui/components';
+import { Badge, Field, Input, Menu, Select } from '@sigx/zero';
 import { AgentTile, Button, ErrorNote, Icon, ProjectSquare, StatusPill } from '@agentic/ui';
 import { agentNamed, type MockChatSummary } from '../../mock/workspace';
 import { dataMode } from '../../data-mode';

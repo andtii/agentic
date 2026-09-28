@@ -17,7 +17,7 @@
  */
 import { component, onMounted, onUnmounted, signal, useHead, watch, type Define } from 'sigx';
 import { Link, useRoute, useRouter } from '@sigx/router';
-import { Checkbox } from '@sigx/zero-daisyui/components';
+import { Checkbox } from '@sigx/zero';
 import { AgentTile, Button, CategoryMenu, ConnectorTile, ErrorNote, Icon, Label, SearchField, Segmented, Tag, type AgentHue } from '@agentic/ui';
 import { CONNECTOR_CATEGORIES, CONNECTOR_LISTINGS, categoryCounts, listingPluginId, listingsByCategory, type ConnectorListing } from '../../../plugins/listings';
 import { AddConnectorDialog, type AddConnectorRequest } from '../AddConnectorDialog';

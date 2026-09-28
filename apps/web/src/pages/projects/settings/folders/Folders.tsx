@@ -7,8 +7,7 @@
 import { component, signal, watch } from 'sigx';
 import { parseProjectFolderKey, projectFolderKey, type EnvironmentId, type FsGitInfo, type MachineId } from '@agentic/core';
 import { derivedModel } from '@sigx/zero/behaviors';
-import { RadioGroup } from '@sigx/zero';
-import { Field } from '@sigx/zero-daisyui/components';
+import { Field, RadioGroup } from '@sigx/zero';
 import { Button, ErrorNote, FormDialog, Tag, gitBadgeText, type WorkdirEnvironment, type WorkdirSelection } from '@agentic/ui';
 import { WorkdirInput } from '../../../workdir/WorkdirInput';
 import type { ProjectPageProps } from '../../layout/types';

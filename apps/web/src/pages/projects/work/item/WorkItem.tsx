@@ -7,7 +7,7 @@
  */
 import { component, signal, type Define, type JSXElement } from 'sigx';
 import { Link } from '@sigx/router';
-import { Checkbox } from '@sigx/zero-daisyui/components';
+import { Checkbox } from '@sigx/zero';
 import { formatRef, type Ref, type WorkStageState } from '@agentic/core';
 import { AgentTile, EmptyState, Icon, StageTrack, StatusPill, Tag, type Tone } from '@agentic/ui';
 import { dataMode } from '../../../../data-mode';

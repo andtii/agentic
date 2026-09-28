@@ -5,8 +5,7 @@
  */
 import { component, signal, type Define, type JSXElement } from 'sigx';
 import { Link } from '@sigx/router';
-import { Input } from '@sigx/zero';
-import { Checkbox } from '@sigx/zero-daisyui/components';
+import { Checkbox, Input } from '@sigx/zero';
 import { formatRef, parseRefs, planClaimLive, type PlanActor, type PlanItem, type Ref } from '@agentic/core';
 import { Icon, Tag, type Tone } from '@agentic/ui';
 import { formatAge } from '../../../../../mock/workspace';

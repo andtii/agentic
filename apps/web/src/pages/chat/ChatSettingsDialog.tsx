@@ -1,6 +1,5 @@
 import { component, signal, type Define } from 'sigx';
-import { Select } from '@sigx/zero';
-import { Checkbox, Field } from '@sigx/zero-daisyui/components';
+import { Checkbox, Field, Select } from '@sigx/zero';
 import { Button, FormDialog, TextField } from '@agentic/ui';
 import type { MockChatMember } from '../../mock/workspace';
 import type { AgentLookup } from './live';

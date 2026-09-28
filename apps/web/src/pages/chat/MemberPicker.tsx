@@ -1,6 +1,5 @@
 import { component, signal, type Define } from 'sigx';
-import { RadioGroup } from '@sigx/zero';
-import { Checkbox } from '@sigx/zero-daisyui/components';
+import { Checkbox, RadioGroup } from '@sigx/zero';
 import { AgentTile, EnvironmentLine, Icon, QuotaBadge, type WorkdirEnvironment } from '@agentic/ui';
 import type { AgentIdentity } from './live';
 import { memberQuota, type QuotaMachine } from './quota';

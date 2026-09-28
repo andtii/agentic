@@ -173,7 +173,7 @@ pnpm test             # vitest run
 pnpm test <path>      # single file/dir (substring match; no `--`)
 pnpm test -t "name"   # single test by name
 pnpm test:coverage
-pnpm typecheck        # tsc --noEmit over packages/*/src, __tests__, apps/*/src
+pnpm typecheck        # tsc --noEmit over packages/*/src, __tests__, apps/*/src (needs `pnpm --filter @agentic/ui build:ds` once, for @agentic/ui/register)
 pnpm lint             # oxlint packages apps
 pnpm size             # size-limit (.size-limit.json)
 pnpm check            # the pre-push gate for this diff (scripts/check.mjs; --all, --workers, --node)

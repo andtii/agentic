@@ -43,7 +43,8 @@
     "**/*.css"
   ],
   "scripts": {
-    "build": "vite build && vite build --mode prod-dist && tsc -p tsconfig.build.json && sigx zero:fragment --strict && sigx zero:build ./dist/design-system.js --extra-manifest ./dist/fragment.js --out dist/ds"
+    "build": "vite build && vite build --mode prod-dist && tsc -p tsconfig.build.json && sigx zero:fragment --strict && sigx zero:build ./dist/design-system.js --extra-manifest ./dist/fragment.js --out dist/ds",
+    "build:ds": "vite build && sigx zero:build ./dist/design-system.js --extra-manifest ./dist/fragment.js --out dist/ds"
   },
   "dependencies": {
     "@agentic/core": "workspace:*",

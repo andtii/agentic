@@ -2,7 +2,7 @@
 /**
  * `pnpm check [--base <ref>] [--workers] [--node] [--all]` — the local gate before the
  * one push (AGENTS.md). Runs what CI's PR lanes would run for this diff, minus
- * e2e: typecheck and lint always; the unit tests the change can reach
+ * e2e: the design system's build (`@agentic/ui` `build:ds`, for `@agentic/ui/register`), typecheck and lint always; the unit tests the change can reach
  * (`vitest --changed`); `pnpm build && pnpm size` when a size-limited package
  * changed; the scripts tests when `scripts/` changed; workerd with `--workers`;
  * the same acceptance suite on the Node host with `--node` (or `--workers`).
@@ -32,6 +32,8 @@ console.log(`check: ${files.length} changed file(s) vs ${base} → ${Object.entr
 if (!lanes.code) process.exit(0);
 
 const steps = [
+    // `@agentic/ui/register` types the app against the design system's own vocabulary (#608); it is emitted by the build.
+    ['design system', ['--filter', '@agentic/ui', 'build:ds']],
     ['typecheck', ['typecheck']],
     ['lint', ['lint']],
     ['unit', flag('--all') ? ['vitest', 'run', '--retry=1'] : ['vitest', 'run', '--retry=1', '--changed', base]]

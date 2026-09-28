@@ -63,6 +63,8 @@ jobs:
       - uses: ./.github/actions/setup
       - run: pnpm lint
       - run: pnpm verify:catalog
+      # `@agentic/ui/register` (the design system's vocabulary for `@sigx/zero`, #608) is emitted by the build.
+      - run: pnpm --filter @agentic/ui build:ds
       - run: pnpm typecheck
       - if: needs.changes.outputs.scripts == 'true'
         run: pnpm test:scripts
@@ -79,6 +81,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
+      # vitest's type tests (`*.test-d.ts`) check the whole tsconfig program, which reads `@agentic/ui/register` (#608).
+      - run: pnpm --filter @agentic/ui build:ds
       - run: pnpm vitest run --shard=${{ matrix.shard }}/4
 
   # The Worker + ActorHost Durable Object inside workerd (Miniflare), then the
@@ -174,8 +178,9 @@ jobs:
       - uses: ./.github/actions/setup
         with:
           node-version: ${{ matrix.node-version }}
-      - run: pnpm typecheck
+      # The build first: it emits `@agentic/ui/register`, which typecheck reads (#608).
       - run: pnpm build
+      - run: pnpm typecheck
       - run: pnpm test
       - if: matrix.node-version == '22'
         run: pnpm --filter @agentic/web test:workers
@@ -191,6 +196,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
+      - run: pnpm --filter @agentic/ui build:ds
       - run: pnpm test:coverage
       - uses: codecov/codecov-action@v7
         with:

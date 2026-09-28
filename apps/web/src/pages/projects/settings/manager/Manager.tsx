@@ -7,8 +7,7 @@
  */
 import { component, signal, watch } from 'sigx';
 import { PM_PERSONALITIES, PM_POLICY_DEFAULT, type ProjectRecord } from '@agentic/core';
-import { RadioGroup } from '@sigx/zero';
-import { Field } from '@sigx/zero-daisyui/components';
+import { Field, RadioGroup } from '@sigx/zero';
 import { Button, CardSkeleton, ChipInput, ErrorNote, SelectField, Switch, TextField, TextareaField } from '@agentic/ui';
 import type { ProjectPageProps } from '../../layout/types';
 import { CUSTOM_PERSONALITY, PERSONALITY_SAMPLES } from '../../new/model';
