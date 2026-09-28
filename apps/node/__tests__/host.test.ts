@@ -201,6 +201,15 @@ describe.skipIf(!nodeSqlite)('createNodeHost', () => {
         expect((malformed as Response).status).toBe(401);
     });
 
+    it('answers 426 to a plain-HTTP request on the daemon socket path, as the Worker does (#1008)', async () => {
+        const fallback: string[] = [];
+        const { node } = await start(await home(), { fallback: (request) => (fallback.push(new URL(request.url).pathname), new Response('document')) });
+        const plain = await node.fetch(new Request('http://localhost:8787/_agentic/daemon/m1', { headers: { authorization: 'Bearer amt.x' } }));
+        expect(plain.status).toBe(426);
+        expect(await plain.json()).toMatchObject({ error: 'upgrade_required' });
+        expect(fallback).toEqual([]);
+    });
+
     it('answers the daemon keepalive itself, never the actor', async () => {
         const { node } = await start(await home());
         const who = { workspaceId: 'ws1', machineId: 'm1', key: 'ws1:machine:m1', token: 'amt.x' } as Parameters<NodeHost['daemon']['opened']>[0];
