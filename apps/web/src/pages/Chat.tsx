@@ -133,9 +133,10 @@ export const ChatScreen = component<{ id: string; projectId?: string }>(({ props
         const a = agentNamed(w.agentId);
         return { agentId: w.agentId, name: a.name, hue: a.hue, step: w.step, startedAt: openedAt - w.seconds * 1000, onStop: () => { st.stopped = [...st.stopped, w.agentId]; } };
     });
+    const prefsOn = signal({ on: false });
     // The view and detail (#1058): working and waiting members, plus a live line, count as at work.
     const chatView = useChatView({
-        ws: () => USER.workspace,
+        ws: () => (prefsOn.on ? USER.workspace : null),
         chatId: props.id,
         working: () => {
             const v = loadChat(props.id);
@@ -144,6 +145,9 @@ export const ChatScreen = component<{ id: string; projectId?: string }>(({ props
             return new Set([...busy, ...(v.live ?? []).filter((w) => !st.stopped.includes(w.agentId)).map((w) => w.agentId)]).size;
         }
     });
+    // The saved view choices apply after mount (#1113): the server cannot read them, so the render that hydrates
+    // its HTML keeps the automatic view and default detail; the choices show in the render after.
+    onMounted(() => { prefsOn.on = true; });
     // "Mention in chat" (#565): `?file=` puts `@file:<path>` into the composer once.
     const router = useRouter();
     const mention = signal<{ insert: ComposerInsert | null }>({ insert: null });

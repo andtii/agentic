@@ -131,12 +131,16 @@ export const LiveChat = component<{ id: string; projectId?: string }>(({ props }
     const transcript = signal(chatTranscript('chat'));
     const authors = signal<{ value: Record<string, MessageAuthor> }>({ value: {} });
     const feeds = signal<{ list: FeedHandle[] }>({ list: [] });
+    const prefsOn = signal({ on: false });
     // The view and detail (#1058): the agents at work are the working, the waiting and the ones whose feed is mid-turn.
     const chatView = useChatView({
-        ws: () => viewer.workspaceId ?? null,
+        ws: () => (prefsOn.on ? viewer.workspaceId ?? null : null),
         chatId: props.id,
         working: () => agentsAtWork(workingAgents(index.value ?? [], props.id), waitingAgents(kept.list), feeds.list.filter((f) => sessionMidTurn(f.transcript)).map((f) => f.agentId)).size
     });
+    // The saved view choices apply after mount (#1113): the server cannot read them, so the render that hydrates
+    // its HTML keeps the automatic view and default detail; the choices show in the render after.
+    onMounted(() => { prefsOn.on = true; });
     // Raw on a finished turn (#1058): each session's log read once, while Raw is on, folded for the turns' calls.
     const raw = signal<{ on: boolean; folded: Record<string, AgentTranscript>; asked: string[] }>({ on: false, folded: {}, asked: [] });
     // Who is followed (#1060 fills the panel): the page keeps the context panel while nobody is.
