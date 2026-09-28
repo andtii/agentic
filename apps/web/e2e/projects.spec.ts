@@ -214,3 +214,24 @@ test.describe('rails and grids by width', () => {
         expect(await columns(page, '[data-features-catalogue]')).toBe(cols);
     });
 });
+
+test('a project chat with a tall context panel keeps the page at the viewport: only the thread and the panel scroll (#1015)', async ({ page }) => {
+    await page.goto('/projects/p_agentic/chats/c4');
+    const main = page.locator('[data-project-layout="p_agentic"] [data-page="chat"] [data-chat-main]');
+    await expect(main).toBeVisible();
+    // A long conversation grows the panel's task list past the viewport; a spacer stands in for it, and one in the thread for a long thread.
+    await page.evaluate(() => {
+        const spacer = (h: number) => Object.assign(document.createElement('div'), { style: `block-size: ${h}px; flex: none` });
+        document.querySelector('[data-page="chat"] [data-chat-context]')?.append(spacer(3000));
+        document.querySelector('[data-chat-main] [data-scope="ai-thread"][data-part="root"]')?.prepend(spacer(3000));
+    });
+    const [scrollHeight, innerHeight] = await page.evaluate(() => [document.scrollingElement!.scrollHeight, window.innerHeight]);
+    expect(scrollHeight, 'the document scrolls').toBeLessThanOrEqual(innerHeight);
+    await expect(page.locator('[data-chat-composer]')).toBeInViewport({ ratio: 1 });
+    if (width(page) >= 1280) {
+        const panel = page.locator('[data-page="chat"] > [data-chat-context]');
+        const [panelScroll, panelClient] = await panel.evaluate((el) => [el.scrollHeight, el.clientHeight]);
+        expect(panelScroll, 'the context panel scrolls on its own').toBeGreaterThan(panelClient);
+        expect(panelClient).toBeLessThanOrEqual(innerHeight);
+    }
+});
