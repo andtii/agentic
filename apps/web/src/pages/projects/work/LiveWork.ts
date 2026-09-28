@@ -11,6 +11,7 @@ import { useChatRows } from '../../chat/LiveChats';
 import { featuresOf, projectTasks, useFeatureUi, usePlanItems, usePullsState, useTaskIndexRows } from './live';
 import type { WorkFeatures, WorkTask } from './model';
 import type { WorkAgentLookup } from './WorkView';
+import { liveWorkActions, type WorkActions } from './actions';
 
 export interface LiveWorkInputs {
     tasks(): readonly WorkTask[];
@@ -20,6 +21,8 @@ export interface LiveWorkInputs {
     planItems(): readonly PlanItem[];
     features(): WorkFeatures;
     readonly agentOf: WorkAgentLookup;
+    /** Retry, Dismiss and Stop on the task rows (#1040); absent until the viewer's workspace is known. */
+    readonly actions?: WorkActions;
     readonly loading: boolean;
 }
 
@@ -38,6 +41,7 @@ export function useLiveWork(project: () => ProjectRecord): LiveWorkInputs {
             const ids = new Set(chats.rows().filter((c) => c.projectId === id).map((c) => c.id));
             return projectTasks(index.rows(), ids);
         },
+        ...(viewer.workspaceId ? { actions: liveWorkActions(defs, viewer.workspaceId, directory.lookup) } : {}),
         pulls: pullsState.pulls,
         pullsReadiness: pullsState.readiness,
         planItems,

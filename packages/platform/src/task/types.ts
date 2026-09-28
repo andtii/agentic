@@ -96,6 +96,8 @@ export interface TaskView extends TaskSnapshot {
     readonly branch?: string;
     /** What the task is on now, one line (#937); cleared by every status change. */
     readonly activity?: string;
+    /** When a person cleared the settled task from the Work view (#1040). */
+    readonly dismissedAt?: number;
     readonly notStopped: readonly TaskId[];
 }
 
@@ -145,6 +147,8 @@ export type TaskEntry =
       }
     | { readonly t: 'session-stopped'; readonly at: number }
     | { readonly t: 'note'; readonly at: number; readonly branch?: string; readonly activity?: string }
+    /** Cleared from the Work view by a person (#1040), or back (`dismissed: false`, the Undo). */
+    | { readonly t: 'dismissed'; readonly at: number; readonly by: string; readonly dismissed: boolean }
     | { readonly t: 'usage'; readonly at: number; readonly usage: Usage; readonly costUsd: number };
 
 export interface TaskState {
@@ -179,6 +183,8 @@ export interface TaskState {
     branch?: string;
     /** A short current-activity line (#937): the latest status line; every transition clears it. */
     activity?: string;
+    /** When a person cleared the settled task from the Work view (#1040); the task page keeps it. */
+    dismissedAt?: number;
     /** The session driver confirmed the running work stopped (`sessionStopped()`), or nothing ever ran. */
     sessionStopped: boolean;
     startedAt?: number;

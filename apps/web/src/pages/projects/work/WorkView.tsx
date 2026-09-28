@@ -9,7 +9,7 @@
 import { component, signal, type Define } from 'sigx';
 import { Link } from '@sigx/router';
 import { Field, Input, Select } from '@sigx/zero';
-import type { PlanItem, PullRequest, WorkGroup, WorkItem } from '@agentic/core';
+import type { PlanItem, PullRequest, TaskId, WorkGroup, WorkItem } from '@agentic/core';
 import { WORK_STAGES_FALLBACK, workStagesFor } from '@agentic/core';
 import { AgentTile, Button, ChecksBar, StageTrack, type AgentHue } from '@agentic/ui';
 import { Age } from '../../../components/Age';
@@ -23,9 +23,10 @@ import type { ProjectPageProps } from '../layout/types';
 import { LiveStartTask } from '../../task/LiveStartTask';
 import { openStartTask } from '../../task/start';
 import { useLiveWork } from './LiveWork';
+import { closeWorkNotice, runWorkAction, undoWorkAction, workHidden, workNotice, type WorkActions } from './actions';
 import { PullsSignIn } from './pull/PullsSignIn';
 import { mockWorkFeatures, mockWorkTasks, usePlanItems, usePulls } from './live';
-import { WORK_GROUPS, filterWork, groupWork, isStale, workAgentOf, workItemsOf, type WorkFeatures, type WorkFilter, type WorkTask } from './model';
+import { WORK_GROUPS, filterWork, groupWork, isStale, workActionsOf, workAgentOf, workItemsOf, type WorkAction, type WorkFeatures, type WorkFilter, type WorkTask } from './model';
 
 defineTopbar('project-work', (route) => ({ trail: projectTrail(route, { label: 'Work', href: `/projects/${String(route.params.id)}/work` }) }));
 
@@ -46,9 +47,51 @@ export type WorkBoardProps =
     & Define.Prop<'agentOf', WorkAgentLookup, true>
     & Define.Prop<'now', number, true>
     /** "New task" opens the Start task dialog; absent (mock data), the button is disabled. */
-    & Define.Prop<'onNewTask', () => void>;
+    & Define.Prop<'onNewTask', () => void>
+    /** What a task row's Retry, Dismiss and Stop call (#1040); absent (mock data), rows have no buttons. */
+    & Define.Prop<'actions', WorkActions>;
 
-const WorkRow = component<{ item: WorkItem; projectId: string; tasks: readonly WorkTask[]; pulls: readonly PullRequest[]; agentOf: WorkAgentLookup; now: number }>(({ props }) => () => {
+const ACTION_BUTTON: Readonly<Record<WorkAction, { readonly label: string; readonly icon: 'play' | 'close' | 'stop' }>> = {
+    retry: { label: 'Retry', icon: 'play' },
+    dismiss: { label: 'Dismiss', icon: 'close' },
+    stop: { label: 'Stop', icon: 'stop' }
+};
+
+/** A task's buttons (#1040): the row's and the work item page's. */
+export const WorkActionButtons = component<{ item: WorkItem; tasks: readonly WorkTask[]; actions: WorkActions; onDone?: () => void }>(({ props }) => () => {
+    const list = workActionsOf(props.item, props.tasks);
+    if (!list.length || !props.item.taskId) return null;
+    const taskId = props.item.taskId as TaskId;
+    return (
+        <span data-work-actions="">
+            {list.map((a) => (
+                <Button
+                    intent="default"
+                    icon={ACTION_BUTTON[a].icon}
+                    name="work-action"
+                    value={a}
+                    onClick={() => { void runWorkAction(props.actions, a, taskId, props.item.title).then(() => props.onDone?.()); }}
+                >
+                    {ACTION_BUTTON[a].label}
+                </Button>
+            ))}
+        </span>
+    );
+}, { name: 'WorkActionButtons' });
+
+/** The notice under the last action: what was done, with Undo while it can be undone, or what failed. */
+export const WorkNotice = component(() => () => {
+    if (!workNotice.text && !workNotice.error) return null;
+    return (
+        <div data-work-notice="" role="status" data-error={workNotice.error ? 'true' : undefined}>
+            <span>{workNotice.error || workNotice.text}</span>
+            {workNotice.undo ? <Button intent="default" name="work-undo" onClick={() => { void undoWorkAction(); }}>Undo</Button> : null}
+            <Button intent="icon" icon="close" label="Close" onClick={() => closeWorkNotice()} />
+        </div>
+    );
+}, { name: 'WorkNotice' });
+
+const WorkRow = component<{ item: WorkItem; projectId: string; tasks: readonly WorkTask[]; pulls: readonly PullRequest[]; agentOf: WorkAgentLookup; now: number; actions?: WorkActions }>(({ props }) => () => {
     const i = props.item;
     const pr = i.pull !== undefined ? props.pulls.find((p) => p.number === i.pull) : undefined;
     const task = i.taskId ? props.tasks.find((t) => t.id === i.taskId) : undefined;
@@ -83,6 +126,7 @@ const WorkRow = component<{ item: WorkItem; projectId: string; tasks: readonly W
                         return <span data-work-agent><AgentTile name={a.name} hue={a.hue} size={20} /><strong>{a.name}</strong></span>;
                     })()}
                 <span data-work-next title={i.nextStep}>{i.nextStep}</span>
+                {props.actions ? <WorkActionButtons item={i} tasks={props.tasks} actions={props.actions} /> : null}
             </div>
             <Age at={i.updatedAt} now={props.now} class={stale ? 'is-stale' : undefined} />
         </li>
@@ -94,7 +138,10 @@ export const WorkBoard = component<WorkBoardProps>(({ props }) => {
     const st = signal({ agent: ALL as string | null, stage: ALL as string | null, q: '', open: { 'your-move': true, agents: true, waiting: false, done: false } as Record<WorkGroup, boolean> });
     const filter = (): WorkFilter => ({ agent: st.agent && st.agent !== ALL ? st.agent : '', stage: st.stage && st.stage !== ALL ? st.stage : '', q: st.q });
     return () => {
-        const { tasks, pulls, now } = props;
+        const { pulls, now } = props;
+        // A row just stopped or dismissed leaves at once, before the index catches up (#1040).
+        const hidden = workHidden.ids;
+        const tasks = hidden.length ? props.tasks.filter((t) => !hidden.includes(t.id)) : props.tasks;
         const all = workItemsOf(tasks, pulls, props.planItems, props.features, now);
         const stages = workStagesFor(props.features.enabled, props.features.uiOf);
         const plain = stages === WORK_STAGES_FALLBACK;
@@ -142,12 +189,13 @@ export const WorkBoard = component<WorkBoardProps>(({ props }) => {
                             </button>
                             {open
                                 ? rows.length
-                                    ? <ul data-work-rows>{rows.map((item) => <WorkRow item={item} projectId={props.projectId} tasks={tasks} pulls={pulls} agentOf={props.agentOf} now={now} />)}</ul>
+                                    ? <ul data-work-rows>{rows.map((item) => <WorkRow item={item} projectId={props.projectId} tasks={tasks} pulls={pulls} agentOf={props.agentOf} now={now} {...(props.actions ? { actions: props.actions } : {})} />)}</ul>
                                     : <p data-work-empty>{g.id === 'your-move' ? 'Nothing waits on you.' : 'No agent is on anything here.'}</p>
                                 : null}
                         </section>
                     );
                 })}
+                <WorkNotice />
                 {plain ? <p data-work-footnote>{`No stage feature here: work items move ${stages.join(' → ')}. Same view, same groups.`}</p> : null}
             </div>
         );
@@ -177,6 +225,7 @@ const MockWork = component<ProjectPageProps>(({ props }) => {
 
 const LiveWork = component<ProjectPageProps>(({ props }) => {
     const live = useLiveWork(() => props.project);
+    const actions = live.actions;
     return () => (
         <>
             {live.loading && !live.tasks().length ? <p data-panel-note aria-busy="true">Loading work…</p> : null}
@@ -190,6 +239,7 @@ const LiveWork = component<ProjectPageProps>(({ props }) => {
                 agentOf={live.agentOf}
                 now={Date.now()}
                 onNewTask={() => openStartTask()}
+                {...(actions ? { actions } : {})}
             />
             <LiveStartTask />
         </>

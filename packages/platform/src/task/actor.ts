@@ -69,6 +69,12 @@ export type TaskMethods = {
      * settled task keeps no activity.
      */
     note(note: TaskNote): Promise<TaskView>;
+    /**
+     * Clear a settled task from the Work view for everyone (#1040), or (`dismissed: false`) bring it back — the Undo.
+     * Written to the TaskIndex row (`dismissedAt`); no transition, the task and its history stay. A live task is
+     * refused (409): stop it first. Unchanged → writes nothing.
+     */
+    dismiss(by: string, dismissed?: boolean): Promise<TaskView>;
     /** The session driver's word that the running work has stopped. */
     sessionStopped(): Promise<void>;
     get(): TaskView;
@@ -145,6 +151,7 @@ function toView(s: TaskState): TaskView {
         ...(s.sessionId !== undefined ? { sessionId: s.sessionId } : {}),
         ...(s.branch !== undefined ? { branch: s.branch } : {}),
         ...(s.activity !== undefined ? { activity: s.activity } : {}),
+        ...(s.dismissedAt !== undefined ? { dismissedAt: s.dismissedAt } : {}),
         children: s.children,
         ...(s.result ? { result: s.result } : {}),
         ...(s.error ? { error: s.error } : {}),
@@ -464,6 +471,17 @@ const options: ActorOptions<TaskState, TaskMethods, TaskStreams> & { applyEntry(
                 if (entry.branch === undefined && entry.activity === undefined) return view();
                 const at = Date.now();
                 await commit(ctx, { t: 'note', at, ...entry });
+                await indexTask(ctx, s.workspaceId, ctx.snapshot(), at);
+                return view();
+            },
+            async dismiss(by, dismissed = true) {
+                requireCreated();
+                if (typeof by !== 'string' || !by.trim()) throw new ServerFnError(400, `task ${s.id}: say who dismisses it`);
+                if (typeof dismissed !== 'boolean') throw new ServerFnError(400, `task ${s.id}: dismissed must be true or false`);
+                if (!isTerminal(s.status)) throw new ServerFnError(409, `task ${s.id} is ${s.status}; stop it before dismissing it`);
+                if (dismissed === (s.dismissedAt !== undefined)) return view();
+                const at = Date.now();
+                await commit(ctx, { t: 'dismissed', at, by, dismissed });
                 await indexTask(ctx, s.workspaceId, ctx.snapshot(), at);
                 return view();
             },

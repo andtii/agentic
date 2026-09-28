@@ -137,6 +137,31 @@
 [data-work-row] > [data-age] { justify-self: end; font-size: var(--text-xs); color: var(--ag-text-dim); }
 [data-work-row] > [data-age].is-stale { color: var(--color-warning); }
 
+/* A task row's Retry, Dismiss and Stop (#1040): at the end of the owner cell, shown on hover where there is hover. */
+[data-work-actions] { display: inline-flex; flex: none; gap: var(--space-2xs); margin-inline-start: auto; }
+[data-work-actions] button { min-block-size: 0; padding-block: 0; font-size: var(--text-xs); }
+@media (hover: hover) {
+    [data-work-row] [data-work-actions] { opacity: 0; transition: opacity 120ms; }
+    [data-work-row]:hover [data-work-actions], [data-work-row]:focus-within [data-work-actions] { opacity: 1; }
+}
+
+/* The notice after an action, with its Undo. */
+[data-work-notice] {
+    position: sticky;
+    inset-block-end: var(--space-md);
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    margin-block-start: var(--space-md);
+    padding: var(--space-sm) var(--space-md);
+    border: var(--border) solid var(--ag-line-strong);
+    border-radius: var(--radius-box);
+    background: var(--color-base-300);
+    font-size: var(--text-sm);
+}
+[data-work-notice] > span { flex: 1; min-inline-size: 0; }
+[data-work-notice][data-error] { border-color: var(--color-error); }
+
 [data-work-empty], [data-work-footnote] { margin: var(--space-sm) 0 0; font-size: var(--text-sm); color: var(--ag-text-dim); }
 
 /* Below 768 px a row stacks: track and age on one line, then the title, then who acts next. */
