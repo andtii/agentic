@@ -364,3 +364,10 @@ The chat-modes handoff ([`docs/design/chat-modes/`](design/chat-modes/HANDOFF.md
 5. **A correction to the handoff.** Agents in a session never call `tasks_delegate`, which exists only on the MCP server. Handoff lines therefore come from the `delegate`, `plan_assign` and `plan_handoff` tool calls, not from `tasks_delegate` or message text.
 
 "Coordinator" on the boards (the Lanes top row, the composer's `coordinator answers unless you @ someone`) means `ChatState.coordinator`: the default addressee `resolveActivation` (`packages/core/src/chat.ts`) activates when a message @-mentions no one.
+
+## 2026-09-28 — independent plan items run in parallel: independence = after + touches (#1047)
+
+- **What limits parallel work is independence, not a count.** An agent may work several plan items at once, each in a task of its own. `claimLimit` / `members.limits` (default 1) are the ceiling. A second item runs beside the first only when its `after` items are done and its `touches` overlap none of the agent's other items. An overlap with the agent's own item is refused. With another agent's item it still only warns, because two agents can agree on an order.
+- **No touches means the item runs alone.** Leaving touches out stays the safe default: such an item is never a second claim, and nothing joins it. Waiting stays in the item (`after` is the wait, `touches` the collision guard). There is no separate "waits for" field.
+- **One task per item.** The plan wake starts one task per item the agent can start, up to its free slots, and claims the item for that task before the task starts, so no work runs without a claim. A task carries at most one item.
+- **A worktree per item.** With the git feature's worktree option on, a task carrying an item works in `plan/<project>-<n>`, never the chat's worktree.

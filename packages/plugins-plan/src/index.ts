@@ -47,7 +47,8 @@ export const planProjectSettings: ConfigSchema = {
         claimLimit: {
             type: 'integer',
             title: 'Items per agent at once',
-            description: 'How many items one agent may have claimed at the same time.',
+            description:
+                "The ceiling of items one agent works in parallel, each in a task of its own. A second item runs beside the first only when it is independent: its `after` items are done and its touches name paths that overlap none of the agent's other items. An item without touches runs alone.",
             minimum: 1,
             maximum: 10,
             default: 1
@@ -137,7 +138,7 @@ export function planInstructions({ settings }: ProjectFeatureContext): string {
         'This project has a plan: phases of items, each carried out by a task (plan → item → task). Work from it with the plan tools:',
         ...PLAN_TOOLS.map((t) => `- \`${t}\`: ${PLAN_TOOL_SUMMARIES[t]}`),
         '',
-        `Rules: claim an item before working on it — at most ${limit} at once. A claim lasts ${lease} minutes and renews on every plan_* call; when it runs out the item returns to your queue and the project manager is told. An item whose \`after\` items are not done cannot be claimed. If your item's touches overlap another claimed item's, say so and agree an order. Hand an item off with plan_handoff rather than dropping it.`,
+        `Rules: claim an item before working on it — at most ${limit} at once${limit > 1 ? ', each in a task of its own: a task carries one item, and a second item runs beside the first only when its touches name paths that overlap none of your other items (an item without touches runs alone)' : ''}. A claim lasts ${lease} minutes and renews on every plan_* call; when it runs out the item returns to your queue and the project manager is told. An item whose \`after\` items are not done cannot be claimed. If your item's touches overlap another claimed item's, say so and agree an order. Hand an item off with plan_handoff rather than dropping it.`,
         mayTick
             ? "Tick each done-when line with plan_update as you meet it; an item is done when all are ticked."
             : 'Do not tick done-when lines yourself: when you think one is met, say so with plan_update (a note) and a person ticks it.',

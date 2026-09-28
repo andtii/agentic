@@ -8,6 +8,10 @@
  * - **Claimed**: an agent works it now under a lease (`PLAN_LEASE_DEFAULT_MS`) that renews on each plan call it
  *   makes; refused while the item waits on an `after` item, is claimed by someone else, sits in someone else's
  *   queue, needs a person, or the agent is at its working limit (`memberLimit`). A claimed item leaves the queue.
+ * - **Parallel** (#1047): the limit is the ceiling of items an agent works at once, each in a task of its own. A second
+ *   (or later) claim must be independent of every item the agent already works: its touches name paths and overlap none
+ *   of theirs. An item that names no touches runs alone — it is never a second claim, and nothing joins it. A task
+ *   carries at most one item. `startItems` claims an agent's startable queue items, each for a new task, for the wake.
  * - **Lease runs out**: the item goes back to the top of its assignee's queue, never the open pool, and the
  *   manager is told.
  * - **Touches**: claiming an item whose paths overlap a live claim of another agent warns both agents and
@@ -179,6 +183,11 @@ export interface PlanBook {
      */
     heads?: Record<string, { itemId: number; due: number; stalled?: true }>;
     working?: AgentId[];
+    /**
+     * Agents that work items and have room for more (#1047), by agent id: the queued item they were last told they could
+     * start beside them (`ready`), so the same item is not told again on every write. Absent on books stored before it.
+     */
+    besideTold?: Record<string, number>;
 }
 
 export function emptyBook(workspaceId: WorkspaceId, projectId: ProjectId): PlanBook {
@@ -188,7 +197,7 @@ export function emptyBook(workspaceId: WorkspaceId, projectId: ProjectId): PlanB
 // ---------------------------------------------------------------------------
 // Errors, actors, the call context
 
-export type PlanErrorCode = 'invalid' | 'forbidden' | 'not-found' | 'done' | 'blocked' | 'taken' | 'assigned-elsewhere' | 'over-limit' | 'needs-person' | 'full';
+export type PlanErrorCode = 'invalid' | 'forbidden' | 'not-found' | 'done' | 'blocked' | 'taken' | 'assigned-elsewhere' | 'over-limit' | 'not-independent' | 'task-busy' | 'needs-person' | 'full';
 
 const STATUS: Record<PlanErrorCode, number> = {
     invalid: 400,
@@ -199,6 +208,8 @@ const STATUS: Record<PlanErrorCode, number> = {
     taken: 409,
     'assigned-elsewhere': 409,
     'over-limit': 409,
+    'not-independent': 409,
+    'task-busy': 409,
     'needs-person': 409,
     full: 409
 };
@@ -725,9 +736,34 @@ export function claimRefusal(book: PlanBook, call: PlanCall, agentId: AgentId, i
         const limit = call.limitOf(agentId);
         const working = claimsOf(book, agentId, call.now).length;
         if (working >= limit) return new PlanRuleError('over-limit', `@${agentId} already works ${working} item${working === 1 ? '' : 's'} (limit ${limit})`);
+        const held = claimsOf(book, agentId, call.now).filter((i) => i.id !== item.id);
+        if (held.length) return independenceRefusal(item, held);
     }
     return null;
 }
+
+/**
+ * Why `item` may not run beside `held`, the items its agent already works (#1047), or `null`: it names no touches (it
+ * runs alone), one of them names none, or their touches overlap. Waiting (`after`) is `claimRefusal`'s own check.
+ */
+function independenceRefusal(item: StoredItem, held: readonly StoredItem[]): PlanRuleError | null {
+    const list = held.map((i) => `#${i.id}`).join(', ');
+    if (!item.touches.length) return new PlanRuleError('not-independent', `#${item.id} names no touches, so it runs alone: finish ${list} first (or give #${item.id} the paths it touches)`);
+    for (const other of held) {
+        if (!other.touches.length) return new PlanRuleError('not-independent', `#${other.id} names no touches, so it runs alone: finish it before starting #${item.id}`);
+        const paths = item.touches.filter((p) => other.touches.some((q) => planTouchesOverlap(p, q)));
+        if (paths.length) return new PlanRuleError('not-independent', `#${item.id} touches ${paths.join(', ')}, as #${other.id} does, which you are working: finish #${other.id} first`);
+    }
+    return null;
+}
+
+/** A task carries at most one item (#1047): the live claim, other than on `itemId`, that `taskId` already holds. */
+function taskHolds(book: PlanBook, taskId: TaskId, itemId: number, now: number): StoredItem | undefined {
+    return all(book).find((i) => i.id !== itemId && liveClaim(i, now) && i.claim!.taskId === taskId);
+}
+
+const taskBusy = (taskId: TaskId, other: StoredItem): PlanRuleError =>
+    new PlanRuleError('task-busy', `this task (${taskId}) already carries #${other.id}; one item per task — finish or hand off #${other.id}, and the plan starts the next item in a task of its own`);
 
 /** Live claims of other agents whose touches overlap `item`'s. */
 function clashes(book: PlanBook, call: PlanCall, agentId: AgentId, item: StoredItem): { other: StoredItem; paths: string[] }[] {
@@ -752,6 +788,8 @@ export function claim(book: PlanBook, call: PlanCall, itemId: number, options: C
     if (options.taskId !== undefined && (typeof options.taskId !== 'string' || !options.taskId.trim() || options.taskId.length > 200)) fail('invalid', 'taskId must be a task id');
     const refusal = claimRefusal(book, call, agentId, item);
     if (refusal) throw refusal;
+    const busy = options.taskId !== undefined ? taskHolds(book, options.taskId, item.id, call.now) : undefined;
+    if (busy) throw taskBusy(options.taskId!, busy);
     const renewing = liveClaim(item, call.now);
     item.claim = {
         agentId,
@@ -783,6 +821,49 @@ export function claim(book: PlanBook, call: PlanCall, itemId: number, options: C
         value: { item, warnings },
         changes: renewing ? [] : [{ op: 'claimed', actor, planId: item.planId, itemId: item.id, summary: `#${item.id} claimed by @${agentId}: ${item.title}` }]
     };
+}
+
+/** An item `startItems` claimed, and the new task it was claimed for. */
+export interface StartedItem {
+    readonly item: StoredItem;
+    readonly taskId: TaskId;
+}
+
+/**
+ * Claim for `agentId` the items of its queue it can start now (#1047), in queue order, up to its limit, each for a new
+ * task (`newTaskId`): the plan wake then starts that task, so every task carries its own item and the claim exists
+ * before the work does. Only what `claimRefusal` lets through — with limit 1 an idle agent starts its first ready item;
+ * a second claim must be independent of the first — and no item that clashes with another agent's touches or waits on
+ * another project (`waitsElsewhere`).
+ */
+export function startItems(book: PlanBook, call: PlanCall, agentId: AgentId, newTaskId: () => TaskId, waitsElsewhere: (item: StoredItem) => boolean = () => false): Outcome<StartedItem[]> {
+    const as: PlanCall = { ...call, actor: agentActor(agentId) };
+    const started: StartedItem[] = [];
+    const changes: PlanChange[] = [];
+    for (const n of [...(book.queues[`agent:${agentId}`] ?? [])]) {
+        const item = book.items[String(n)];
+        if (!item || liveClaim(item, call.now) || waitsElsewhere(item) || claimRefusal(book, as, agentId, item) || clashes(book, as, agentId, item).length) continue;
+        const taskId = newTaskId();
+        changes.push(...claim(book, as, item.id, { taskId }).changes);
+        started.push({ item, taskId });
+    }
+    return { value: started, changes };
+}
+
+/**
+ * Undo a start whose task never began (#1047): the claim `taskId` holds on `itemId` ends and the item goes back to the
+ * top of its assignee's queue, so the next wake tries again. Nothing when the claim has moved on since.
+ */
+export function unstart(book: PlanBook, call: PlanCall, itemId: number, taskId: TaskId): PlanChange[] {
+    const item = book.items[String(itemId)];
+    if (!item?.claim || item.claim.taskId !== taskId) return [];
+    const agentId = item.claim.agentId;
+    delete item.claim;
+    item.state = 'ready';
+    item.assignee ??= agentActor(agentId);
+    enqueue(book, item.assignee, item.id, 0);
+    note(item, call.now, agentActor(agentId), 'its task could not be started; back to the top of the queue');
+    return [{ op: 'released', actor: null, planId: item.planId, itemId: item.id, summary: `#${item.id} not started for @${agentId}; back to the top of their queue: ${item.title}` }];
 }
 
 /** What `handoff` takes besides the target and the note. */
@@ -920,6 +1001,8 @@ export function update(book: PlanBook, call: PlanCall, itemId: number, patch: Pl
     if (patch.taskId !== undefined) {
         if (!holder || !sameActor(holder, actor)) fail('forbidden', 'only the agent working the item sets its task');
         if (typeof patch.taskId !== 'string' || !patch.taskId.trim() || patch.taskId.length > 200) fail('invalid', 'taskId must be a task id');
+        const busy = taskHolds(book, patch.taskId, item.id, call.now);
+        if (busy) throw taskBusy(patch.taskId, busy);
     }
     if ((item.state === 'done' || item.state === 'dropped') && (ticks.length || (state !== undefined && state !== 'ready' && !reopening && !(state === 'dropped' && item.state === 'dropped')) || patch.taskId !== undefined)) fail('done', `#${item.id} is ${item.state}`);
     if (state === 'ready' && item.state === 'done' && actor.kind !== 'user') fail('forbidden', `only a person reopens #${item.id}`);
@@ -1100,7 +1183,8 @@ export const READY_WORK_TEXT = 'work your queue: plan_next → plan_claim → do
  *   clash, not waiting on another project — `waitsElsewhere`) is told once, naming the first such item. So work that is
  *   assigned, unblocked by a done item (ticked, marked or merged) or released back to a queue reaches its assignee.
  *   Once per idle spell (`readyTold`): not again until it claims an item or has no ready work left. An unread handoff
- *   (or ready, or answer) notice about that item counts as the telling.
+ *   (or ready, or answer) notice about that item counts as the telling. An agent that works items but is under its limit
+ *   (#1047) is told the same of a queued item independent of them, once per item (`besideTold`).
  * - **idle** — the manager hears once when a member that had work holds no claim and has an empty queue.
  * - **stalled** — the manager hears once when that first ready item has sat unclaimed for longer than the project's
  *   lease (`heads[..].due`; `nextWatchDue` arms the reminder for it, so it fires with nobody calling).
@@ -1112,6 +1196,7 @@ export function watchMembers(book: PlanBook, call: PlanCall, waitsElsewhere: (it
     const wasWorking = new Set(book.working ?? []);
     const working: AgentId[] = [];
     const heads: NonNullable<PlanBook['heads']> = {};
+    const besides: Record<string, number> = {};
     const leaseMs = call.leaseMs ?? PLAN_LEASE_DEFAULT_MS;
     for (const agentId of new Set(call.members)) {
         const watched = call.manager !== null && agentId !== call.manager;
@@ -1124,11 +1209,20 @@ export function watchMembers(book: PlanBook, call: PlanCall, waitsElsewhere: (it
                 .sort((a, b) => b.updatedAt - a.updatedAt || b.id - a.id)[0];
             tellManager(book, call, { kind: 'idle', itemId: last?.id ?? 0, text: `@${agentId} holds no item and its queue is empty${last ? ` (last: #${last.id} ${last.title})` : ''}` });
         }
-        if (claimsOf(book, agentId, call.now).length) {
+        const startable = (item: StoredItem) => !waitsElsewhere(item) && !claimRefusal(book, call, agentId, item) && !clashes(book, call, agentId, item).length;
+        const holding = claimsOf(book, agentId, call.now).length;
+        if (holding) {
             told.delete(agentId);
+            // Room for more (#1047): `claimRefusal` lets through only an item independent of those it works.
+            const beside = holding < call.limitOf(agentId) ? queued.find(startable) : undefined;
+            if (!beside) continue;
+            besides[agentId] = beside.id;
+            const to = agentActor(agentId);
+            if (book.besideTold?.[agentId] === beside.id || book.notices.some((n) => sameActor(n.to, to) && n.itemId === beside.id && (n.kind === 'handoff' || n.kind === 'ready' || n.kind === 'answer'))) continue;
+            tell(book, { at: call.now, to, kind: 'ready', itemId: beside.id, text: `#${beside.id} is ready for you beside what you work: ${beside.title}. It is independent of your other items, so it runs in a task of its own.` });
             continue;
         }
-        const head = queued.find((item) => !waitsElsewhere(item) && !claimRefusal(book, call, agentId, item) && !clashes(book, call, agentId, item).length);
+        const head = queued.find(startable);
         if (!head) {
             told.delete(agentId);
             continue;
@@ -1154,6 +1248,8 @@ export function watchMembers(book: PlanBook, call: PlanCall, waitsElsewhere: (it
     else delete book.working;
     if (Object.keys(heads).length) book.heads = heads;
     else delete book.heads;
+    if (Object.keys(besides).length) book.besideTold = besides;
+    else delete book.besideTold;
 }
 
 /** When the next unclaimed head of a queue counts as stalled (#982), if any does not yet. */

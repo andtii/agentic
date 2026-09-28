@@ -28,7 +28,7 @@
  * Every change is a line in the item's activity and a `plan.changed` / `plan.lease-expired` audit record with
  * its actor. Workers eviction rule: every mutation ends in `ctx.save()` inside the turn.
  */
-import { type AgentId, type ChatId, type Plan, type PlanActor, type PlanItem, type PlanItemState, type Principal, type ProjectId, type ProjectRecord, type Ref, type TaskId, type WorkspaceId } from '@agentic/core';
+import { createId, type AgentId, type ChatId, type Plan, type PlanActor, type PlanItem, type PlanItemState, type Principal, type ProjectId, type ProjectRecord, type Ref, type TaskId, type WorkspaceId } from '@agentic/core';
 import { defineActor, type ActorContext, type ActorPolicy, type AnyActorDefinition } from '@sigx/actors';
 import { ServerFnError } from '@sigx/server';
 import { auditPort, type AuditPort } from '../audit/port.js';
@@ -76,6 +76,8 @@ import {
     PlanRuleError,
     renewLeases,
     splitItem,
+    startItems,
+    unstart,
     takeNotices,
     watchMembers,
     nextWatchDue,
@@ -266,8 +268,10 @@ export function definePlanActor(options: PlanActorOptions = {}) {
         readonly caller: PlanActor | null;
         readonly callerTask?: TaskId;
         readonly tasks: ReadonlyMap<number, TaskId>;
+        /** The turn's call context: the wake starts items under the project's limits (#1047). */
+        readonly call: PlanCall;
     }
-    const turnOf = (ctx: Ctx, caller: PlanActor | null): Turn => {
+    const turnOf = (ctx: Ctx, caller: PlanActor | null, call: PlanCall): Turn => {
         const tasks = new Map<number, TaskId>();
         for (const i of Object.values(ctx.state.items)) {
             // A question's task first: its answer belongs in the chat that asked (#1043).
@@ -275,7 +279,7 @@ export function definePlanActor(options: PlanActorOptions = {}) {
             if (t !== undefined) tasks.set(i.id, t);
         }
         const p = ctx.principal as Principal | null;
-        return { from: ctx.state.nextNotice, caller, ...(p?.kind === 'agent' && p.taskId ? { callerTask: p.taskId } : {}), tasks };
+        return { from: ctx.state.nextNotice, caller, ...(p?.kind === 'agent' && p.taskId ? { callerTask: p.taskId } : {}), tasks, call };
     };
 
     /**
@@ -307,15 +311,25 @@ export function definePlanActor(options: PlanActorOptions = {}) {
             add(tasks, turn.callerTask);
             const label = labelOf(notices[0]!.to);
             add(chats, s.wakeChats?.[label]);
+            const to = notices[0]!.to;
+            // Ready work starts as tasks, one per item it can start now (#1047); the other notices wake it as before.
+            let rest = notices;
+            if (to.kind === 'agent' && wakePort.starts && notices.some((n) => n.kind === 'ready')) {
+                if (await startFor(ctx, turn, to.agentId, tasks, chats)) {
+                    for (const n of notices) if (n.kind === 'ready') woken.add(n.seq);
+                    rest = notices.filter((n) => n.kind !== 'ready');
+                    if (!rest.length) continue;
+                }
+            }
             try {
-                const reached = await wakePort.wake({ workspaceId: s.workspaceId, projectId: s.projectId, to: notices[0]!.to, notices, tasks, chats });
-                if (reached === true || (typeof reached === 'object' && reached.reached)) for (const n of notices) woken.add(n.seq);
+                const reached = await wakePort.wake({ workspaceId: s.workspaceId, projectId: s.projectId, to, notices: rest, tasks, chats });
+                if (reached === true || (typeof reached === 'object' && reached.reached)) for (const n of rest) woken.add(n.seq);
                 if (typeof reached === 'object') {
                     (s.wakeChats ??= {})[label] = reached.chatId;
                     opened = true;
                 }
             } catch (error) {
-                console.warn(`[plan] waking ${labelOf(notices[0]!.to)} failed:`, error);
+                console.warn(`[plan] waking ${label} failed:`, error);
             }
         }
         if (!woken.size && !opened) return;
@@ -323,8 +337,61 @@ export function definePlanActor(options: PlanActorOptions = {}) {
         await ctx.save();
     };
 
+    /**
+     * Start the items `agentId` can start now (#1047): once a chat to start them in is found (`PlanStarts.chatFor`), each
+     * is claimed for a new task (`startItems`) and saved before that task is started (`PlanStarts.start`), so the claim
+     * exists before the work does. A start that fails is undone (`unstart`). Whether any started.
+     */
+    const startFor = async (ctx: Ctx, turn: Turn, agentId: AgentId, tasks: readonly TaskId[], chats: readonly ChatId[]): Promise<boolean> => {
+        const s = ctx.state;
+        const starts = wakePort.starts!;
+        let chatId: ChatId | undefined;
+        try {
+            chatId = await starts.chatFor({ workspaceId: s.workspaceId, projectId: s.projectId, agentId, tasks, chats });
+        } catch (error) {
+            console.warn(`[plan] finding a chat to start ${agentId}'s items in failed:`, error);
+        }
+        if (chatId === undefined) return false;
+        const at = now();
+        const call: PlanCall = { ...turn.call, now: at };
+        const { value: started, changes } = startItems(s, call, agentId, () => createId('task') as TaskId, (item) => crossAfterOf(item).length > 0);
+        if (!started.length) return false;
+        await ctx.save();
+        const failed: typeof started = [];
+        let any = false;
+        for (const { item, taskId } of started) {
+            let reached = false;
+            try {
+                reached = await starts.start({
+                    workspaceId: s.workspaceId,
+                    projectId: s.projectId,
+                    agentId,
+                    chatId,
+                    item: { id: item.id, title: item.title, touches: [...item.touches], doneWhen: item.doneWhen.map((d) => d.text) },
+                    taskId
+                });
+            } catch (error) {
+                console.warn(`[plan] starting #${item.id} for ${agentId} failed:`, error);
+            }
+            if (reached) any = true;
+            else failed.push({ item, taskId });
+        }
+        // Undone newest first, each to the top of the queue: it keeps its order.
+        const undone = failed.reverse().flatMap(({ item, taskId }) => unstart(s, call, item.id, taskId));
+        await arm(ctx, at);
+        await record(ctx, [...changes, ...undone], at);
+        return any;
+    };
+
     /** Save, re-arm the lease reminder for the next lease end, audit, then wake the notices' addressees — all inside the turn. */
     const commit = async (ctx: Ctx, changes: readonly PlanChange[], at: number, turn?: Turn): Promise<void> => {
+        await arm(ctx, at);
+        await record(ctx, changes, at);
+        if (turn) await wakeAddressees(ctx, turn);
+    };
+
+    /** Save, and re-arm the reminder for the next lease end or stall when that moved earlier (or there is none left). */
+    const arm = async (ctx: Ctx, at: number): Promise<void> => {
         const s = ctx.state;
         const leaseEnd = nextLeaseEnd(s);
         const stallDue = nextWatchDue(s);
@@ -341,8 +408,6 @@ export function definePlanActor(options: PlanActorOptions = {}) {
             if (due === undefined) await ctx.reminders.clear(PLAN_LEASE_REMINDER);
             else await ctx.reminders.set(PLAN_LEASE_REMINDER, { due: Math.max(0, due - at) });
         }
-        await record(ctx, changes, at);
-        if (turn) await wakeAddressees(ctx, turn);
     };
 
     /** `watchMembers` with this project's cross-project waits: an item waiting on another project is not counted ready. */
@@ -393,7 +458,7 @@ export function definePlanActor(options: PlanActorOptions = {}) {
                 const p = ctx.principal as Principal | null;
                 const call = { ...(await callOf(actor)), ...(actor?.kind === 'agent' && p?.kind === 'agent' && p.taskId ? { taskId: p.taskId as TaskId } : {}) };
                 const s = ctx.state;
-                const turn = turnOf(ctx, actor);
+                const turn = turnOf(ctx, actor, call);
                 const changes: PlanChange[] = [...expireLeases(s, call)];
                 renewLeases(s, call);
                 try {
@@ -415,7 +480,7 @@ export function definePlanActor(options: PlanActorOptions = {}) {
                 const actor = principalActor(ctx.principal as Principal | null);
                 const call = await callOf(actor);
                 const s = ctx.state;
-                const turn = turnOf(ctx, actor);
+                const turn = turnOf(ctx, actor, call);
                 const changes = expireLeases(s, call);
                 const renewed = renewLeases(s, call);
                 try {
@@ -710,7 +775,7 @@ export function definePlanActor(options: PlanActorOptions = {}) {
             const s = ctx.state;
             const project = await projects.project(ctx, s.workspaceId, s.projectId).catch(() => undefined);
             const call = planCallOf(project, now(), null);
-            const turn = turnOf(ctx, null);
+            const turn = turnOf(ctx, null, call);
             const changes = expireLeases(s, call);
             tellIdle(s, call);
             // Force a re-arm: the reminder that fired is spent.

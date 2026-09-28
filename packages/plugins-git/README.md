@@ -14,14 +14,14 @@ Design: `docs/architecture.md` §9 (project feature plugins) and §7 (feature ho
 | `identityOf(folder)` | the badge's `origin`: the repo's identity across machines (compared with `sameOrigin`); the project form fills the `origin` setting from it |
 | `instructions(ctx)` | the project's `instructions` text, trimmed, into every session's `## Project` section |
 | `onChatReleased(input)` | with `worktreeCleanup: 'on-chat-leave'`, remove the chat's worktree when the chat leaves the project (#623) or is deleted (#674); with `on-merge`, also when its pull request merged (#675) |
-| `beforeSession(input)` | with `worktreePerChat` on and a task from a chat: one `worktree` op per chat and environment, and the session opens in the worktree |
+| `beforeSession(input)` | with `worktreePerChat` on and a task from a chat: one `worktree` op per chat and environment, and the session opens in the worktree. A task that carries a plan item (`input.planItem`, #1047) opens in the item's worktree instead: branch `plan/<project>-<n>` (`planItemWorktreeFor`) |
 
 ## Per-project settings (`features['agentic.feature.git']`)
 
 | Key | Type | Default | Meaning |
 |---|---|---|---|
 | `origin` | string | — | the origin remote URL as git writes it (`https://…` or `git@host:path`) |
-| `worktreePerChat` | boolean | `false` | give each chat its own branch and worktree |
+| `worktreePerChat` | boolean | `false` | give each chat its own branch and worktree, and each task that carries a plan item one per item |
 | `branchPrefix` | string | `chat/` | what a chat's branch name starts with |
 | `branchTemplate` | string | — | a chat's branch as a template: `{branchPrefix}`, `{chatId8}`, `{chatId}`, `{project}`; unset = `{branchPrefix}{chatId8}` |
 | `worktreePath` | string | `auto` | where a chat's worktree goes, as a template: the branch tokens plus `{repo}`, `{repoName}`, `{repoParent}`, `{branch}`, `{branchSlug}`; `auto` = `suggestWorktreePath` |

@@ -13,7 +13,7 @@
 
 import { defineTool } from '@sigx/ai';
 import { z } from 'zod';
-import { PLAN_TOOLS, formatRef, parseRef, planClaimLive, planDoneWhenMet, planItemWaitsOn, planItems, planTouchesOverlap, type AgentId, type Plan, type PlanActor, type PlanDoneWhen, type PlanItem, type PlanItemState, type Ref } from '@agentic/core';
+import { PLAN_TOOLS, formatRef, parseRef, planClaimLive, planDoneWhenMet, planItemWaitsOn, planItems, planTouchesOverlap, type AgentId, type Plan, type PlanActor, type PlanDoneWhen, type PlanItem, type PlanItemState, type Ref, type TaskId } from '@agentic/core';
 import type { ToolCall } from './ports.js';
 
 /** What `plan_update` answers when an item is done (#981): keep working the queue rather than end the turn. */
@@ -33,8 +33,10 @@ export interface PlanBoard {
     readonly me: AgentId;
     /** The project manager (`ProjectMembers.coordinator`), when the project has one. */
     readonly manager?: AgentId;
-    /** How many items the caller may hold claimed at once (1 by default). */
+    /** How many items the caller may hold claimed at once (1 by default): the ceiling of its parallel tasks (#1047). */
     readonly limit: number;
+    /** The task the caller works in, when it works in one: a task carries at most one item (#1047). */
+    readonly task?: TaskId;
 }
 
 export interface PlanUpdateInput {
@@ -188,6 +190,11 @@ function myClaims(board: PlanBoard, now: number): PlanItem[] {
     return allItems(board).filter((i) => i.state !== 'done' && planClaimLive(i.claim, now) && i.claim!.agentId === board.me);
 }
 
+/** The item the caller's task carries (#1047): its live claim linked to `board.task`. */
+export function planTaskItem(board: PlanBoard, now: number = Date.now()): PlanItem | undefined {
+    return board.task === undefined ? undefined : myClaims(board, now).find((i) => i.claim!.taskId === board.task);
+}
+
 /** Overlapping touches between `item` and the items other agents hold claimed: `#10 (@lint) also touches plugins/model.ts`. */
 export function planTouchWarnings(board: PlanBoard, item: PlanItem, now: number = Date.now()): string[] {
     const out: string[] = [];
@@ -215,6 +222,9 @@ function blockerText(board: PlanBoard, n: number, now: number): string {
  * agent holds claimed. `null` when nothing qualifies.
  */
 export function planNext(board: PlanBoard, planId?: string, now: number = Date.now()): Located | null {
+    // A task carrying an item works that one (#1047): the next item starts in a task of its own.
+    const carried = planTaskItem(board, now);
+    if (carried) return find(board, carried.id);
     const me = agent(board.me);
     const items = allItems(board);
     const pool = locate(board).filter((l) => (planId === undefined || l.plan.id === planId) && l.item.state === 'ready' && !takenByOther(l.item, board.me, now));
@@ -231,6 +241,8 @@ export function planClaimRefusal(board: PlanBoard, n: number, now: number = Date
     if (item.state === 'dropped') return `#${n} was dropped. Try plan_next.`;
     if (takenByOther(item, board.me, now)) return `#${n} is claimed by ${handleOf(board, agent(item.claim!.agentId))} until ${new Date(item.claim!.leaseUntil).toISOString()}. Try plan_next.`;
     const mineAlready = planClaimLive(item.claim, now) && item.claim!.agentId === board.me;
+    const carried = planTaskItem(board, now);
+    if (carried && carried.id !== n) return `this task already carries #${carried.id}, and a task carries one item. Finish #${carried.id} (tick its done-when with plan_update) or hand it off with plan_handoff; the plan starts #${n} in a task of its own.`;
     if (mineAlready) return undefined;
     if (item.assignee && !same(item.assignee, agent(board.me))) return `#${n} is in ${handleOf(board, item.assignee)}'s queue. Try plan_next, or ask the project manager to assign it to you.`;
     const waits = planItemWaitsOn(item, allItems(board));
@@ -240,6 +252,15 @@ export function planClaimRefusal(board: PlanBoard, n: number, now: number = Date
     if (item.state !== 'ready' && !lapsed) return `#${n} is ${item.state}. Try plan_next.`;
     const held = myClaims(board, now);
     if (held.length >= board.limit) return `you already hold ${held.map((i) => `#${i.id}`).join(', ')} and your limit is ${board.limit} at once. Finish it with plan_update or release it with plan_handoff first.`;
+    // A second item runs beside the first only when independent of it (#1047): both name touches, and they do not overlap.
+    if (held.length) {
+        if (!item.touches.length) return `#${n} names no touches, so it runs alone: finish ${held.map((i) => `#${i.id}`).join(', ')} first.`;
+        for (const other of held) {
+            if (!other.touches.length) return `#${other.id} names no touches, so it runs alone: finish it before starting #${n}.`;
+            const paths = item.touches.filter((p) => other.touches.some((q) => planTouchesOverlap(p, q)));
+            if (paths.length) return `#${n} touches ${paths.join(', ')}, as #${other.id} does, which you are working: finish #${other.id} first.`;
+        }
+    }
     return undefined;
 }
 
@@ -356,6 +377,7 @@ export function planTools(port: PlanPort | undefined) {
                 const board = await need(port, NEXT).board(call(ctx));
                 const now = Date.now();
                 const next = planNext(board, input.plan, now);
+                if (next && next.item.id === planTaskItem(board, now)?.id) return { item: planItemView(board, next, now), from: 'this task', note: `this task carries #${next.item.id}: finish it here; other items run in tasks of their own.` };
                 if (!next) return { item: null, note: 'nothing is ready for you: your queue is empty or waiting, and no open item has its after-items done without a path clash. Post one status of what you finished and what waits on whom.' };
                 return { item: planItemView(board, next, now), from: next.item.assignee ? 'your queue' : 'open items' };
             }

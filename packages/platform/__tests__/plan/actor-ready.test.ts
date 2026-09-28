@@ -54,7 +54,7 @@ describe('ready work, woken through the chat (chatPlanWake)', () => {
     });
     afterEach(() => app.stop());
 
-    it('assigning into an idle agent’s queue posts to it in the plan’s chat and routes a turn that works the queue', async () => {
+    it('assigning into an idle agent’s queue starts a task for the item in the plan’s chat, claimed for that task (#1047)', async () => {
         const chat = app.as(user).actor(Chat, `${ws}:chat:${CHAT}`);
         await chat.addAgent(FORGE);
         const plan = app.as(user).actor(Plan, planKey(ws, project));
@@ -64,11 +64,14 @@ describe('ready work, woken through the chat (chatPlanWake)', () => {
         const msg = (await chat.history(null, 10)).entries.map((e) => e.entry).find((e) => e.t === 'msg');
         expect(msg).toMatchObject({ mentions: [FORGE] });
         const text = (msg as unknown as { parts: readonly { text: string }[] }).parts[0]!.text;
-        expect(text).toContain('#1 is ready for you: Reconnect');
-        expect(text).toMatch(/plan_next → plan_claim .* repeat until plan_next returns nothing/);
+        expect(text).toContain('Plan #1: Reconnect');
+        expect(text).toContain('This task carries #1');
         for (let i = 0; i < 20 && ran.length === 0; i++) await new Promise((r) => setTimeout(r, 5));
         expect(ran).toHaveLength(1);
         expect(await app.as(user).actor(TaskActor, taskKey(ws, ran[0]!)).get()).toMatchObject({ owner: FORGE, assignee: FORGE, origin: { kind: 'user', chatId: CHAT } });
+        // The claim exists before the work does, and links the task.
+        const item = (await plan.get('plan-1')).phases[0]!.items[0]!;
+        expect(item).toMatchObject({ state: 'claimed', claim: { agentId: FORGE, taskId: ran[0] } });
     });
 });
 
