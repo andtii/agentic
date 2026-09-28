@@ -41,8 +41,9 @@ function stateOf(status: string): StepState {
         case 'completed':
             return 'done';
         case 'failed':
-        case 'cancelled':
             return 'error';
+        // A call cancelled by Stop is skipped, not failed — as the UI's live `stepState` shows it (#1097).
+        case 'cancelled':
         case 'denied':
             return 'denied';
         case 'in_progress':
