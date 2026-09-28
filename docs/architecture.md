@@ -985,7 +985,7 @@ Docs only: the handoff, the four boards, `canvas.json`, screenshots and tokens i
 
 #### #1053 core: transcript step contract — TranscriptStep, TurnSteps, summary and excerpt helpers
 
-_not yet_
+`packages/core/src/transcript.ts`: the types `StepKind`, `StepState`, `StepExcerpt`, `TranscriptStep` and `TurnSteps` (`total` is the true count when `steps` is cut at a cap), an optional `steps` on the `msg` ChatEntry and on the SessionEvent `message`, and pure helpers — `stepKindOf(category, tool)` (the `@sigx/ai-agent/coding` category to a kind; `delegate`, `tasks_delegate`, `plan_assign` and `plan_handoff`, matched on the last `__` segment, are `delegate`), `summariseSteps` / `formatStepSummary` (`5 steps · 3 commands, 2 reads · 1 failed, recovered`), `pickExcerpt` / `formatExcerptNote` (the lines naming an error with one line of context, else the last 3; at most 8), `turnOpensItself` (a failure no later same-tool, same-target step recovered) and `audienceOf` (who an agent `msg` is for, for the Team view's folded talk). Step times come from the Session's event stamps (`eventTime`, #580); events replayed from the machine carry none (#1064).
 
 #### #580 platform: session events carry a time
 
@@ -997,7 +997,7 @@ _not yet_
 
 #### #1055 platform/runtimes: a turn step summary on the final chat msg, normalised per runtime
 
-_not yet_
+`@agentic/runtimes` `steps.ts`: `normaliseStep(runtime, call)` reads a call (`{name, input, output, error, category, diffs}`) as `{kind, target, result?, exitCode?, delegate?}` through the runtime's normaliser (`registerStepNormaliser`, the `touches.ts` pattern; `steps/`): Claude Code — `Bash` the command and the exit code from its result text (`Exit code N`, 0 when it completed), `Read`/`Write`/`Edit`/`MultiEdit` the path and `+a −b` from the call's `coding.diff`s (else its input), `Grep`/`Glob` the pattern and `N matches`; Codex — `shell` with the exit code from `{exitCode, output}`, `apply_patch` its files; Copilot — the kind from `categoryOf`. Any other runtime (`anthropic-api`) takes `stepKindOf(category, name)` and no target. `delegate`, `plan_assign` and `plan_handoff` are `delegate` steps everywhere, with `delegate.to` (the assignee or handle) and the `taskId` (result or `follow`) or plan `item`. Targets are one line, clipped to 120 characters. Platform `session/steps.ts`: `foldTurnSteps(events, {turnId, agentId, sessionId, runtime})` folds the turn's top-level `tool-call` / `tool-update` events (a sub-agent's calls, with a `parentCallId`, are not steps; a `coding.diff` goes to the call its `parentCallId` names) into `TurnSteps`: times from the events' `at`, the target from `toolActivity` when the runtime names none, at most `TURN_STEPS_CAP` (60) steps with `total` true, and an excerpt (`pickExcerpt`, lines clipped to 120) only on failed steps — the last `TURN_EXCERPTS_MAX` (8) — with `output.ref` = `<sessionId>#<callId>`. `finishTurn` reads the turn's events from its `turn-start` on (window, pages; best effort — none when they cannot be read) and publishes the result as `steps` on the `message` SessionEvent; the Chat copies it onto the `msg` (a `steps` without `turnId`, `steps[]` and `total` is refused as malformed), so it pages with the entry. A typical turn's summary is a few KB; the worst case (60 loud failures) stays under 32 KB.
 
 #### #1056 web: the Session page deep-links a step and shows its full output
 

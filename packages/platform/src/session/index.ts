@@ -8,3 +8,4 @@ export type { SessionStoreContext } from './store.js';
 export { appendEntry, boundTranscript, createEventLogStore, createTranscriptStore, pageMessages, TRANSCRIPT_BYTES, TRANSCRIPT_PAGE_BYTES } from './store.js';
 export type { SessionCommandResult, SessionInfo, SessionActor, CorrectionResult, SessionRequestView, PlatformInputRequest, PlatformRequestRef, DetachedInput } from './actor.js';
 export { ANSWER_ATTEMPTS, ANSWER_RETRY_MS, defineSessionActor, isInterruptedTurnEnd, interruptedTurn, resumeTurnId, resumeCommandId, INTERRUPTED_CODE, INTERRUPTED_MESSAGE, HISTORY_GAP_CODE, HISTORY_UNAVAILABLE_CODE, platformRequestId } from './actor.js';
+export { foldTurnSteps, TURN_STEPS_CAP, TURN_EXCERPTS_MAX, EXCERPT_LINE_MAX, type TurnStepsInput } from './steps.js';

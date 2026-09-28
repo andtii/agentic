@@ -98,6 +98,11 @@ function parseSessionEvent(payload: unknown, chatKey: string): SessionEvent {
                 throw malformed('mentions');
             }
             if (e.taskId !== undefined && typeof e.taskId !== 'string') throw malformed('taskId');
+            // The turn's steps (#1055): kept as the Session sent them, once they have the shape's spine.
+            if (e.steps !== undefined) {
+                const steps = e.steps as Record<string, unknown> | null;
+                if (!steps || typeof steps !== 'object' || typeof steps.turnId !== 'string' || !Array.isArray(steps.steps) || typeof steps.total !== 'number') throw malformed('steps');
+            }
             break;
         case 'title':
             if (typeof e.title !== 'string' || !e.title.trim()) throw malformed('title');
@@ -898,7 +903,8 @@ export function defineChatActor(ports: ChatOptions = {}) {
                         at: e.at,
                         mentions: e.mentions ?? [],
                         sessionId: e.sessionId,
-                        ...(e.taskId ? { taskId: e.taskId } : {})
+                        ...(e.taskId ? { taskId: e.taskId } : {}),
+                        ...(e.steps ? { steps: e.steps } : {})
                     };
                     await appendEntry(ctx, entry);
                     await afterMessage(ctx, entry, ports.titles);
