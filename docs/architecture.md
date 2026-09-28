@@ -952,6 +952,59 @@ The composer's popup is one zero `Combobox` trigger for any `@…`, `#…` or `w
 
 `ViewerState.userId` (`whoami`'s) is who "You" and "Mine" are. `features/plan/shared/data.ts`: `PlanIdentity` (`me`, `look`, `name`) — `mockPlanIdentity` on mock data, `usePlanIdentity()` live over the viewer and the agent directory (`livePlanIdentity`); the list's crew, owners, filter and detail panel and the Overview card draw through it, and a board drop on You is `assign(item, { kind: 'user', userId })`. `usePlanStore` reads, live, the task each open claimed item's claim names (`claimTaskIds` → `TaskActor.get`, one `useData`) into `PlanDoc.runs` (`runOfTask`: task, machine, environment, folder, session) — Runs as and the row's task ref. `shared/switcher.tsx`: `PlanSwitcher` (compact beside the list's and the board's title, full on the graph) and `PlanViews` (List / Board / Graph) on all three; picking a plan follows `?plan=`, New plan is the store's `create`. `shared/pins.ts`: a file ref's hover card reads its lines with `fs read-at` (`Machine.fsRequest`, then `fsResult` polled to the client deadline) at the ref's sha, in the item's task folder when it runs, else the project folder on the first online environment (`pinPlaceOf`); an offline machine, no folder or a refusal is said on the card. `createPinSource(place, fs)` takes the fs, so tests use a fake.
 
+### Chat modes (#1050)
+
+The target for the chat modes ([#1050](https://github.com/andtii/agentic/issues/1050); boards in `docs/design/chat-modes/`, HANDOFF.md "Chat modes" lines 532–646, requirements CHT-09 and COL-09, decisions 2026-09-28 "chat modes"). One placeholder per sub-issue, in issue order: each issue replaces its own placeholder's body in place and never appends, so parallel PRs merge cleanly.
+
+- **The turn becomes steps.** An agent's turn is its prose plus one steps box: every tool call of the turn is a `TranscriptStep` (kind, tool, one-line target, state, short result, times, an output excerpt with a ref to the full text in Session). A finished turn is collapsed and opens itself only when a failure stopped the work.
+- **Detail levels.** Messages (prose, questions, approvals, results), Steps (plus collapsed steps boxes) and Raw (every step expanded with full input and output, today's rendering).
+- **The view rule.** Focus while one agent works, Team while two or more work at once (moving back and forth without moving the scroll), Lanes only when pinned. A pin stops the automatic switch for that chat. The pin and the detail level are per viewer, per chat, in `localStorage` (like `read-marks.ts`), never on the Chat actor. Below 768 px only Focus and Team; Lanes is hidden below 1024 px and falls back to Team.
+- **Where the data comes from.** Core owns the contract (`TranscriptStep`, `StepKind`, `StepState`, `TurnSteps`, an optional `steps` on the `msg` ChatEntry and on the SessionEvent `message`, and pure helpers `stepKindOf`, `summariseSteps`, `pickExcerpt`, `audienceOf`, `turnOpensItself`). The Session stamps `at` on each event and, in `finishTurn`, folds the turn into `TurnSteps` through per-runtime step normalisers registered in `@agentic/runtimes` (the `touches.ts` pattern), attached to the turn's final `msg`. Raw mode and "Full output" read the Session lazily; the Session page deep-links a step with `?call=`. Handoff lines come from the `delegate`, `plan_assign` and `plan_handoff` tool calls; "coordinator" is `ChatState.coordinator`, the default addressee in `resolveActivation`. The live Follow panel reads the live session stream.
+
+#### #1052 docs: vendor the chat-modes handoff, decisions and architecture section
+
+Docs only: the handoff, the four boards, `canvas.json`, screenshots and tokens in `docs/design/chat-modes/`, the 2026-09-28 chat-modes decisions, and this section with its placeholders. No seam changes.
+
+#### #1053 core: transcript step contract — TranscriptStep, TurnSteps, summary and excerpt helpers
+
+_not yet_
+
+#### #580 platform: session events carry a time
+
+_not yet_
+
+#### #1054 ui: steps box, step line, failure excerpt, live line and a detail level on Thread
+
+_not yet_
+
+#### #1055 platform/runtimes: a turn step summary on the final chat msg, normalised per runtime
+
+_not yet_
+
+#### #1056 web: the Session page deep-links a step and shows its full output
+
+_not yet_
+
+#### #1057 ui: team parts — crew strip, handoff line, work card, folded talk, lane, follow panel
+
+_not yet_
+
+#### #1058 web: chat Focus view, View and Detail controls, view seam and remembered choices
+
+_not yet_
+
+#### #1059 web: chat Team view and the automatic Focus/Team switch
+
+_not yet_
+
+#### #1060 web: chat Follow panel over the live session stream
+
+_not yet_
+
+#### #1061 web: chat Lanes view
+
+_not yet_
+
 ## 11. Zero feedback loop
 
 This app is the dogfood consumer for `@sigx/zero`. Friction (a missing part, a state the anatomy cannot express, a control that fights the model binding, a recipe the validator rejects) is filed on signalxjs/zero labelled `from:agentic` as it is found, linked from the sub-issue here, with the smallest workaround in the package that owns the code and a `docs/promotion.md` line naming the zero issue. Zero is never patched or vendored in this repo.
