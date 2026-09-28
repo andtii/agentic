@@ -12,9 +12,9 @@ import { createFetchHandler } from '@sigx/server-renderer/server';
 import { template, assets } from 'virtual:sigx-app';
 import { handleServerFnRequest, matchesServerFn } from '@sigx/server/server';
 import { serverFns, serverFnBase } from 'virtual:sigx-server-fns';
-import { createApp } from './entry-server';
+import { createAppWithDefs } from './entry-server';
 import { createA2aMount } from './a2a/mount';
-import { createActorHost, createActorWorker, pairingWiring, platformFiles, platformRegistry, type PlatformEnv } from './actors.cloudflare';
+import { createActorHost, createActorWorker, pairingWiring, platformDefs, platformFiles, platformRegistry, type PlatformEnv } from './actors.cloudflare';
 import { devLoginEnabled, devLoginRouteFor } from './auth/dev-login';
 import { createAuthMount, githubEnabled } from './auth/mount';
 import { setSignInOptions } from './auth/sign-in';
@@ -25,7 +25,8 @@ import { runWithHost } from './host-scope';
 
 const render = createFetchHandler({
     template,
-    app: (url) => createApp(url),
+    // SSR reads through this isolate's registry (#34, #1017).
+    app: createAppWithDefs(() => platformDefs()),
     document: { assets }
 });
 

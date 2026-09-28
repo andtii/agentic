@@ -343,11 +343,28 @@ export function pairingWiring(actors: readonly AnyActorDefinition[]): NonNullabl
 
 /** The definitions the pages read through during SSR (`useActorDefs`, #34): the registry's own objects, picked by type. */
 export function platformDefs(actors: readonly AnyActorDefinition[]): ActorDefs {
-    const byType = (type: string): AnyActorDefinition => {
+    return defsBy((type) => {
         const def = actors.find((d) => (d as { type: string }).type === type);
         if (!def) throw new Error(`[actors.app] no \`${type}\` actor in the registry`);
         return def;
-    };
+    });
+}
+
+/**
+ * The same definitions, read off a running host (#1017): what a host's SSR provides when it holds the
+ * registry only through its `Host` — the Node entry (`entry.node.ts`) renders inside the host's own scope
+ * (`runWithHost`), so `currentHost()` is the host that serves the reads. Every platform actor is
+ * array-registered, so the lookup is synchronous; a lazy or missing one is a wiring error.
+ */
+export function hostDefs(host: Host): ActorDefs {
+    return defsBy((type) => {
+        const def = host.definition(type);
+        if (!def || typeof (def as { then?: unknown }).then === 'function') throw new Error(`[actors.app] no \`${type}\` actor registered on the host`);
+        return def as AnyActorDefinition;
+    });
+}
+
+function defsBy(byType: (type: string) => AnyActorDefinition): ActorDefs {
     return {
         Workspace: byType('Workspace') as ActorDefs['Workspace'],
         Chat: byType('Chat') as ActorDefs['Chat'],
