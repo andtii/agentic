@@ -352,3 +352,15 @@ Open decision 8 settled v1 as "responsive web only… No native shell". This ent
 3. **Squash merges: the worktree goes, the branch stays.** Removal keeps today's safety: `git worktree remove` without `--force`, and a dirty worktree is kept and audited. Branch deletion stays `git branch -d`, never `-D`. `-d` refuses a squash-merged branch, so that branch is kept and the audit says so.
 4. **`on-merge` includes `on-chat-leave`.** A project that tidies merged chats also tidies chats that leave or are deleted. `never` and `on-chat-leave` behave as before.
 5. **The chat stays usable.** A merged chat stays in its project. Its next session makes the worktree again (the daemon's idempotent `worktree` op, #618), from the kept branch or from the base.
+
+## 2026-09-28 — chat modes: steps on the turn, saved view choices, mobile, event times, handoff source (#1050, #1052)
+
+The chat-modes handoff ([`docs/design/chat-modes/`](design/chat-modes/HANDOFF.md), "Chat modes", lines 532–646) separates what an agent says from what it does: a turn's tool calls fold into one steps box, the thread has a Messages / Steps / Raw detail level, and the view (Focus, Team, Lanes) picks itself from how many agents are working. Two data gaps sit under it — a finished turn keeps no steps, and Session events carry no time — and the handoff leaves storage, mobile and one tool name open. These are the answers.
+
+1. **Steps data.** When a turn finishes, the Session attaches a compact `TurnSteps` summary to the turn's final `msg` (an optional `steps` field on the `msg` ChatEntry and on the SessionEvent `message`), folded by per-runtime step normalisers registered in `@agentic/runtimes`. The chat never copies full tool input or output: Raw mode and a step's "Full output" read the Session lazily.
+2. **Saved choices.** The view pin and the detail level are saved per viewer, per chat, in `localStorage`, like `read-marks.ts`. They are not stored on the Chat actor.
+3. **Mobile.** Below 768 px the phone gets Focus and Team only: the crew strip scrolls sideways and Follow opens as a bottom drawer. Lanes is hidden below 1024 px and falls back to Team.
+4. **#580 folds in.** The Session stamps `at` on each event, which gives real step durations (`startedAt` / `endedAt`).
+5. **A correction to the handoff.** Agents in a session never call `tasks_delegate`, which exists only on the MCP server. Handoff lines therefore come from the `delegate`, `plan_assign` and `plan_handoff` tool calls, not from `tasks_delegate` or message text.
+
+"Coordinator" on the boards (the Lanes top row, the composer's `coordinator answers unless you @ someone`) means `ChatState.coordinator`: the default addressee `resolveActivation` (`packages/core/src/chat.ts`) activates when a message @-mentions no one.

@@ -1,0 +1,507 @@
+{
+ "v": 3,
+ "createdOnFiles": {
+  "v": 1,
+  "at": "2026-09-17T09:24:07Z"
+ },
+ "title": "Agentic UI",
+ "launch": {
+  "view": "canvas",
+  "page": "core"
+ },
+ "pages": [
+  {
+   "id": "core",
+   "name": "Core flows"
+  },
+  {
+   "id": "projects",
+   "name": "Projects"
+  },
+  {
+   "id": "chat",
+   "name": "Chat modes"
+  },
+  {
+   "id": "agents",
+   "name": "Agents"
+  },
+  {
+   "id": "ops",
+   "name": "Operations"
+  },
+  {
+   "id": "mobile",
+   "name": "Mobile 400"
+  },
+  {
+   "id": "foundations",
+   "name": "Foundations"
+  }
+ ],
+ "boards": {
+  "Main.dc.html": {
+   "x": 0,
+   "y": 0,
+   "w": 1440,
+   "h": 1100,
+   "title": "Home  /",
+   "page": "core",
+   "is_interactive": true
+  },
+  "Chat.dc.html": {
+   "x": 1520,
+   "y": 0,
+   "w": 1440,
+   "h": 1300,
+   "title": "Chat  /chats/:id",
+   "page": "core",
+   "is_interactive": true
+  },
+  "Task.dc.html": {
+   "x": 0,
+   "y": 1400,
+   "w": 1440,
+   "h": 1080,
+   "title": "Task tree  /tasks/:id",
+   "page": "core",
+   "is_interactive": true
+  },
+  "Session.dc.html": {
+   "x": 1520,
+   "y": 1400,
+   "w": 1440,
+   "h": 1040,
+   "title": "Session  /sessions/:id",
+   "page": "core",
+   "is_interactive": true
+  },
+  "Agents.dc.html": {
+   "x": 0,
+   "y": 0,
+   "w": 1440,
+   "h": 820,
+   "title": "Agents  /agents",
+   "page": "agents",
+   "is_interactive": true
+  },
+  "AgentConfig.dc.html": {
+   "x": 1520,
+   "y": 0,
+   "w": 1440,
+   "h": 1560,
+   "title": "Agent config + versions  /agents/:id",
+   "page": "agents",
+   "is_interactive": true
+  },
+  "AgentMemory.dc.html": {
+   "x": 3040,
+   "y": 0,
+   "w": 1440,
+   "h": 1100,
+   "title": "Agent memory  /agents/:id",
+   "page": "agents",
+   "is_interactive": true
+  },
+  "Machines.dc.html": {
+   "x": 0,
+   "y": 0,
+   "w": 1440,
+   "h": 900,
+   "title": "Machines  /machines",
+   "page": "ops",
+   "is_interactive": true
+  },
+  "Machine.dc.html": {
+   "x": 1520,
+   "y": 0,
+   "w": 1440,
+   "h": 1000,
+   "title": "Machine  /machines/:id",
+   "page": "ops",
+   "is_interactive": true
+  },
+  "Pair.dc.html": {
+   "x": 3040,
+   "y": 0,
+   "w": 1440,
+   "h": 820,
+   "title": "Pair  /pair",
+   "page": "ops",
+   "is_interactive": true
+  },
+  "Schedules.dc.html": {
+   "x": 0,
+   "y": 1160,
+   "w": 1440,
+   "h": 740,
+   "title": "Schedules  /schedules",
+   "page": "ops",
+   "is_interactive": true
+  },
+  "Plugins.dc.html": {
+   "x": 0,
+   "y": 3520,
+   "w": 1440,
+   "h": 1560,
+   "title": "Plugins: all  /plugins",
+   "page": "ops",
+   "is_interactive": true
+  },
+  "Settings.dc.html": {
+   "x": 3040,
+   "y": 1160,
+   "w": 1440,
+   "h": 1020,
+   "title": "Settings  /settings",
+   "page": "ops",
+   "is_interactive": true
+  },
+  "History.dc.html": {
+   "x": 0,
+   "y": 2500,
+   "w": 1440,
+   "h": 800,
+   "title": "History  (audit, #44)",
+   "page": "ops",
+   "is_interactive": true
+  },
+  "Usage.dc.html": {
+   "x": 1520,
+   "y": 2500,
+   "w": 1440,
+   "h": 900,
+   "title": "Usage  (ledger, #45)",
+   "page": "ops",
+   "is_interactive": true
+  },
+  "MobileHome.dc.html": {
+   "x": 0,
+   "y": 0,
+   "w": 400,
+   "h": 860,
+   "title": "Mobile: inbox + approval",
+   "page": "mobile",
+   "is_interactive": true
+  },
+  "MobileChat.dc.html": {
+   "x": 480,
+   "y": 0,
+   "w": 400,
+   "h": 980,
+   "title": "Mobile: chat + composer",
+   "page": "mobile",
+   "is_interactive": true
+  },
+  "MobileMachines.dc.html": {
+   "x": 960,
+   "y": 0,
+   "w": 400,
+   "h": 860,
+   "title": "Mobile: machines",
+   "page": "mobile",
+   "is_interactive": true
+  },
+  "MobileNav.dc.html": {
+   "x": 1440,
+   "y": 0,
+   "w": 400,
+   "h": 860,
+   "title": "Mobile: drawer",
+   "page": "mobile",
+   "is_interactive": true
+  },
+  "Foundations.dc.html": {
+   "x": 0,
+   "y": 0,
+   "w": 1440,
+   "h": 1500,
+   "title": "Foundations: tokens, states, failures",
+   "page": "foundations"
+  },
+  "MemberCard.dc.html": {
+   "x": 0,
+   "y": 2640,
+   "w": 1872,
+   "h": 720,
+   "title": "Member card: states",
+   "page": "core",
+   "is_interactive": true
+  },
+  "Changes.dc.html": {
+   "x": 3040,
+   "y": 1400,
+   "w": 1440,
+   "h": 1080,
+   "title": "Changes: diff  /sessions/:id/changes",
+   "page": "core",
+   "is_interactive": true
+  },
+  "Files.dc.html": {
+   "x": 4560,
+   "y": 1400,
+   "w": 1440,
+   "h": 1000,
+   "title": "Files  /sessions/:id/files",
+   "page": "core",
+   "is_interactive": true
+  },
+  "PluginsConnectors.dc.html": {
+   "x": 1520,
+   "y": 3520,
+   "w": 1440,
+   "h": 740,
+   "title": "Plugins: connectors  /plugins?kind=connector",
+   "page": "ops",
+   "is_interactive": true
+  },
+  "PluginDetail.dc.html": {
+   "x": 3040,
+   "y": 3520,
+   "w": 1440,
+   "h": 1180,
+   "title": "Plugin: Gmail  /plugins/:id",
+   "page": "ops",
+   "is_interactive": true
+  },
+  "AddConnector.dc.html": {
+   "x": 1520,
+   "y": 4360,
+   "w": 1440,
+   "h": 1080,
+   "title": "Add a connector  /plugins/connectors/add",
+   "page": "ops",
+   "is_interactive": true
+  },
+  "Pull.dc.html": {
+   "x": 1520,
+   "y": 1000,
+   "w": 1440,
+   "h": 1480,
+   "title": "Pull request  /projects/:id/work/:item",
+   "page": "projects",
+   "is_interactive": true
+  },
+  "PullSurfaces.dc.html": {
+   "x": 3040,
+   "y": 1000,
+   "w": 1880,
+   "h": 460,
+   "title": "Pull requests: where they surface",
+   "page": "projects",
+   "is_interactive": true
+  },
+  "Projects.dc.html": {
+   "x": 0,
+   "y": 0,
+   "w": 1440,
+   "h": 820,
+   "title": "Projects  /projects",
+   "page": "projects",
+   "is_interactive": true
+  },
+  "ProjectHome.dc.html": {
+   "x": 1520,
+   "y": 0,
+   "w": 1440,
+   "h": 900,
+   "title": "Project home  /projects/:id",
+   "page": "projects",
+   "is_interactive": true
+  },
+  "ProjectChats.dc.html": {
+   "x": 3040,
+   "y": 0,
+   "w": 1440,
+   "h": 900,
+   "title": "Project chats  /projects/:id/chats",
+   "page": "projects",
+   "is_interactive": true
+  },
+  "ProjectCode.dc.html": {
+   "x": 0,
+   "y": 1000,
+   "w": 1440,
+   "h": 980,
+   "title": "Project work, git on  /projects/:id/work",
+   "page": "projects",
+   "is_interactive": true
+  },
+  "EventHome.dc.html": {
+   "x": 0,
+   "y": 2600,
+   "w": 1440,
+   "h": 940,
+   "title": "Project home, no code  /projects/:id",
+   "page": "projects",
+   "is_interactive": true
+  },
+  "ProjectPlain.dc.html": {
+   "x": 1520,
+   "y": 2600,
+   "w": 1440,
+   "h": 940,
+   "title": "Project work, no code  /projects/:id/work",
+   "page": "projects",
+   "is_interactive": true
+  },
+  "ProjectFeatures.dc.html": {
+   "x": 3040,
+   "y": 2600,
+   "w": 1440,
+   "h": 1080,
+   "title": "Project features  /projects/:id/settings/features",
+   "page": "projects",
+   "is_interactive": true
+  },
+  "Plan.dc.html": {
+   "x": 0,
+   "y": 3760,
+   "w": 1440,
+   "h": 1300,
+   "title": "Plan: list  /projects/:id/plan",
+   "page": "projects",
+   "is_interactive": true
+  },
+  "PlanBoard.dc.html": {
+   "x": 1520,
+   "y": 3760,
+   "w": 1440,
+   "h": 900,
+   "title": "Plan: board, queues per agent",
+   "page": "projects",
+   "is_interactive": true
+  },
+  "PlanAgents.dc.html": {
+   "x": 3040,
+   "y": 3760,
+   "w": 1440,
+   "h": 1120,
+   "title": "Plan: how agents use it",
+   "page": "projects",
+   "is_interactive": true
+  },
+  "Requests.dc.html": {
+   "x": 0,
+   "y": 5160,
+   "w": 1440,
+   "h": 1000,
+   "title": "Requests to a project manager  /projects/:id/requests",
+   "page": "projects",
+   "is_interactive": true
+  },
+  "PMChat.dc.html": {
+   "x": 1520,
+   "y": 5160,
+   "w": 1440,
+   "h": 940,
+   "title": "Chat: bringing in another project&rsquo;s PM",
+   "page": "projects",
+   "is_interactive": true
+  },
+  "PMSettings.dc.html": {
+   "x": 3040,
+   "y": 5160,
+   "w": 1440,
+   "h": 940,
+   "title": "Project manager settings",
+   "page": "projects",
+   "is_interactive": true
+  },
+  "Links.dc.html": {
+   "x": 0,
+   "y": 6260,
+   "w": 1440,
+   "h": 1060,
+   "title": "Links across projects  /projects/links",
+   "page": "projects",
+   "is_interactive": true
+  },
+  "ChatFocus.dc.html": {
+   "x": 0,
+   "y": 0,
+   "w": 1440,
+   "h": 1000,
+   "title": "Chat, Focus: one agent",
+   "page": "chat",
+   "is_interactive": true
+  },
+  "ChatTeam.dc.html": {
+   "x": 1520,
+   "y": 0,
+   "w": 1440,
+   "h": 1080,
+   "title": "Chat, Team: several agents",
+   "page": "chat",
+   "is_interactive": true
+  },
+  "ChatLanes.dc.html": {
+   "x": 0,
+   "y": 1180,
+   "w": 1440,
+   "h": 940,
+   "title": "Chat, Lanes: watch agents side by side",
+   "page": "chat",
+   "is_interactive": true
+  },
+  "TranscriptParts.dc.html": {
+   "x": 1520,
+   "y": 1180,
+   "w": 1440,
+   "h": 880,
+   "title": "Chat transcript: parts and rules",
+   "page": "chat",
+   "is_interactive": true
+  }
+ },
+ "order": [
+  "Main.dc.html",
+  "Chat.dc.html",
+  "Task.dc.html",
+  "Session.dc.html",
+  "Changes.dc.html",
+  "Files.dc.html",
+  "MemberCard.dc.html",
+  "Projects.dc.html",
+  "ProjectHome.dc.html",
+  "ProjectChats.dc.html",
+  "ProjectCode.dc.html",
+  "Pull.dc.html",
+  "PullSurfaces.dc.html",
+  "EventHome.dc.html",
+  "ProjectPlain.dc.html",
+  "ProjectFeatures.dc.html",
+  "Plan.dc.html",
+  "PlanBoard.dc.html",
+  "PlanAgents.dc.html",
+  "Requests.dc.html",
+  "PMChat.dc.html",
+  "PMSettings.dc.html",
+  "Links.dc.html",
+  "ChatFocus.dc.html",
+  "ChatTeam.dc.html",
+  "ChatLanes.dc.html",
+  "TranscriptParts.dc.html",
+  "Agents.dc.html",
+  "AgentConfig.dc.html",
+  "AgentMemory.dc.html",
+  "Machines.dc.html",
+  "Machine.dc.html",
+  "Pair.dc.html",
+  "Schedules.dc.html",
+  "Plugins.dc.html",
+  "PluginsConnectors.dc.html",
+  "AddConnector.dc.html",
+  "PluginDetail.dc.html",
+  "Settings.dc.html",
+  "History.dc.html",
+  "Usage.dc.html",
+  "MobileHome.dc.html",
+  "MobileChat.dc.html",
+  "MobileMachines.dc.html",
+  "MobileNav.dc.html",
+  "Foundations.dc.html"
+ ],
+ "notes": {},
+ "designSystems": []
+}
