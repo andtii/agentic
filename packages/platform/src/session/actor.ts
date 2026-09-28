@@ -39,7 +39,7 @@ import { inboxKey, type NotificationInput, type NotificationRef } from '../notif
 import { answerText, describeRule, needOf, policyRequestOf, requestRecordOf, requestRecordsOf, requestRef, ruleFor, sessionGrantsOf, shapeAnswers, type RequestEvent, type RequestRecord, type RequestResolvedEvent, type SessionGrant } from '../policy/requests.js';
 import { correctionOf, instructionProposals, lastUserText, learningAccess, learningPluginFor, memoryAccess, renderMemoryBlock, retrieveMemories, taskOutcomeOf, turnStatusOf, withMemoryBlock, type LearningPorts, type MemoryOpener } from '../task/driver.js';
 import type { AnswerFollowUp, OpenedSession, SessionOpenSpec, SessionPorts } from './ports.js';
-import { applySessionEntry, optionsOf, specOptions, bytesOf, type DetachedAnswer, currentTaskId, cursorAfter, EMPTY_TURN_EVENTS, jsonBytes, eventsAfter, findEvent, initialSessionState, isWholeEvent, knownEvents, PAGE_BYTES, parseSessionKey, platformCursor, requestById, RETAINED_PAGES, WINDOW_BYTES, type CorrectionRecord, type LearningRecord, type SessionEntry, type SessionPatch, type SessionState } from './state.js';
+import { applySessionEntry, eventTime, optionsOf, stampEvent, specOptions, bytesOf, type DetachedAnswer, currentTaskId, cursorAfter, EMPTY_TURN_EVENTS, jsonBytes, eventsAfter, findEvent, initialSessionState, isWholeEvent, knownEvents, PAGE_BYTES, parseSessionKey, platformCursor, requestById, RETAINED_PAGES, WINDOW_BYTES, type CorrectionRecord, type LearningRecord, type SessionEntry, type SessionPatch, type SessionState } from './state.js';
 import { SessionPage, sessionPageKey } from './page.js';
 import { shouldNoteActivity, toolActivity, type ActivityMark } from './activity.js';
 import { TaskActor } from '../task/actor.js';
@@ -458,7 +458,9 @@ export function defineSessionActor(ports: SessionPorts) {
 
     async function appendEvent(c: ActorContext<SessionState>, ev: AgentEvent): Promise<void> {
         if (!cursorAfter(c.state.head, ev)) return;
-        await appendEntry(c, { t: 'ev', ev } satisfies SessionEntry);
+        // Stamped with when it arrived (#580), never before the event it follows; the reducer stays clock-free.
+        const previous = c.state.events[c.state.events.length - 1];
+        await appendEntry(c, { t: 'ev', ev: stampEvent(ev, now(), previous && eventTime(previous)) } satisfies SessionEntry);
         await rollWindow(c);
         if (ev.type !== 'request' && ev.type !== 'request-resolved') return;
         const spec = c.state.spec;

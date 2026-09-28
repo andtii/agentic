@@ -1,7 +1,7 @@
 /** Session actor — durable event log, wire serve, resume, task-based driver (architecture §4 Session, §5a/§5b). */
 export type { SessionOpenSpec, SessionFactoryContext, OpenedSession, SessionFactory, CommandSink, HistorySource, HistoryTarget, HistoryAnswer, SessionPorts, MemoryRetrievalRecord, AnswerFollowUp } from './ports.js';
 export type { SessionStatus, SessionMode, RunningTurn, CommandRecord, SessionState, SessionPatch, SessionEntry, LearningRecord, CorrectionRecord, SessionPageMeta, TranscriptPageMeta, DetachedAnswer, IndexEntry, IndexedTurnStart } from './state.js';
-export { MAX_COMMANDS, WINDOW_BYTES, PAGE_BYTES, RETAINED_PAGES, INDEX_TURNS, initialSessionState, applySessionEntry, cursorAfter, currentTaskId, platformCursor, parseSessionKey, eventsAfter, knownEvents, findEvent, requestById, isWholeEvent, bytesOf, jsonBytes, utf8Bytes } from './state.js';
+export { eventTime, stampEvent, MAX_COMMANDS, WINDOW_BYTES, PAGE_BYTES, RETAINED_PAGES, INDEX_TURNS, initialSessionState, applySessionEntry, cursorAfter, currentTaskId, platformCursor, parseSessionKey, eventsAfter, knownEvents, findEvent, requestById, isWholeEvent, bytesOf, jsonBytes, utf8Bytes } from './state.js';
 export { SessionPage, sessionPageKey, SESSION_PAGE_TYPE, type SessionPageState } from './page.js';
 export { SessionTranscriptPage, transcriptPageKey, SESSION_TRANSCRIPT_PAGE_TYPE, type SessionTranscriptPageState } from './transcript.js';
 export type { SessionStoreContext } from './store.js';

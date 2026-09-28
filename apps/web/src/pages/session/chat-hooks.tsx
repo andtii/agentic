@@ -100,8 +100,20 @@ export function mockChatHooks(v: MockSessionView, agent: Pick<AgentIdentity, 'na
     };
 }
 
-/** A live session's `fileActions` from its log's `tool-call` events: the Transcript page is where a call is read. */
-export function liveEditedBy(input: { id: string; root: string; runtime: string | undefined; events: readonly { readonly type: string }[]; agent: { name: string; hue?: AgentHue } }): ((path: string) => JSXElement | null) | undefined {
-    const calls = input.events.flatMap((e) => (e.type === 'tool-call' ? [e as unknown as ToolCallLike & { readonly callId: string }] : []));
-    return editedByActions({ root: input.root, runtime: input.runtime, calls, agent: input.agent, href: () => transcriptHref(input.id) });
+/**
+ * A live session's `fileActions` from its log's `tool-call` events: the Transcript page is where a call is read. The
+ * call's `at` — when the platform received it (#580) — prints through `time` (the workspace zone's `HH:MM`); an event
+ * logged before events carried one shows no time.
+ */
+export function liveEditedBy(input: { id: string; root: string; runtime: string | undefined; events: readonly { readonly type: string }[]; agent: { name: string; hue?: AgentHue }; time?: (ms: number) => string }): ((path: string) => JSXElement | null) | undefined {
+    const calls = input.events.flatMap((e) => (e.type === 'tool-call' ? [e as unknown as ToolCallLike & { readonly callId: string; readonly at?: unknown }] : []));
+    const format = input.time;
+    return editedByActions({
+        root: input.root,
+        runtime: input.runtime,
+        calls,
+        agent: input.agent,
+        href: () => transcriptHref(input.id),
+        ...(format ? { time: (call: { readonly at?: unknown }) => (typeof call.at === 'number' && Number.isFinite(call.at) ? format(call.at) : undefined) } : {})
+    });
 }
