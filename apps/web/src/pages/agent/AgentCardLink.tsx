@@ -1,6 +1,6 @@
 import { component, type Define } from 'sigx';
 import { useRouter } from '@sigx/router';
-import { Card } from '@sigx/zero-daisyui/components';
+import { Card } from '@sigx/zero';
 
 export type AgentCardLinkProps =
     & Define.Prop<'to', string, true>

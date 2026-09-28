@@ -1,5 +1,5 @@
 import { component, signal, type Define } from 'sigx';
-import { Input } from '@sigx/zero-daisyui/components';
+import { Input } from '@sigx/zero';
 import { Button, ErrorNote } from '@agentic/ui';
 import type { IndexedEntry } from '@agentic/platform';
 import { entryLine, type AgentLookup, type TimeText } from './live';

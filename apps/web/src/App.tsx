@@ -1,7 +1,6 @@
 import { component, useData, useHead, type JSXElement } from 'sigx';
 import { Link, RouterView, useRoute, useRouter } from '@sigx/router';
-import { ThemeProvider, themeInitScript } from '@sigx/zero';
-import { Avatar, Breadcrumbs } from '@sigx/zero-daisyui/components';
+import { Avatar, Breadcrumbs, themeInitScript, ThemeProvider } from '@sigx/zero';
 import { AppShell, Button, ConnectionStrip, connectionRows, OfflineBanner, type NavGroup } from '@agentic/ui';
 import { NAV_GROUPS } from './nav';
 import { backOf, titleOf, trailFor } from './crumbs';

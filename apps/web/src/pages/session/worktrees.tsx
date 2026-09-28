@@ -5,8 +5,7 @@
  */
 import { component, signal, watch, type Define } from 'sigx';
 import { useRouter } from '@sigx/router';
-import { Select } from '@sigx/zero';
-import { Field } from '@sigx/zero-daisyui/components';
+import { Field, Select } from '@sigx/zero';
 import type { FsWorktreeEntry } from '@agentic/core';
 import { changesHref, displayRoot, filesHref, type SessionFiles, type SessionView } from './files';
 

@@ -5,7 +5,7 @@
  */
 import { component, signal, type Define } from 'sigx';
 import { Link } from '@sigx/router';
-import { Checkbox } from '@sigx/zero-daisyui/components';
+import { Checkbox } from '@sigx/zero';
 import type { ProjectRecord } from '@agentic/core';
 import { AgentTile, Button, ErrorNote, FormDialog, Icon, SearchField, StatusPill } from '@agentic/ui';
 import { settingsHref } from '../settings/tabs';

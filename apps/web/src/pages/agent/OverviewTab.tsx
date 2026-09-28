@@ -1,8 +1,7 @@
 import { component, type Define } from 'sigx';
 import { Link } from '@sigx/router';
-import { Card } from '@sigx/zero-daisyui/components';
 import { EnvironmentLine, Label, SectionHeading, StatusPill } from '@agentic/ui';
-import { Col } from '@sigx/zero';
+import { Card, Col } from '@sigx/zero';
 import type { MockAgent } from '../../mock/data';
 import { sessionRows, type AgentProfile, type SessionRow } from '../../mock/agents';
 import { age } from './format';

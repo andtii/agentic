@@ -1,8 +1,7 @@
 import { component, signal, useHead } from 'sigx';
 import { Link, useRoute } from '@sigx/router';
-import { Tabs } from '@sigx/zero-daisyui/components';
 import { AgentTile, Button, EmptyState, EnvironmentLine, StatusPill } from '@agentic/ui';
-import { Col, Row } from '@sigx/zero';
+import { Col, Row, Tabs } from '@sigx/zero';
 import { Page } from '../components/Page';
 import { agentById } from '../mock/data';
 import { agentProfile } from '../mock/agents';

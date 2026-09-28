@@ -2,7 +2,7 @@
   "name": "@agentic/web",
   "version": "0.0.0",
   "private": true,
-  "description": "The web app: sigx SSR + serverFn + actors host on Cloudflare Workers, UI on @sigx/zero + zero-daisyui. Scaffolded by `sigx create` (ssr + hydrate + cloudflare + router + server-fn).",
+  "description": "The web app: sigx SSR + serverFn + actors host on Cloudflare Workers, UI on @sigx/zero, typed by @agentic/ui/register. Scaffolded by `sigx create` (ssr + hydrate + cloudflare + router + server-fn).",
   "type": "module",
   "scripts": {
     "dev": "node server.mjs",
@@ -39,7 +39,6 @@
     "@sigx/server": "catalog:",
     "@sigx/server-renderer": "catalog:",
     "@sigx/zero": "catalog:",
-    "@sigx/zero-daisyui": "catalog:",
     "sigx": "catalog:"
   },
   "devDependencies": {

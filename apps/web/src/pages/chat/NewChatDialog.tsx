@@ -1,9 +1,8 @@
 import { component, signal, watch, type Define } from 'sigx';
 import { BYPASS_PERMISSIONS_MODE, accountRefOf, environmentsForAccount, parseProjectFolderKey, type AccountRef, type ProjectRecord } from '@agentic/core';
-import { RadioGroup } from '@sigx/zero';
+import { Checkbox, Field, RadioGroup } from '@sigx/zero';
 import { derivedModel } from '@sigx/zero/behaviors';
 import { Link } from '@sigx/router';
-import { Checkbox, Field } from '@sigx/zero-daisyui/components';
 import { ErrorNote, FormDialog, SelectField, type WorkdirEnvironment } from '@agentic/ui';
 import type { AgentIdentity } from './live';
 import { MemberPicker } from './MemberPicker';

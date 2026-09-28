@@ -7,8 +7,7 @@
  */
 import { component, signal, watch, type Define } from 'sigx';
 import { projectFolderKey, PM_PERSONALITIES, type MachineId, type ProjectPatch } from '@agentic/core';
-import { RadioGroup } from '@sigx/zero';
-import { Field } from '@sigx/zero-daisyui/components';
+import { Field, RadioGroup } from '@sigx/zero';
 import { Button, ChipInput, ErrorNote, FormDialog, Tag, TextField, TextareaField, gitBadgeText, type WorkdirSelection } from '@agentic/ui';
 import { WorkdirInput } from '../../workdir/WorkdirInput';
 import type { LocateBackend } from '../locate';

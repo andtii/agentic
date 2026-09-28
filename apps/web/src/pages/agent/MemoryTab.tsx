@@ -1,8 +1,7 @@
 import { component, effect, onUnmounted, signal, type Define } from 'sigx';
-import { Card } from '@sigx/zero-daisyui/components';
 import type { MemoryEntry, MemoryKind } from '@agentic/core';
 import { Button, ConfirmDialog, EmptyState, ErrorNote, FilterChips, FormDialog, Icon, Label, StatusPill, Switch, Tag, TextareaField } from '@agentic/ui';
-import { Col } from '@sigx/zero';
+import { Card, Col } from '@sigx/zero';
 import { MEMORY_KINDS, memoryCounts, type AgentProfile } from '../../mock/agents';
 import { agentClock, shortDate, dateTime } from './format';
 

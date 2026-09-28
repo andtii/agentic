@@ -1,7 +1,6 @@
 import { component, signal, type Define } from 'sigx';
-import { Card } from '@sigx/zero-daisyui/components';
 import { AGENT_FIELDS as F, AgentForm, Button, ErrorNote, Label, TextField, VersionItem, type AccountOption, type AgentFormRailProps, type AgentFormWorkdirProps, type FieldOption } from '@agentic/ui';
-import { Col } from '@sigx/zero';
+import { Card, Col } from '@sigx/zero';
 import type { AgentConfig, AgentConfigVersion, EnvironmentId } from '@agentic/core';
 import { mockWorkdirEnvironments, type WorkdirEnvironments } from '../workdir/environments';
 import { WorkdirInput } from '../workdir/WorkdirInput';

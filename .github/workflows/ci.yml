@@ -63,6 +63,8 @@ jobs:
       - uses: ./.github/actions/setup
       - run: pnpm lint
       - run: pnpm verify:catalog
+      # `@agentic/ui/register` (the design system's vocabulary for `@sigx/zero`, #608) is emitted by the build.
+      - run: pnpm --filter @agentic/ui build:ds
       - run: pnpm typecheck
       - if: needs.changes.outputs.scripts == 'true'
         run: pnpm test:scripts
@@ -174,8 +176,9 @@ jobs:
       - uses: ./.github/actions/setup
         with:
           node-version: ${{ matrix.node-version }}
-      - run: pnpm typecheck
+      # The build first: it emits `@agentic/ui/register`, which typecheck reads (#608).
       - run: pnpm build
+      - run: pnpm typecheck
       - run: pnpm test
       - if: matrix.node-version == '22'
         run: pnpm --filter @agentic/web test:workers

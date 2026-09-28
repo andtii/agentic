@@ -75,6 +75,9 @@
       ],
       "@agentic/ui/design-system": [
         "./packages/ui/src/design-system/index.ts"
+      ],
+      "@agentic/ui/register": [
+        "./packages/ui/dist/ds/register"
       ]
     }
   },

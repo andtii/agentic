@@ -6,8 +6,7 @@
  * Every change is one `ProjectPatch` through `save` — `Workspace.upsertProject` live, a local merge on mock data.
  */
 import { component, signal, watch, type Define } from 'sigx';
-import { Select } from '@sigx/zero';
-import { Field } from '@sigx/zero-daisyui/components';
+import { Field, Select } from '@sigx/zero';
 import { applyProjectFeaturePreset, type ProjectPatch, type ProjectRecord } from '@agentic/core';
 import { Button, ErrorNote, FilterChips, Icon, SchemaForm, SearchField, SlotMarks, Switch, type IconName, type ProjectFeatureSlot, type SchemaFormApi } from '@agentic/ui';
 import { featureIcon } from '../../features/registry';

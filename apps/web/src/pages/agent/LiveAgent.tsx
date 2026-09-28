@@ -15,10 +15,9 @@ import { component, effect, onUnmounted, signal, useData, type JSXElement } from
 import { Link, useRoute, useRouter } from '@sigx/router';
 import { actor } from '@sigx/actors';
 import { useActorState } from '@sigx/actors/app';
-import { Tabs } from '@sigx/zero-daisyui/components';
 import type { AgentConfig, AgentConfigVersion, MemoryEntry } from '@agentic/core';
 import { AgentTile, Button, EmptyState, EnvironmentLine, ErrorNote, StatusPill } from '@agentic/ui';
-import { Col, Row } from '@sigx/zero';
+import { Col, Row, Tabs } from '@sigx/zero';
 import { Page } from '../../components/Page';
 import { useActorDefs, useViewer } from '../../actors/defs';
 import { agentKeyOf, memoryKeyOf } from '../../actors/keys';

@@ -8,8 +8,7 @@
  */
 import { component, signal, type Define } from 'sigx';
 import { Link } from '@sigx/router';
-import { Select } from '@sigx/zero';
-import { Field, Input } from '@sigx/zero-daisyui/components';
+import { Field, Input, Select } from '@sigx/zero';
 import type { PlanItem, PullRequest, WorkGroup, WorkItem } from '@agentic/core';
 import { WORK_STAGES_FALLBACK, workStagesFor } from '@agentic/core';
 import { AgentTile, Button, ChecksBar, StageTrack, type AgentHue } from '@agentic/ui';
