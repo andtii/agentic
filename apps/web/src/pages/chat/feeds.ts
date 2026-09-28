@@ -22,6 +22,8 @@ import { actorSessionTransport, type SessionActorClient, type SessionFeed } from
 export interface FeedHandle extends SessionFeed {
     /** The task the session runs (`SessionInfo.spec.taskId`), once the record was read — "Resume" goes to the router by it (#46). */
     readonly taskId?: string;
+    /** When the session's current turn started (#1058, the live line's clock): the `turn-start` event's `at`, else when the feed saw it. */
+    readonly turnStartedAt?: number;
     /** Stop following; the remote session lives on. */
     disconnect(): void;
     /** The client, once connected — `respond` and `cancel` go through it. */
@@ -45,7 +47,7 @@ export function feedAnchor(info: Pick<SessionInfo, 'transcriptAt' | 'running' | 
 
 export function openFeed(session: SessionActorClient, sessionId: string, agentId: string, onError: (error: Error) => void): FeedHandle {
     const transcript = signal(createTranscript(sessionId));
-    const record = signal<{ taskId?: string }>({});
+    const record = signal<{ taskId?: string; turnStartedAt?: number }>({});
     let stopped = false;
     let client: AgentSessionClient | undefined;
     void (async () => {
@@ -61,6 +63,10 @@ export function openFeed(session: SessionActorClient, sessionId: string, agentId
             }
             for await (const event of client.subscribe(from)) {
                 if (stopped) break;
+                if (event.type === 'turn-start') {
+                    const at = (event as unknown as { at?: unknown }).at;
+                    record.turnStartedAt = typeof at === 'number' ? at : Date.now();
+                }
                 reduceAgentEvent(transcript, event);
             }
         } catch (e) {
@@ -73,6 +79,9 @@ export function openFeed(session: SessionActorClient, sessionId: string, agentId
         transcript,
         get taskId() {
             return record.taskId;
+        },
+        get turnStartedAt() {
+            return record.turnStartedAt;
         },
         client: () => client,
         disconnect() {

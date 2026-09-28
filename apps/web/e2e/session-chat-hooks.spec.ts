@@ -14,6 +14,8 @@ test.describe('session chat hooks', () => {
         // Monaco loads and lays out twice (the diff, then the file): more than the default 30 s on a loaded runner (#817).
         test.setTimeout(90_000);
         await page.goto('/chats/c1');
+        // Three agents at work: Team, at Messages (#1058). The Edit card shows at Raw.
+        await page.locator('[data-chat-control="detail"] button', { hasText: 'Raw' }).click();
         const link = page.locator('[data-scope="ai-tool-call"][data-part="link"]');
         await expect(link).toHaveText('View diff');
         await link.click();

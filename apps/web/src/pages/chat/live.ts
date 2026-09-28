@@ -11,7 +11,7 @@ import type { AgentView, ChatSummary, InboxNotification, IndexedEntry, SessionIn
 import { createTranscript, type AgentCapabilities, type AgentEvent, type Decision } from '@sigx/ai-agent';
 import type { AgentMessage, AgentPart, AgentTranscript, OpenRequest } from '@sigx/ai-agent/app';
 import { WIRE_PROTOCOL_VERSION, type SessionTransport, type WireCommand, type WireFrame, type WireReply } from '@sigx/ai-agent/wire';
-import { hueFor, type AgentHue, type EnvironmentParts, type MessageAuthor } from '@agentic/ui';
+import { hueFor, type AgentHue, type EnvironmentParts, type MessageAuthor, type StepsMessage } from '@agentic/ui';
 import { failureOf, interruptionLine, INTERRUPTED_CODE, type FailureState, type Interruption } from '../../components/status';
 import { formatTime, USER, type MockChatMember, type MockTaskRow } from '../../mock/workspace';
 import { isFileTokenAt, resourceText } from '../session/references';
@@ -524,7 +524,9 @@ export function entryTranscript(entries: readonly IndexedEntry[], lookup: AgentL
                 authors[entry.id] = { name: userName, person: true, time: timeOf(entry.at) };
             } else {
                 const a = lookup(entry.author.agentId);
-                messages.push({ id: entry.id, role: 'assistant', actor: a.id, parts });
+                // The turn's steps (#1053) ride the message, so its steps box shows once the turn is an entry (#1058).
+                const message: StepsMessage = { id: entry.id, role: 'assistant', actor: a.id, parts, ...(entry.steps ? { steps: entry.steps } : {}) };
+                messages.push(message);
                 authors[entry.id] = { name: a.name, hue: a.hue, environment: a.environment, time: timeOf(entry.at) };
             }
         } else if (entry.t === 'status') {

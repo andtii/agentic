@@ -1034,7 +1034,39 @@ take a `now` from the page (`elapsedOf`, `formatElapsed`); the parts do not tick
 
 #### #1058 web: chat Focus view, View and Detail controls, view seam and remembered choices
 
-_not yet_
+Both chat pages (mock `Chat.tsx`, live `chat/LiveChat.tsx`) render the conversation through one seam in
+`apps/web/src/pages/chat/views/`:
+
+- **Header** (`views/ViewHeader.tsx`): the title, a note naming the rule that chose the view
+  (`one agent working · Focus picked automatically`, `pinned by you · …`), and two kit `Segmented` controls,
+  `VIEW` (`Focus | Team | Lanes`, Lanes left out below 1024 px) and `DETAIL` (`Messages | Steps | Raw`).
+  Choosing a view pins it; an `Auto` link in the note (shown only while pinned) unpins it.
+- **Pick** (`views/pick.ts`, pure): the agents at work are the union of `workingAgents`, `waitingAgents` and
+  the feeds mid-turn (mock: members `active` or `waiting` plus the sample live lines); 0–1 is `focus`, 2+ is
+  `team`; a pin wins; `lanes` is `team` below `LANES_MIN_WIDTH` (1024). The detail defaults to Messages in
+  Team and Steps otherwise; a saved detail wins. A view switch keeps the first visible thread row where it was
+  (`anchorOf` / `restoreScroll`, recorded on every scroll of the conversation column while the thread is not
+  following).
+- **Saved choices** (`chat/view-prefs.ts`): `{ pin?, detail?, expanded: string[] }` per workspace and chat in
+  `localStorage` (`agentic:chat-view:<ws>`), every access guarded as `read-marks.ts`; `expanded` backs
+  `Thread.stepsOpen` / `onStepsToggle`. A box the reader closes stays closed for the visit, so a turn that
+  opened itself can be shut.
+- **Registry** (`views/index.ts`): `CHAT_VIEWS` maps `focus`, `team` (`views/team/`) and `lanes`
+  (`views/lanes/`) to components that all take one `view: ChatViewModel` (`views/types.ts`: the thread
+  inputs, `detail`, the steps-box state, `stepHref`, the live work, members, lookup, feeds, coordinator and
+  the `followed` / `onFollow` seam). Team and Lanes are stubs over Focus until #1059 / #1061; `follow/`
+  exports `FollowPanel` (`follow: FollowModel`), a stub that renders nothing, which the page shows in place of
+  the context panel while someone is followed (#1060).
+- **Focus** (`views/focus/`): `Thread` at the chat's detail; finished turns fold `msg.steps` (copied onto the
+  thread message by `entryTranscript`), the turn in flight its feed's tool parts; one `LiveLine` per feed
+  mid-turn (`views/live-work.ts`: its newest running step, its start from the feed's `turn-start` —
+  `FeedHandle.turnStartedAt`), placed after the last row; its Stop cancels the turn through the feed client
+  (`Session.cancel`). `Full output` is `refHref(step.output.ref)`, else `callHref` in the agent's session.
+- **Raw** (`views/raw.ts`): while Raw is on, the live page reads each session a finished turn ran in once
+  (`Session.events()`), folds it, and puts the turn's tool calls in front of its text; the mock page carries
+  them as `MockChatView.raw`.
+- **Samples** (`mock/chat-modes.ts`): `cm1` (the build:ds chat of ChatFocus) and `cm2` (the four-agent
+  register chat of ChatTeam / ChatLanes), loadable by id in project `p_agentic`, not listed.
 
 #### #1059 web: chat Team view and the automatic Focus/Team switch
 

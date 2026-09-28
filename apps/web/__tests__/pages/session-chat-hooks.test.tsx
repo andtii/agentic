@@ -6,7 +6,7 @@
  * "Mention in chat" puts `@file:` in the composer, the Edit card's "View
  * diff" opens that file's diff.
  */
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, onTestFinished } from 'vitest';
 import type { AgentId, ChatId, MessageId, PromptPart, TaskContract } from '@agentic/core';
 import type { ChatSummary, IndexedEntry } from '@agentic/platform';
 import { clearMockChatPosts, mockChatPosts } from '../../src/mock/chat-posts';
@@ -15,6 +15,7 @@ import { askInChat } from '../../src/pages/session/chat-hooks';
 import { changesHref, filesHref, relativeToRoot, type LineQuestion } from '../../src/pages/session/files';
 import { codeReferencePart, fileReferenceParts, fileToken, fileTokensIn, mentionHref, mentionOfQuery, questionParts, referenceLabel, resourceText, viewDiffLinks } from '../../src/pages/session/references';
 import { all, mountRoute, tick } from './mount';
+import { clearViewPrefs, saveDetail } from './chat-view-prefs';
 
 async function until(check: () => boolean, what: string): Promise<void> {
     for (let i = 0; i < 100; i++) {
@@ -152,6 +153,9 @@ describe('the mock workspace end to end (#565)', () => {
     });
 
     it("the Edit card's View diff opens that file's diff, the absolute path read relative to the folder", async () => {
+        // Every tool card: Raw detail (a multi-agent chat defaults to Messages, #1058).
+        saveDetail('c1', 'raw');
+        onTestFinished(clearViewPrefs);
         const chat = await mountRoute('/chats/c1');
         const links = all(chat, 'ai-tool-call', 'link');
         expect(links.map((l) => l.textContent)).toEqual(['View diff']);
