@@ -1,8 +1,10 @@
 /**
  * A session feed (#34): `connectSession` over the Session actor, folded
- * into one reactive transcript with `reduceAgentEvent` — in place, so a
- * `part-delta` is one property write observed by the one text node that
- * reads it.
+ * into one reactive transcript — in place, so a `part-delta` is one property
+ * write observed by the one text node that reads it. The fold carries the
+ * `coding` extension (#1106): `coding.*` events (terminal deltas, diffs,
+ * plans) land under `transcript.ext.coding`, which the Follow panel's live
+ * output reads first; the default reducer would drop every `ext` event.
  *
  * #398: a chat member's session lives for the life of the chat (#393), so
  * its log holds every turn it ever ran; the feed does not replay that. It is
@@ -14,7 +16,8 @@
  * events to the same transcript (AC-06).
  */
 import { signal } from 'sigx';
-import { createTranscript, reduceAgentEvent, type EventCursor } from '@sigx/ai-agent';
+import { createReducer, createTranscript, type EventCursor } from '@sigx/ai-agent';
+import { codingExtension } from '@sigx/ai-agent/coding';
 import { connectSession, type AgentSessionClient } from '@sigx/ai-agent/wire';
 import type { SessionInfo } from '@agentic/platform';
 import { actorSessionTransport, type SessionActorClient, type SessionFeed } from './live';
@@ -29,6 +32,9 @@ export interface FeedHandle extends SessionFeed {
     /** The client, once connected — `respond` and `cancel` go through it. */
     client(): AgentSessionClient | undefined;
 }
+
+/** The feed's fold: the core reducer plus the coding extension (#1106). */
+const reduceFeedEvent = createReducer({ extensions: [codingExtension()] });
 
 const START: EventCursor = { epoch: 0, seq: 0 };
 
@@ -67,7 +73,7 @@ export function openFeed(session: SessionActorClient, sessionId: string, agentId
                     const at = (event as unknown as { at?: unknown }).at;
                     record.turnStartedAt = typeof at === 'number' ? at : Date.now();
                 }
-                reduceAgentEvent(transcript, event);
+                reduceFeedEvent(transcript, event);
             }
         } catch (e) {
             if (!stopped) onError(e instanceof Error ? e : new Error(String(e)));
