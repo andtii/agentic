@@ -59,6 +59,8 @@ export interface Route {
     cwd?: string;
     /** The project the task belongs to (#332), from its contract; the record is read from the Workspace at `run` and at every placement. */
     readonly projectId?: ProjectId;
+    /** The plan item the task carries out (#1073, `TaskContract.planItem`): the project's features get it at every placement (a worktree per item). */
+    readonly planItem?: number;
     /** `projectFolderFor(project, environmentId, machineId)` as resolved at `run` (EXE-12, #702): the project's folder on this environment, when it has one. */
     readonly projectFolder?: string;
     readonly policy: OfflinePolicy;

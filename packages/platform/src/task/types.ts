@@ -170,6 +170,8 @@ export interface TaskState {
     projectId?: ProjectId;
     /** The earlier session whose engine conversation this task continues (#285). */
     resumeFrom?: SessionId;
+    /** The plan item the task carries out (#1047/#1073), from its contract; routing hands it to the project's features. Never inherited by a delegated child. */
+    planItem?: number;
     /** The model and permission mode its session runs with (#453), from the contract; the chat member's own win at placement. */
     options?: SessionOptions;
     owner: AgentId;

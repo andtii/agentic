@@ -143,6 +143,7 @@ function toView(s: TaskState): TaskView {
         ...(s.workdir !== undefined ? { workdir: s.workdir } : {}),
         ...(s.projectId !== undefined ? { projectId: s.projectId } : {}),
         ...(s.resumeFrom !== undefined ? { resumeFrom: s.resumeFrom } : {}),
+        ...(s.planItem !== undefined ? { planItem: s.planItem } : {}),
         ...(s.options !== undefined ? { options: { ...s.options } } : {}),
         depth: s.depth,
         ...(s.parentId !== undefined ? { parentId: s.parentId } : {}),

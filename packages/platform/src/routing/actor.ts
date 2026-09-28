@@ -795,6 +795,7 @@ export function defineRoutingActor(ports: RoutingPorts) {
                     ...(route.environmentId ? { environmentId: route.environmentId } : {}),
                     ...(route.machineId ? { machineId: route.machineId } : {}),
                     ...(route.cwd !== undefined ? { cwd: route.cwd } : {}),
+                    ...(route.planItem !== undefined ? { planItem: route.planItem } : {}),
                     fs: fs === 'daemon' && route.machineId && route.environmentId ? machineFs(machine(route.machineId), route.environmentId, { now }) : noDaemonFs
                 });
                 if (!outcome.ok) {
@@ -840,8 +841,9 @@ export function defineRoutingActor(ports: RoutingPorts) {
             /**
              * Bind the route to its session (#393; CHT-01, CHT-11): a chat route takes the member's live session from the
              * chat's binding (`ChatSummary.sessions[agentId]`) when `reusable`, with the chat's `seenSeq` for the prompt;
-             * otherwise — and always for a chatless route — a fresh id. A binding refused is ended first: its
-             * `session-ended` drops the chat's row, and the new session's `session-started` replaces it either way.
+             * otherwise — and always for a chatless route — a fresh id. A binding refused is ended first — unless another
+             * route still runs on it (#1073) — its `session-ended` drops the chat's row, and the new session's
+             * `session-started` replaces it either way.
              * Idempotent: a route already bound (a retry) keeps its id. Called once the placement is final (the folder
              * included), since that is what reuse is judged on.
              */
@@ -871,9 +873,13 @@ export function defineRoutingActor(ports: RoutingPorts) {
                             route.seenSeq = row.seenSeq;
                             return row.sessionId;
                         }
-                        await session(row.sessionId)
-                            .close()
-                            .catch(() => undefined);
+                        // A binding another route still runs on is left open (#1073): plan item tasks of one member run
+                        // in parallel, each in its item's worktree, and one placement must not end another's session.
+                        const serving = Object.values(ctx.state.routes).some((r) => r.taskId !== route.taskId && r.sessionId === row.sessionId);
+                        if (!serving)
+                            await session(row.sessionId)
+                                .close()
+                                .catch(() => undefined);
                     }
                 }
                 route.sessionId = newSessionId();
@@ -1368,7 +1374,7 @@ export function defineRoutingActor(ports: RoutingPorts) {
                     const gated = projectError ? {} : await gate(runtime, undefined, connectorIds(config, project));
                     const host = hostOf(runtime);
                     const refused: TaskError | undefined = projectError ?? gated.error ?? (host === undefined ? { code: UNKNOWN_RUNTIME_CODE, message: `agent ${t.assignee} runs on "${runtime}", which this build does not have`, recoverable: false } : undefined);
-                    const base = { taskId, agentId: t.assignee, ...(chatId ? { chatId } : {}), runtime, policy: config.execution.offlinePolicy, config, ...(constraints ? { constraints } : {}), ...(gated.plugins ? { plugins: gated.plugins } : {}), ...(t.projectId ? { projectId: t.projectId } : {}), createdAt: at, updatedAt: at };
+                    const base = { taskId, agentId: t.assignee, ...(chatId ? { chatId } : {}), runtime, policy: config.execution.offlinePolicy, config, ...(constraints ? { constraints } : {}), ...(gated.plugins ? { plugins: gated.plugins } : {}), ...(t.projectId ? { projectId: t.projectId } : {}), ...(t.planItem !== undefined ? { planItem: t.planItem } : {}), createdAt: at, updatedAt: at };
                     if (refused) {
                         // No route was written; `fail` tells the task's chat where the answer would have been (#128).
                         await fail({ ...base, status: 'opening' }, refused);
