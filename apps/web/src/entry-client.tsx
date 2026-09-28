@@ -8,9 +8,9 @@ import './styles/plugins.css';
 import '@agentic/ui/register';
 import { defineApp } from 'sigx';
 import { ssrClientPlugin } from '@sigx/server-renderer/client';
-import { actorsPlugin, fetchTransport } from '@sigx/actors/app';
-import { ACTOR_ENDPOINT, clientDefs } from './actors/client';
-import { browserSocketFor, liveOverSockets } from './actors/live-socket';
+import { actorsPlugin } from '@sigx/actors/app';
+import { clientDefs } from './actors/client';
+import { pageTransport } from './actors/page-transport';
 import { installClientConnection, setClientConnection, watchTransport } from './components/status';
 import { useActorDefs, useViewer } from './actors/defs';
 import { viewerHook } from './actors/viewer';
@@ -30,11 +30,12 @@ const app = defineApp(<App />);
 app.use(createAppRouter());
 // The platform actors over the Worker (#34, #713): calls as POSTs on the HTTP mount; live reads on one hibernatable
 // socket per actor (`/_sigx/socket/{type}/{key}`, #712), opened with its first subscription and closed with its last.
+// No page opens the NDJSON `$live` stream (#715): the transport always has a live channel (`actors/page-transport.ts`).
 // Actor refs are hand-built stubs (`actors/client.ts`): the platform's definitions are not `*.actor.ts` modules.
 // The transport reports this browser's connection (OPS-04, #46): an open socket or an answered call says live, a
 // dropped socket or the network says reconnecting.
 const socketReport = { onOpen: () => setClientConnection('live'), onDrop: () => setClientConnection('reconnecting') };
-const transport = liveOverSockets({ calls: fetchTransport({ endpoint: ACTOR_ENDPOINT }), socketFor: (type, key) => browserSocketFor(type, key, socketReport) });
+const transport = pageTransport({ report: socketReport });
 app.use(actorsPlugin({ transport: watchTransport(transport), live: { onError: () => setClientConnection('reconnecting') } }));
 installClientConnection();
 app.defineProvide(useActorDefs, clientDefs);
