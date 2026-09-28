@@ -3,12 +3,15 @@
  * (`r2ChatFileStore`), export sink (`r2ArtifactSink`) and orphan sweep run on,
  * over a directory (#988).
  *
- *     <dir>/objects/<key>        the bytes
- *     <dir>/meta/<key>.json      { size, uploaded, httpMetadata, customMetadata }
+ *     <dir>/objects/<key>%.bin    the bytes
+ *     <dir>/meta/<key>%.json      { size, uploaded, httpMetadata, customMetadata }
  *
  * Every key segment is percent-encoded (`encodeURIComponent`, plus `*`), so a
  * key is a valid path on Windows as on Linux and cannot climb out of `dir`
- * (`.` and `..` segments and empty segments are refused). A put writes the
+ * (`.` and `..` segments and empty segments are refused). An encoded segment
+ * never holds `%.` (a `%` is always followed by two hex digits), so the leaf
+ * suffixes never name a directory: `a` and `a/b` sit side by side, as on R2
+ * (#1006). A put writes the
  * bytes and then the sidecar, each through a temp file and a rename, so a
  * reader sees the old object or the new one. `list` walks the sidecars in key
  * order; its cursor is the last key it returned.
@@ -26,6 +29,9 @@ interface Sidecar {
 }
 
 const DEFAULT_LIST_LIMIT = 1000;
+/** Leaf suffixes no encoded segment can end in, so a leaf never shares a name with a directory (#1006). */
+const OBJECT_SUFFIX = '%.bin';
+const META_SUFFIX = '%.json';
 
 const encodeSegment = (segment: string): string => encodeURIComponent(segment).replace(/\*/g, '%2A');
 
@@ -55,12 +61,13 @@ const isMissing = (e: unknown): boolean => (e as { code?: string } | null)?.code
 export function fsBucket(dir: string): R2BucketLike {
     const objects = join(dir, 'objects');
     const meta = join(dir, 'meta');
-    const objectPath = (key: string): string => join(objects, ...segmentsOf(key));
-    const metaPath = (key: string): string => {
+    const leafPath = (root: string, key: string, suffix: string): string => {
         const s = segmentsOf(key);
-        s[s.length - 1] += '.json';
-        return join(meta, ...s);
+        s[s.length - 1] += suffix;
+        return join(root, ...s);
     };
+    const objectPath = (key: string): string => leafPath(objects, key, OBJECT_SUFFIX);
+    const metaPath = (key: string): string => leafPath(meta, key, META_SUFFIX);
 
     const head = async (key: string): Promise<R2ObjectLike | null> => {
         let text: string;
@@ -93,7 +100,7 @@ export function fsBucket(dir: string): R2BucketLike {
             }
             for (const entry of entries) {
                 if (entry.isDirectory()) await walk(join(path, entry.name), `${prefix}${decodeURIComponent(entry.name)}/`);
-                else if (entry.name.endsWith('.json')) out.push(prefix + decodeURIComponent(entry.name.slice(0, -'.json'.length)));
+                else if (entry.name.endsWith(META_SUFFIX)) out.push(prefix + decodeURIComponent(entry.name.slice(0, -META_SUFFIX.length)));
             }
         };
         await walk(meta, '');

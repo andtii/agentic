@@ -46,6 +46,17 @@ describe('fsBucket', () => {
         for (const key of ['../x', 'a/../../x', '/abs', 'a//b', '']) await expect(b.put(key, 'x')).rejects.toThrow(/invalid key/);
     });
 
+    it('keeps a key and the keys it prefixes side by side, as R2 does (#1006)', async () => {
+        const b = await bucket();
+        const keys = ['a', 'a/b', 'a.json/b', 'a%.bin', 'a%.bin/c'];
+        for (const k of keys) await b.put(k, `v:${k}`);
+        for (const k of keys) expect(new TextDecoder().decode(await (await b.get(k))!.arrayBuffer())).toBe(`v:${k}`);
+        expect((await b.list()).objects.map((o) => o.key)).toEqual([...keys].sort());
+        await b.delete('a');
+        expect(await b.get('a')).toBeNull();
+        expect((await b.list()).objects.map((o) => o.key)).toEqual(keys.filter((k) => k !== 'a').sort());
+    });
+
     it('lists by prefix in key order, pages with a cursor, and leaves custom metadata out unless asked', async () => {
         const b = await bucket();
         for (const k of ['files/b/2', 'files/a/1', 'files/b/1', 'other/x']) await b.put(k, k, { customMetadata: { at: '1' } });
