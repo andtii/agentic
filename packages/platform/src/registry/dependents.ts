@@ -13,13 +13,14 @@
  */
 
 import type { AgentConfig, AgentId, PluginManifest, ScheduleId } from '@agentic/core';
+import type { AgentGrants, AgentGrantsAt } from '../agent/entries.js';
 import type { AgentDependent, DependencyVia, Dependents, ScheduleDependent } from './types.js';
 
 export interface AgentRef {
     readonly id: AgentId;
     readonly config: AgentConfig;
-    /** Its config versions, oldest first, when the caller read them: `since` is dated from these (#681). */
-    readonly history?: readonly { readonly at: number; readonly config: AgentConfig }[];
+    /** Its grants over its versions, one row per change, oldest first, when the caller read them: `since` is dated from these (#681, #1032). */
+    readonly history?: readonly AgentGrantsAt[];
 }
 
 export interface ScheduleRef {
@@ -48,7 +49,7 @@ export function toolInNamespace(toolName: string, namespace: string): boolean {
 }
 
 /** How `agent` depends on `manifest`, or an empty list when it does not. */
-export function dependencyOf(agent: AgentRef, manifest: PluginManifest): readonly DependencyVia[] {
+export function dependencyOf(agent: { readonly config: AgentGrants }, manifest: PluginManifest): readonly DependencyVia[] {
     const via: DependencyVia[] = [];
     const { config } = agent;
     if (config.connectors.some((c) => c.id === manifest.id)) via.push('connector');
@@ -60,7 +61,7 @@ export function dependencyOf(agent: AgentRef, manifest: PluginManifest): readonl
 }
 
 /**
- * When `agent` started depending on `manifest` (#681): the time of the oldest version in the unbroken run of versions,
+ * When `agent` started depending on `manifest` (#681): the time of the oldest grant row in the unbroken run of rows,
  * ending with the newest, that depend on it — a grant removed and added again dates from the re-add. `undefined`
  * without a history, or when its newest version does not depend on it.
  */
@@ -68,7 +69,7 @@ export function dependentSince(agent: AgentRef, manifest: PluginManifest): numbe
     const history = agent.history ?? [];
     let since: number | undefined;
     for (let i = history.length - 1; i >= 0; i--) {
-        if (dependencyOf({ id: agent.id, config: history[i]!.config }, manifest).length === 0) break;
+        if (dependencyOf({ config: history[i]! }, manifest).length === 0) break;
         since = history[i]!.at;
     }
     return since;

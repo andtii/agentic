@@ -353,7 +353,7 @@ export function defineRegistry(options: RegistryOptions = {}) {
 
     type Refs = { readonly agents: readonly AgentRef[]; readonly schedules: readonly ScheduleRef[] };
 
-    /** Read the Workspace index, then every agent and schedule it lists — side by side, index order kept. `history` adds each agent's config versions (#681). */
+    /** Read the Workspace index, then every agent and schedule it lists — side by side, index order kept. `history` adds each agent's grant history (#681, #1032). */
     const collectRefs = async (ctx: Ctx, options: { readonly history?: boolean } = {}): Promise<Refs> => {
         const ws = workspaceOf(ctx);
         const index = await ctx.actor(Workspace, workspaceKey(ws)).get();
@@ -362,7 +362,7 @@ export function defineRegistry(options: RegistryOptions = {}) {
                 index.agents.map(async (id): Promise<AgentRef> => {
                     const client = ctx.actor(AgentActor, agentKey(ws, id as AgentId));
                     // The history only dates the grant: one that cannot be read leaves `since` out, never the agent.
-                    const [agent, history] = await Promise.all([client.get(), options.history ? client.configHistory().catch(() => undefined) : undefined]);
+                    const [agent, history] = await Promise.all([client.get(), options.history ? client.grantHistory().catch(() => undefined) : undefined]);
                     return { id: agent.id, config: agent.config, ...(history ? { history } : {}) };
                 })
             ),

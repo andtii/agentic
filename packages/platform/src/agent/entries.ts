@@ -156,20 +156,40 @@ function foldEntry(config: AgentConfig, entry: AgentConfigEntry): AgentConfig {
         : mergeAgentConfig(defaultAgentConfig(), entry.patch);
 }
 
-/** One version as it stood: when it was written and the whole config then. */
-export interface AgentConfigAt {
-    readonly version: number;
-    readonly at: number;
-    readonly config: AgentConfig;
+/** The part of a config that decides which plugins an agent depends on (#681, #1032): what `dependencyOf` reads. */
+export interface AgentGrants {
+    readonly connectors: AgentConfig['connectors'];
+    readonly tools: AgentConfig['tools'];
+    readonly execution: Pick<AgentConfig['execution'], 'runtime' | 'offlinePolicy'>;
 }
 
-/** Every version's whole config, oldest first — replayed from the defaults once (#681). */
-export function configHistory(versions: readonly AgentConfigEntry[]): AgentConfigAt[] {
-    const out: AgentConfigAt[] = [];
+/** An agent's grants from the version written at `at` until the next change to them. */
+export interface AgentGrantsAt extends AgentGrants {
+    readonly at: number;
+}
+
+const grantsOf = (config: AgentConfig): AgentGrants => ({
+    connectors: config.connectors,
+    tools: config.tools,
+    execution: { runtime: config.execution.runtime, offlinePolicy: config.execution.offlinePolicy }
+});
+
+/**
+ * The agent's grants over its versions, oldest first, replayed once (#1032): one row per change to them, dated by the
+ * version that made it — a version that leaves them as they were adds nothing, so the rows grow with grant changes,
+ * not with every config edit, and never carry instructions or anything else a dependency does not read.
+ */
+export function grantHistory(versions: readonly AgentConfigEntry[]): AgentGrantsAt[] {
+    const out: AgentGrantsAt[] = [];
     let config = defaultAgentConfig();
+    let last = '';
     for (const entry of versions) {
         config = foldEntry(config, entry);
-        out.push({ version: entry.v, at: entry.at, config });
+        const grants = grantsOf(config);
+        const key = JSON.stringify(grants);
+        if (key === last) continue;
+        last = key;
+        out.push({ at: entry.at, ...grants });
     }
     return out;
 }

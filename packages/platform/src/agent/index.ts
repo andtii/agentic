@@ -3,6 +3,8 @@ export { AgentActor, agentKey, agentMemoryScope, principalLabel, type AgentView 
 export {
     type AgentConfigEntry,
     type AgentEntry,
+    type AgentGrants,
+    type AgentGrantsAt,
     type AgentProposalEntry,
     type AgentState,
     type AgentVersionInfo,
@@ -13,6 +15,7 @@ export {
     appendInstruction,
     applyAgentEntry,
     configAtVersion,
+    grantHistory,
     initialAgentState,
     parseAgentKey
 } from './entries.js';
