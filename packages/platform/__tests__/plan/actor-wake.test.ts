@@ -25,7 +25,7 @@ const agentP = (agentId: AgentId, taskId?: TaskId): Principal => ({ kind: 'agent
 let members: ProjectMembers;
 let settings: Record<string, unknown>;
 let wakes: PlanWake[];
-let reachable: (w: PlanWake) => boolean;
+let reachable: (w: PlanWake) => boolean | { chatId: ChatId; reached: boolean };
 let app: TestActorApp;
 let Plan: ReturnType<typeof definePlanActor>;
 
@@ -109,6 +109,39 @@ describe('Plan actor: waking addressees', () => {
         await claimed();
         await plan(agentP(FORGE)).handoff(1, { kind: 'user', userId: 'u1' }, 'please review');
         expect(wakes.map((w) => w.to)).toEqual([{ kind: 'user', userId: 'u1' }]);
+    });
+
+    it('an answer wakes the agent that asked, in the chat of the task it asked from (#1043)', async () => {
+        await claimed();
+        await plan(agentP(FORGE, 'task_forge' as TaskId)).update(1, { state: 'needs-you', note: 'which port?' });
+        wakes = [];
+        const item = await plan(user).answer(1, '8787');
+        expect(item).toMatchObject({ state: 'ready' });
+        expect(item.ask).toBeUndefined();
+        const forge = wakes.filter((w) => w.to.kind === 'agent' && w.to.agentId === FORGE);
+        expect(forge).toHaveLength(1);
+        expect(forge[0]!.tasks[0]).toBe('task_forge');
+        expect(forge[0]!.notices.map((n) => n.kind)).toEqual(['answer']);
+        expect(forge[0]!.notices[0]!.text).toContain('"which port?": 8787');
+    });
+
+    it('a note naming agents wakes each of them (#1043)', async () => {
+        await claimed();
+        wakes = [];
+        await plan(user).update(1, { note: 'Forge, Lint: see the thread', mentions: [FORGE, LINT] });
+        expect(wakes.map((w) => (w.to.kind === 'agent' ? w.to.agentId : '')).sort()).toEqual([FORGE, LINT].sort());
+        expect(wakes.every((w) => w.notices.every((n) => n.kind === 'mention'))).toBe(true);
+    });
+
+    it.each([true, false])('a chat a wake opened is offered to the next wake of that agent, reached: %s (#1043)', async (reached) => {
+        await plan().create({ title: 'P', phases: [{ title: 'One', items: [{ title: 'a' }] }] });
+        reachable = () => ({ chatId: 'chat_opened' as ChatId, reached });
+        await plan(user).update(1, { note: 'hey', mentions: [LINT] });
+        expect(wakes.at(-1)!.chats).toEqual([]);
+        await plan(user).update(1, { note: 'again', mentions: [LINT] });
+        expect(wakes.at(-1)!.chats).toEqual(['chat_opened']);
+        // Not reached: the notices still wait for Lint's next plan call.
+        expect((await plan(agentP(LINT)).takeNotices()).length).toBe(reached ? 0 : 2);
     });
 
     it('a wake that throws leaves the notice waiting and never fails the call', async () => {

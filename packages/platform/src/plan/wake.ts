@@ -6,7 +6,9 @@
  * - **An agent** gets a chat message addressed to it, as the PR autopilot does (`chatAutopilotPort.startTurn`):
  *   posted in the first chat of the candidates it is a member of — the chats of the tasks working the items, then
  *   the plan's own chat — with a task started from that message (`mentionContract`) and handed to the router,
- *   one-way. No chat it is a member of → not woken; the notice waits for its next plan call as before.
+ *   one-way. No chat it is a member of → not woken; the notice waits for its next plan call as before — except what
+ *   a person caused (#1043: an `answer` to its question, a `mention` in a note), which opens a project chat with the
+ *   agent ("Plan #n") and posts there; the actor tries that chat first next time.
  * - **A person** gets one Inbox row.
  *
  * A woken notice is taken off the actor, so it is not delivered twice. Never a gate: a failure leaves the notice
@@ -14,13 +16,14 @@
  */
 import { createId, type AgentId, type ChatId, type PlanActor, type ProjectId, type TaskId, type WorkspaceId } from '@agentic/core';
 import { actor, defineActor, type AnyActorDefinition } from '@sigx/actors';
-import { asPrincipal, userPrincipal } from '../auth/index.js';
+import { asPrincipal, userPrincipal, workspaceKey } from '../auth/index.js';
 import { Chat } from '../chat/index.js';
 import { Inbox, inboxKey } from '../notify/inbox.js';
 import type { NotificationInput } from '../notify/types.js';
 import { routingKey, ROUTING_TYPE } from '../routing/key.js';
 import { mentionContract, MENTION_CONTEXT_WINDOW } from '../routing/mentions.js';
 import { TaskActor, taskKey } from '../task/index.js';
+import { Workspace } from '../workspace/index.js';
 import type { PlanNotice } from './rules.js';
 
 /** One addressee's new notices, and where it might be reached. */
@@ -36,9 +39,18 @@ export interface PlanWake {
 }
 
 export interface PlanWakePort {
-    /** Wake `wake.to` with its notices; `true` when they reached it (they are then taken off the actor). */
-    wake(wake: PlanWake): Promise<boolean>;
+    /** Wake `wake.to` with its notices: whether they reached it (they are then taken off the actor). */
+    wake(wake: PlanWake): Promise<PlanWakeResult>;
 }
+
+/**
+ * `true` when the notices reached their addressee. `{ chatId, reached }` when the wake opened a chat for it (#1043): the
+ * actor keeps that chat and offers it next time, whether or not this post got through — so a retry opens no second one.
+ */
+export type PlanWakeResult = boolean | { readonly chatId: ChatId; readonly reached: boolean };
+
+/** The notices a person caused, which open a chat with an agent no other chat reaches (#1043). */
+const OPENS_CHAT: ReadonlySet<PlanNotice['kind']> = new Set(['answer', 'mention']);
 
 /** Nobody is woken: notices wait for their addressee's next plan call. */
 export const NO_PLAN_WAKE: PlanWakePort = { wake: async () => false };
@@ -76,7 +88,9 @@ const NOTICE_TITLES: Record<PlanNotice['kind'], string> = {
     done: 'done',
     'needs-you': 'needs a person',
     idle: 'member idle',
-    stalled: 'member stalled'
+    stalled: 'member stalled',
+    answer: 'answered',
+    mention: 'mentioned you'
 };
 
 /** The Inbox row for a person's notices. */
@@ -93,7 +107,7 @@ export function planWakeRow(notices: readonly PlanNotice[], chatId?: ChatId): No
 /** The production wake: a chat message (and a task) for an agent, an Inbox row for a person. */
 export function chatPlanWake(options: ChatPlanWakeOptions = {}): PlanWakePort {
     return {
-        async wake({ workspaceId, to, notices, tasks, chats }) {
+        async wake({ workspaceId, projectId, to, notices, tasks, chats }) {
             if (!notices.length) return false;
             const driver = asPrincipal(userPrincipal(workspaceId, workspaceId));
             const candidates: ChatId[] = [];
@@ -113,11 +127,13 @@ export function chatPlanWake(options: ChatPlanWakeOptions = {}): PlanWakePort {
             }
             const agentId: AgentId = to.agentId;
             const text = planWakeText(notices);
-            for (const chatId of candidates) {
-                const chat = actor(Chat, `${workspaceId}:chat:${chatId}`).with({ context: driver });
+            const chatOf = (chatId: ChatId) => actor(Chat, `${workspaceId}:chat:${chatId}`).with({ context: driver });
+            /** Post the notices to the agent in `chatId` and start its turn there; `false` when it is not a member. */
+            const postIn = async (chatId: ChatId): Promise<boolean> => {
+                const chat = chatOf(chatId);
                 const summary = await chat.get().catch(() => undefined);
                 const member = summary?.members[agentId];
-                if (!summary || !member) continue;
+                if (!summary || !member) return false;
                 const { messageId } = await chat.post(text, [agentId]);
                 const { entries } = await chat.history(null, MENTION_CONTEXT_WINDOW + 1);
                 const contract = mentionContract({
@@ -136,8 +152,22 @@ export function chatPlanWake(options: ChatPlanWakeOptions = {}): PlanWakePort {
                 const router = actor((options.routing ?? routingByType)(), routingKey(workspaceId)).with({ context: driver, oneWay: true }) as unknown as RouterClient;
                 await router.run(taskId);
                 return true;
+            };
+            for (const chatId of candidates) if (await postIn(chatId)) return true;
+            // What a person caused reaches the agent anyway: a project chat with it, remembered by the actor.
+            if (!notices.some((n) => OPENS_CHAT.has(n.kind))) return false;
+            const { chatId } = await actor(Workspace, workspaceKey(workspaceId))
+                .with({ context: driver })
+                .createChat({ projectId, title: `Plan #${notices.find((n) => OPENS_CHAT.has(n.kind))!.itemId}` });
+            try {
+                const chat = chatOf(chatId);
+                await chat.addAgent(agentId, 'all');
+                await chat.setCoordinator(agentId);
+                return { chatId, reached: await postIn(chatId) };
+            } catch (error) {
+                console.warn(`[plan] posting to the chat opened for ${agentId} failed:`, error);
+                return { chatId, reached: false };
             }
-            return false;
         }
     };
 }

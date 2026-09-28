@@ -6,8 +6,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { defineActor } from '@sigx/actors';
 import { manualScheduler } from '@sigx/actors/host';
 import type { AgentId, ChatId, Principal, ProjectId, ProjectMembers, SessionId, TaskId, WorkspaceId } from '@agentic/core';
+import { AgentActor } from '../../src/agent/index';
+import { AuditActor } from '../../src/audit/index';
 import { capturingAuditPort } from '../../src/audit/port';
-import { Chat } from '../../src/chat/index';
+import { workspaceKey } from '../../src/auth/index';
+import { Chat, ChatPage } from '../../src/chat/index';
+import { PairingDirectory } from '../../src/pairing/index';
+import { Workspace } from '../../src/workspace/index';
 import { Inbox } from '../../src/notify/index';
 import { definePlanActor, planKey } from '../../src/plan/index';
 import { assign, claim, createPlan, emptyBook, takeNotices, watchMembers, type PlanCall } from '../../src/plan/rules';
@@ -64,6 +69,65 @@ describe('ready work, woken through the chat (chatPlanWake)', () => {
         for (let i = 0; i < 20 && ran.length === 0; i++) await new Promise((r) => setTimeout(r, 5));
         expect(ran).toHaveLength(1);
         expect(await app.as(user).actor(TaskActor, taskKey(ws, ran[0]!)).get()).toMatchObject({ owner: FORGE, assignee: FORGE, origin: { kind: 'user', chatId: CHAT } });
+    });
+});
+
+describe('what a person caused reaches an agent no chat reaches (#1043)', () => {
+    let ran: TaskId[];
+    const Routing = defineActor({
+        type: 'routing',
+        allowAnonymous: true,
+        state: () => ({}),
+        methods: () => ({
+            async run(taskId: TaskId) {
+                ran.push(taskId);
+                return { status: 'active' };
+            }
+        })
+    });
+    const anyProject = { project: async (_ctx: unknown, _ws: WorkspaceId, id: ProjectId) => ({ id, members }) };
+    const Plan = definePlanActor({ audit: capturingAuditPort(), projects: anyProject, wake: chatPlanWake({ routing: () => Routing, inbox: () => Inbox }) });
+    let app: TestActorApp;
+    beforeEach(() => {
+        ran = [];
+        app = testActorApp([Plan, Chat, ChatPage, TaskActor, Routing, Inbox, Workspace, PairingDirectory, AuditActor, AgentActor]);
+        return app.start();
+    });
+    afterEach(() => app.stop());
+
+    it('an answer opens a project chat with the asker, posts there, and the next wake reuses it', async () => {
+        const workspace = app.as(user).actor(Workspace, workspaceKey(ws));
+        const { id: projectId } = await workspace.upsertProject({ name: 'P' });
+        const plan = app.as(user).actor(Plan, planKey(ws, projectId));
+        await plan.create({ title: 'P', phases: [{ title: 'One', items: [{ title: 'Reconnect' }] }] });
+        await plan.assign(1, { kind: 'agent', agentId: FORGE });
+        await app.as(agentP(FORGE)).actor(Plan, planKey(ws, projectId)).update(1, { state: 'needs-you', note: 'which port?' });
+        await plan.answer(1, '8787');
+
+        const chats = (await workspace.get()).chats;
+        expect(chats).toHaveLength(1);
+        const chat = app.as(user).actor(Chat, `${ws}:chat:${chats[0]}`);
+        const summary = await chat.get();
+        expect(summary).toMatchObject({ title: 'Plan #1', projectId, coordinator: FORGE });
+        const texts = (await chat.history(null, 20)).entries.map((e) => e.entry).filter((e) => e.t === 'msg').map((e) => (e as unknown as { parts: readonly { text: string }[] }).parts[0]!.text);
+        expect(texts.at(-1)).toContain('"which port?": 8787');
+        for (let i = 0; i < 20 && ran.length === 0; i++) await new Promise((r) => setTimeout(r, 5));
+        expect(ran.length).toBeGreaterThan(0);
+
+        await plan.update(1, { note: 'and use TLS', mentions: [FORGE] });
+        expect((await workspace.get()).chats).toHaveLength(1);
+        const again = (await chat.history(null, 20)).entries.map((e) => e.entry).filter((e) => e.t === 'msg');
+        expect((again.at(-1) as unknown as { parts: readonly { text: string }[] }).parts[0]!.text).toContain('mentioned you on #1 (Reconnect): and use TLS');
+    });
+
+    it('ready work still waits when no chat reaches the agent', async () => {
+        const workspace = app.as(user).actor(Workspace, workspaceKey(ws));
+        const { id: projectId } = await workspace.upsertProject({ name: 'P' });
+        const plan = app.as(user).actor(Plan, planKey(ws, projectId));
+        await plan.create({ title: 'P', phases: [{ title: 'One', items: [{ title: 'Reconnect' }] }] });
+        await plan.assign(1, { kind: 'agent', agentId: FORGE });
+        expect((await workspace.get()).chats).toHaveLength(0);
+        expect((await app.as(agentP(FORGE)).actor(Plan, planKey(ws, projectId)).takeNotices()).map((n) => n.kind)).toEqual(['ready']);
     });
 });
 

@@ -29,6 +29,7 @@ import {
     type Plan,
     type PlanActivity,
     type PlanActor,
+    type PlanAsk,
     type PlanClaim,
     type PlanDoneWhen,
     type PlanItem,
@@ -56,6 +57,8 @@ export const TOUCHES_MAX = 50;
 export const PATH_MAX = 500;
 export const REFS_MAX = 100;
 export const OPTIONS_MAX = 10;
+/** Agents one note may name. */
+export const MENTIONS_MAX = 20;
 /** Activity lines kept per item, newest last. */
 export const ACTIVITY_KEPT = 100;
 /** Notices kept for all addressees together; the oldest go first. */
@@ -102,6 +105,8 @@ export interface StoredItem {
     doneWhen: PlanDoneWhen[];
     activity: PlanActivity[];
     options?: PlanOption[];
+    /** While `needs-you`: who asked what (#1043), so an `answer` goes back to them. */
+    ask?: PlanAsk;
     createdAt: number;
     updatedAt: number;
 }
@@ -126,13 +131,14 @@ export interface StoredPlan {
  * Something an agent or person is told: a lease ran out, touches overlap, an item was handed to them or moved off them,
  * or (`ready`, #981) an idle agent's queue has an item it can claim now. The manager also hears (#982) when an item is
  * `done`, set to `needs-you`, when a member goes `idle` (no claim, empty queue) and when one has `stalled` (ready work
- * at the head of its queue, unclaimed for longer than the lease).
+ * at the head of its queue, unclaimed for longer than the lease). The agent that asked a person hears the `answer`, and
+ * an agent a note names hears the `mention` (#1043).
  */
 export interface PlanNotice {
     readonly seq: number;
     readonly at: number;
     readonly to: PlanActor;
-    readonly kind: 'lease-expired' | 'touches' | 'handoff' | 'reassigned' | 'ready' | 'done' | 'needs-you' | 'idle' | 'stalled';
+    readonly kind: 'lease-expired' | 'touches' | 'handoff' | 'reassigned' | 'ready' | 'done' | 'needs-you' | 'idle' | 'stalled' | 'answer' | 'mention';
     readonly itemId: number;
     readonly text: string;
     /** `touches`: the other item and the suggested order (first to last). */
@@ -227,6 +233,8 @@ export interface PlanCall {
     readonly agentsMayTick?: boolean;
     /** The template a new plan without phases starts from (`starter`). */
     readonly starter?: PlanStarter;
+    /** The calling agent's task, when it calls from one: a question it asks is answered in that task's chat (#1043). */
+    readonly taskId?: TaskId;
 }
 
 /** A starter plan: phases of item titles (`@agentic/plugins-plan`'s `PlanTemplate`). */
@@ -438,6 +446,7 @@ function finish(book: PlanBook, item: StoredItem, call: PlanCall, how: string, p
     else if (item.handedOff) item.finishedClaim = { ...item.handedOff, at: call.now };
     delete item.claim;
     delete item.handedOff;
+    delete item.ask;
     dequeue(book, item.id);
     item.state = 'done';
     note(item, call.now, call.actor, how);
@@ -818,6 +827,16 @@ export interface PlanItemPatch {
     readonly state?: 'ready' | 'needs-you' | 'stuck' | 'done';
     /** The task carrying the item out (the claimer's). */
     readonly taskId?: TaskId;
+    /** Agents the note names (#1043): each is told the note. Project members or the manager; needs a `note`. */
+    readonly mentions?: readonly AgentId[];
+}
+
+/** The agents a note may name: the project's members and its manager. */
+function checkMentions(call: PlanCall, value: unknown, noteLine: string | undefined): AgentId[] {
+    const ids = [...new Set(list(value, 'mentions', MENTIONS_MAX, (v) => (typeof v === 'string' && v.trim() && v.length <= 200 ? (v as AgentId) : fail('invalid', 'a mention is an agent id'))))];
+    if (ids.length && noteLine === undefined) fail('invalid', 'mentions go with a note');
+    for (const id of ids) if (!call.members.includes(id) && id !== call.manager) fail('invalid', `@${id} is not a member of this project`);
+    return ids;
 }
 
 export function update(book: PlanBook, call: PlanCall, itemId: number, patch: PlanItemPatch): Outcome<StoredItem> {
@@ -828,6 +847,7 @@ export function update(book: PlanBook, call: PlanCall, itemId: number, patch: Pl
     const involved = isManager(call) || sameActor(holder, actor) || sameActor(item.assignee, actor);
     if (!involved) fail('forbidden', `only whoever holds #${item.id}, its assignee or the project manager may change it`);
     const noteLine = optionalText(patch.note, 'a note', TEXT_MAX);
+    const mentions = checkMentions(call, patch.mentions, noteLine);
     const ticks = list(patch.tick, 'tick', DONE_WHEN_MAX, (t) => {
         const v = t as { index?: unknown; checked?: unknown } | null;
         if (!v || !Number.isSafeInteger(v.index) || (v.index as number) < 0 || (v.index as number) >= item.doneWhen.length) fail('invalid', `#${item.id} has no done-when line ${String(v?.index)}`);
@@ -855,6 +875,10 @@ export function update(book: PlanBook, call: PlanCall, itemId: number, patch: Pl
     if (noteLine !== undefined) {
         note(item, call.now, actor, noteLine);
         changes.push({ op: 'noted', actor, planId: item.planId, itemId: item.id, summary: `note on #${item.id}: ${noteLine.slice(0, 200)}` });
+        for (const id of mentions) {
+            const to = agentActor(id);
+            if (!sameActor(to, actor)) tell(book, { at: call.now, to, kind: 'mention', itemId: item.id, text: `${who(actor)} mentioned you on #${item.id} (${item.title}): ${noteLine}` });
+        }
     }
     if (patch.taskId !== undefined && item.claim) item.claim.taskId = patch.taskId;
     if (ticks.length) {
@@ -867,10 +891,15 @@ export function update(book: PlanBook, call: PlanCall, itemId: number, patch: Pl
     else if (state !== undefined && state !== item.state) {
         const was = item.state;
         const agent = item.claim?.agentId;
+        // The asker's own task: its claim's, else the one it calls from — never another agent's.
+        const askTask = (actor.kind === 'agent' && item.claim?.agentId === actor.agentId ? item.claim.taskId : undefined) ?? call.taskId;
         delete item.claim;
         delete item.finishedClaim;
         if (was === 'done') delete item.handedOff;
         item.state = state;
+        // The question is kept for whoever answers it (#1043); it goes once the item no longer waits on a person.
+        if (state === 'needs-you') item.ask = { by: actor, ...(noteLine !== undefined ? { text: noteLine } : {}), at: call.now, ...(actor.kind === 'agent' && askTask !== undefined ? { taskId: askTask } : {}) };
+        else delete item.ask;
         if (was === 'done' && item.assignee) enqueue(book, item.assignee, item.id, 0);
         else if (agent !== undefined && item.assignee) enqueue(book, item.assignee, item.id, 0);
         note(item, call.now, actor, `${was} → ${state}`);
@@ -879,6 +908,28 @@ export function update(book: PlanBook, call: PlanCall, itemId: number, patch: Pl
         changes.push({ op: agent !== undefined ? 'released' : 'updated', actor, planId: item.planId, itemId: item.id, summary: `#${item.id} ${was} → ${state}: ${item.title}` });
     }
     return { value: item, changes };
+}
+
+/**
+ * A person (or the manager) answers the question a `needs-you` item waits on (#1043): the answer is noted, the item is
+ * `ready` again, and the agent that asked — else the assigned agent — is told the question and the answer, so it picks
+ * the item back up.
+ */
+export function answer(book: PlanBook, call: PlanCall, itemId: number, answerText: string): Outcome<StoredItem> {
+    const actor = requireManager(call, 'answer an item that needs a person');
+    const item = itemOf(book, itemId);
+    if (item.state !== 'needs-you') fail('invalid', `#${item.id} is not waiting on a person (it is ${item.state})`);
+    const line = text(answerText, 'an answer', TEXT_MAX);
+    const ask = item.ask;
+    delete item.ask;
+    item.state = 'ready';
+    note(item, call.now, actor, `answered: ${line}`);
+    const to = ask?.by.kind === 'agent' ? ask.by : item.assignee?.kind === 'agent' ? item.assignee : undefined;
+    if (to && !sameActor(to, actor)) {
+        const question = ask?.text ? ` "${ask.text}"` : '';
+        tell(book, { at: call.now, to, kind: 'answer', itemId: item.id, text: `${who(actor)} answered your question on #${item.id} (${item.title})${question}: ${line}. #${item.id} is ready again: claim it and carry on.` });
+    }
+    return { value: item, changes: [{ op: 'updated', actor, planId: item.planId, itemId: item.id, summary: `#${item.id} answered, needs-you → ready: ${item.title}` }] };
 }
 
 export function addRef(book: PlanBook, call: PlanCall, itemId: number, ref: Ref | string): Outcome<StoredItem> {
@@ -942,7 +993,8 @@ export function itemView(book: PlanBook, item: StoredItem, now: number): PlanIte
         refs: item.refs.map((r) => ({ ...r })),
         doneWhen: item.doneWhen.map((d) => ({ ...d })),
         activity: item.activity.map((a) => ({ ...a, actor: { ...a.actor } })),
-        ...(item.options ? { options: item.options.map((o) => ({ ...o })) } : {})
+        ...(item.options ? { options: item.options.map((o) => ({ ...o })) } : {}),
+        ...(item.ask ? { ask: { ...item.ask, by: { ...item.ask.by } } } : {})
     };
 }
 
@@ -990,7 +1042,7 @@ export const READY_WORK_TEXT = 'work your queue: plan_next → plan_claim → do
  *   clash, not waiting on another project — `waitsElsewhere`) is told once, naming the first such item. So work that is
  *   assigned, unblocked by a done item (ticked, marked or merged) or released back to a queue reaches its assignee.
  *   Once per idle spell (`readyTold`): not again until it claims an item or has no ready work left. An unread handoff
- *   (or ready) notice about that item counts as the telling.
+ *   (or ready, or answer) notice about that item counts as the telling.
  * - **idle** — the manager hears once when a member that had work holds no claim and has an empty queue.
  * - **stalled** — the manager hears once when that first ready item has sat unclaimed for longer than the project's
  *   lease (`heads[..].due`; `nextWatchDue` arms the reminder for it, so it fires with nobody calling).
@@ -1035,7 +1087,7 @@ export function watchMembers(book: PlanBook, call: PlanCall, waitsElsewhere: (it
         if (told.has(agentId)) continue;
         told.add(agentId);
         const to = agentActor(agentId);
-        if (book.notices.some((n) => sameActor(n.to, to) && n.itemId === head.id && (n.kind === 'handoff' || n.kind === 'ready'))) continue;
+        if (book.notices.some((n) => sameActor(n.to, to) && n.itemId === head.id && (n.kind === 'handoff' || n.kind === 'ready' || n.kind === 'answer'))) continue;
         tell(book, { at: call.now, to, kind: 'ready', itemId: head.id, text: `#${head.id} is ready for you: ${head.title}. ${READY_WORK_TEXT[0]!.toUpperCase()}${READY_WORK_TEXT.slice(1)}.` });
     }
     if (told.size) book.readyTold = [...told];
