@@ -8,6 +8,7 @@
  *   link graph (`workspaceLinks` over each project's `linkItems`) (#764, #822).
  * - `port.ts`: the actor as the `plan_*` tools' `PlanPort` (#816), and the pieces the MCP surface shares.
  * - `settings.ts`: the Plan feature's project settings the actor enforces (#938).
+ * - `release.ts`: the items a turn leaves done or dropped, for the project's features to tidy up after (#1075).
  * - `wake.ts`: how a notice wakes its addressee — a chat message for an agent, an Inbox row for a person (#938).
  */
 export * from './key.js';
@@ -21,3 +22,4 @@ export type { PlanChangedData } from '../audit/events.js';
 export * from './port.js';
 export * from './settings.js';
 export * from './wake.js';
+export * from './release.js';

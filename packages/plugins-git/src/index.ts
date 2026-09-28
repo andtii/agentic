@@ -10,7 +10,7 @@
  * Edge-safe: `@agentic/core` only, no `node:` imports; it runs on the router.
  */
 
-import { normalizePath, PROJECT_FEATURE_KIND, projectFolderFor, suggestWorktreePath, type ConfigSchema, type FsGitInfo, type HostOs, type ProjectFeatureChatReleaseInput, type ProjectFeatureContext, type ProjectFeatureManifest, type ProjectFeaturePlugin, type ProjectFeaturePreset, type ProjectFeaturePreviewInput, type ProjectFeaturePreviewLine, type ProjectFeatureReleaseReason, type ProjectFeatureSessionEffect, type ProjectFeatureSessionInput, type ProjectFolderInfo } from '@agentic/core';
+import { normalizePath, PROJECT_FEATURE_KIND, projectFolderFor, suggestWorktreePath, type ConfigSchema, type FsGitInfo, type HostOs, type ProjectFeatureChatReleaseInput, type ProjectFeatureContext, type ProjectFeatureItemReleaseInput, type ProjectFeatureManifest, type ProjectFeaturePlugin, type ProjectFeatureFs, type ProjectFeaturePreset, type ProjectFeaturePreviewInput, type ProjectFeaturePreviewLine, type ProjectFeatureReleaseReason, type ProjectFeatureSessionEffect, type ProjectFeatureSessionInput, type ProjectFolderInfo } from '@agentic/core';
 import { BRANCH_TOKENS, commandError, expandCommand, expandPath, expandTemplate, NOTICE_TOKENS, PATH_TOKENS, repoValues, slugOf, templateError, type TemplateValues } from './templates.js';
 
 export { BRANCH_TOKENS, COMMAND_TOKENS, commandError, expandCommand, expandTemplate, NOTICE_TOKENS, PATH_TOKENS, slugOf, splitCommand, templateError, templateTokens } from './templates.js';
@@ -86,7 +86,7 @@ export const gitProjectSettings: ConfigSchema = {
         worktreeCleanup: {
             type: 'string',
             title: 'Remove chat worktrees',
-            description: '`never`: chat worktrees stay until you remove them. `on-chat-leave`: when a chat is moved out of the project or deleted, its worktree is removed on every machine that is online — never one with uncommitted changes. `on-merge`: the same, and also once the pull request of the chat\'s branch is merged (the chat stays in the project; its next session makes the worktree again).',
+            description: '`never`: chat worktrees stay until you remove them. `on-chat-leave`: when a chat is moved out of the project or deleted, its worktree is removed on every machine that is online — never one with uncommitted changes. `on-merge`: the same, and also once the pull request of the chat\'s branch is merged (the chat stays in the project; its next session makes the worktree again). Either of the two also removes a plan item\'s worktree once the item is done or dropped.',
             enum: ['never', 'on-chat-leave', 'on-merge'],
             default: 'never'
         },
@@ -486,7 +486,27 @@ function cleansUp(policy: unknown, reason: ProjectFeatureReleaseReason): boolean
  */
 async function onChatReleased({ settings, project, chatId, reason, cwd, fs }: ProjectFeatureChatReleaseInput): Promise<string | undefined> {
     if (settings['worktreePerChat'] !== true || !cleansUp(settings['worktreeCleanup'], reason)) return undefined;
-    const { branch, path, values } = chatWorktreeFor(settings, { chatId, cwd, projectName: project.name });
+    return remove(settings, fs, cwd, chatWorktreeFor(settings, { chatId, cwd, projectName: project.name }));
+}
+
+/**
+ * A plan item is done or dropped (#1075): with cleanup on (`on-chat-leave` or `on-merge` — an item's work is over either
+ * way), its worktree on this environment — the one `planItemWorktreeFor` names — is removed like a chat's
+ * (`onChatReleased`): never forced, a dirty one kept (`dirty` thrown for the audit), the branch deleted only with
+ * `worktreeDeleteBranch` and only when merged. A reopened item's next task makes the worktree again.
+ */
+async function onPlanItemReleased({ settings, project, planItem, cwd, fs }: ProjectFeatureItemReleaseInput): Promise<string | undefined> {
+    const policy = settings['worktreeCleanup'];
+    if (settings['worktreePerChat'] !== true || (policy !== 'on-chat-leave' && policy !== 'on-merge')) return undefined;
+    return remove(settings, fs, cwd, planItemWorktreeFor(settings, { planItem, cwd, projectName: project.name }));
+}
+
+/**
+ * Remove the worktree `target` names, from the project folder `cwd`: built in through the daemon's `worktree-remove`,
+ * or with the project's `worktreeRemove` command after a `git status` shows it clean. What happened, for the audit.
+ */
+async function remove(settings: Readonly<Record<string, unknown>>, fs: ProjectFeatureFs, cwd: string, target: { readonly branch: string; readonly path: string; readonly values: TemplateValues }): Promise<string> {
+    const { branch, path, values } = target;
     const deleteBranch = settings['worktreeDeleteBranch'] === true;
     const command = templateSetting(settings, 'worktreeRemove');
     if (!command) {
@@ -517,6 +537,7 @@ export const gitFeaturePlugin: ProjectFeaturePlugin = {
     instructions: instructionsOf,
     beforeSession,
     onChatReleased,
+    onPlanItemReleased,
     presets: GIT_PRESETS,
     settingsErrors: gitSettingsErrors,
     previewSettings: previewGitSettings
