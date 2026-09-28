@@ -6,6 +6,7 @@ export * from './plugins/index.js';
 export * from './kit/index.js';
 export * from './thread/index.js';
 export * from './transcript/index.js';
+export * from './team/index.js';
 export * from './composer/index.js';
 export * from './code/index.js';
 export * from './projects/index.js';

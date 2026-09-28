@@ -24,6 +24,7 @@ import { codeAnatomies } from '../code/anatomy.js';
 import { aiFormAnatomy } from '../forms/anatomy.js';
 import { aiShellAnatomy } from '../shell/anatomy.js';
 import { aiLiveLineAnatomy, aiStepsAnatomy } from '../transcript/anatomy.js';
+import { teamAnatomies } from '../team/anatomy.js';
 
 /** Every anatomy the fragment declares, in the fragment's order. */
 export const anatomies = [
@@ -39,7 +40,8 @@ export const anatomies = [
     aiFormAnatomy,
     aiShellAnatomy,
     aiStepsAnatomy,
-    aiLiveLineAnatomy
+    aiLiveLineAnatomy,
+    ...teamAnatomies
 ];
 
 /** Scopes whose `data-tone` / `data-kind` selectors are part-level or private, never the axis. */

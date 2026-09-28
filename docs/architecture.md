@@ -1016,7 +1016,17 @@ reads "no longer holds call …" (`data-status="missing"`). The mock fixture car
 
 #### #1057 ui: team parts — crew strip, handoff line, work card, folded talk, lane, follow panel
 
-_not yet_
+`@agentic/ui` `team/`: six presentational parts, props in and events out, none fetching —
+`CrewStrip`/`CrewChip` (`ai-crew`; 4 columns, sideways scroll below 768 px; a chip emits `follow(id)`, the
+followed one carries the `selected` flag and `aria-pressed`), `HandoffLine` (`ai-handoff`), `WorkCard`
+(`ai-work-card`; the last `WORK_CARD_STEPS` (3) steps while working, the `result` prose once done, `Follow` /
+`Following`), `FoldedTalk` (`ai-folded-talk`; `onToggle(open)`), `Lane` (`ai-lane`; `entries` of steps and
+messages with an optional `to`, a `done` footer or a `question` with `onAnswer`) and `FollowPanel` (`ai-follow`;
+330 px, the last `FOLLOW_STEPS` (6) steps and `FOLLOW_LINES` (8) output lines, `onMessage`, `onStop` while the turn is
+in flight, `onClose`). A member's product state (`CrewState`: `working`, `needs-you`, `idle`, `done`, `failed`)
+rides `data-state` on the governed lifecycle (`crewLifecycle`: `running`, `loading`, `paused`, `complete`,
+`error`). Step lines are the `ai-steps` `StepLine` from #1054 (now exported), inside an `ai-steps` list. Times
+take a `now` from the page (`elapsedOf`, `formatElapsed`); the parts do not tick.
 
 #### #1058 web: chat Focus view, View and Detail controls, view seam and remembered choices
 
