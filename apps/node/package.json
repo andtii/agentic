@@ -7,9 +7,12 @@
   "exports": {
     ".": "./src/index.ts"
   },
+  "bin": {
+    "agentic": "./bin/agentic.mjs"
+  },
   "scripts": {
-    "bundle": "pnpm --filter \"@agentic/web^...\" build && pnpm --dir ../web exec vite build --app --mode node",
-    "start": "node dist/main.js"
+    "bundle": "pnpm --filter \"@agentic/daemon...\" build && pnpm --filter \"@agentic/web^...\" build && pnpm --dir ../web exec vite build --app --mode node",
+    "start": "node bin/agentic.mjs start"
   },
   "dependencies": {
     "@agentic/platform": "workspace:*",
