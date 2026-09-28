@@ -12,9 +12,13 @@
  * their own opens and drops (`reportingConnect`, `entry-client.tsx`). `installClientConnection`
  * adds the browser's own `online` / `offline` events. Tests drive the signal
  * with `setClientConnection`.
+ *
+ * The same events wake the live sockets (#714, `wakeSockets`): back online, or back on a visible tab, a socket
+ * waiting out its backoff dials at once.
  */
 import { signal } from 'sigx';
 import type { ActorTransport } from '@sigx/actors/client';
+import { wakeSockets, type SocketWake } from '../../actors/live-socket';
 import type { ClientConnection } from './failure';
 
 const state = signal({ value: 'live' as ClientConnection });
@@ -65,15 +69,52 @@ export function watchTransport(inner: ActorTransport): ActorTransport {
     };
 }
 
-/** The browser's own word on the network; returns the uninstaller. */
-export function installClientConnection(target: Pick<Window, 'addEventListener' | 'removeEventListener'> & { navigator?: { onLine?: boolean } } = window): () => void {
+/** Hidden at least this long, a returning tab recycles its open sockets: one may have died silently while it slept. */
+export const HIDDEN_REFETCH_MS = 30_000;
+
+/** Where the page hears the tab come back: `document`'s `visibilitychange`. */
+export type VisibilitySource = Pick<Document, 'addEventListener' | 'removeEventListener' | 'visibilityState'>;
+
+export interface ClientConnectionOptions {
+    /** Default `document`, when there is one. */
+    readonly visibility?: VisibilitySource;
+    /** Tells the live sockets (default `wakeSockets`). */
+    readonly wake?: (wake: SocketWake) => void;
+    readonly now?: () => number;
+}
+
+/**
+ * The browser's own word on the network, and the live sockets woken by it (#714): `online` reconnects at once and
+ * re-seeds every live read; a tab made visible again dials any socket waiting out its backoff, and — hidden for
+ * `HIDDEN_REFETCH_MS` or more — recycles the open ones too. Returns the uninstaller.
+ */
+export function installClientConnection(
+    target: Pick<Window, 'addEventListener' | 'removeEventListener'> & { navigator?: { onLine?: boolean } } = window,
+    { visibility = typeof document === 'undefined' ? undefined : document, wake = wakeSockets, now = Date.now }: ClientConnectionOptions = {}
+): () => void {
     const offline = () => setClientConnection('reconnecting');
-    const online = () => setClientConnection('live');
+    const online = () => {
+        setClientConnection('live');
+        wake({ refetch: true });
+    };
+    let hiddenAt: number | null = visibility?.visibilityState === 'hidden' ? now() : null;
+    const visible = () => {
+        if (!visibility) return;
+        if (visibility.visibilityState === 'hidden') {
+            hiddenAt ??= now();
+            return;
+        }
+        const away = hiddenAt === null ? 0 : now() - hiddenAt;
+        hiddenAt = null;
+        wake({ refetch: away >= HIDDEN_REFETCH_MS });
+    };
     target.addEventListener('offline', offline);
     target.addEventListener('online', online);
+    visibility?.addEventListener('visibilitychange', visible);
     if (target.navigator?.onLine === false) offline();
     return () => {
         target.removeEventListener('offline', offline);
         target.removeEventListener('online', online);
+        visibility?.removeEventListener('visibilitychange', visible);
     };
 }

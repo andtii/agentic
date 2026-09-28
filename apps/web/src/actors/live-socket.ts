@@ -61,6 +61,143 @@ export function reportingConnect(connect: SocketConnect, report: SocketReport): 
     };
 }
 
+/** Reconnect tuning (OPS-04, #714). */
+export interface BackoffOptions {
+    /** The first retry's window. Default 500 ms. */
+    readonly baseMs?: number;
+    /** The ceiling a retry never waits past. Default 30 s. */
+    readonly capMs?: number;
+    /** `[0, 1)`; default `Math.random`. Injected by tests. */
+    readonly random?: () => number;
+}
+
+export const BACKOFF_BASE_MS = 500;
+export const BACKOFF_CAP_MS = 30_000;
+
+/**
+ * How long retry `attempt` (0-based) waits: exponential, capped, with "equal jitter" — half the window fixed, half
+ * random — so a fleet of tabs dropped by one deploy does not redial in lock-step, and no retry is ever instant.
+ */
+export function backoffDelay(attempt: number, { baseMs = BACKOFF_BASE_MS, capMs = BACKOFF_CAP_MS, random = Math.random }: BackoffOptions = {}): number {
+    const window = Math.min(capMs, baseMs * 2 ** Math.max(0, attempt));
+    return Math.round(window / 2 + random() * (window / 2));
+}
+
+/** What a wake asks of every actor socket: dial a waiting retry now, and with `refetch`, recycle an open link too. */
+export interface SocketWake {
+    /** Also close and redial an open link, so its subscriptions re-seed from a fresh snapshot. */
+    readonly refetch: boolean;
+}
+
+type Waker = (wake: SocketWake) => void;
+
+/** The page's actor sockets, told by `wakeSockets` (the browser's `online` / `visibilitychange`, `installClientConnection`). */
+const wakers = new Set<Waker>();
+
+/** Wake every actor socket of this page. */
+export function wakeSockets(wake: SocketWake): void {
+    // A snapshot: a woken socket leaves the set, and its redial may join it again.
+    for (const w of Array.from(wakers)) w(wake);
+}
+
+export interface ResilientConnectOptions extends BackoffOptions {
+    /** Timers; injected by tests. */
+    readonly setTimer?: (run: () => void, ms: number) => unknown;
+    readonly clearTimer?: (handle: unknown) => void;
+    /** Where this connection hears wakes; default the page-global set `wakeSockets` tells. */
+    readonly wakers?: Set<Waker>;
+}
+
+/**
+ * `connect`, with the reconnect policy the page owns (OPS-04, #714): `socketTransport` redials after every drop and
+ * re-seeds its subscriptions on the new link (each re-sent `{i,sub}` is answered with the read's current value — the
+ * snapshot — and `fingerprint()` drops the ones that did not change), but its own backoff has no jitter and no way to
+ * be cut short. So it is switched off (`retryMs: 0`) and this seam decides when each attempt dials:
+ *
+ * - the first dial is immediate; a dial after an open link dropped waits `backoffDelay(0)`, and each failed attempt
+ *   after it `backoffDelay(n)` — exponential, capped, jittered;
+ * - a wake (`wakeSockets`) dials a waiting attempt now; a wake with `refetch` also closes an open link and redials it
+ *   at once, so a socket that died silently while the laptop slept is replaced and the page re-seeds.
+ */
+export function resilientConnect(dial: SocketConnect, options: ResilientConnectOptions = {}): SocketConnect {
+    const setTimer = options.setTimer ?? ((run, ms) => setTimeout(run, ms));
+    const clearTimer = options.clearTimer ?? ((h) => clearTimeout(h as ReturnType<typeof setTimeout>));
+    const bus = options.wakers ?? wakers;
+    /** Failed attempts since the last open; `-1` = the next dial is immediate (first dial, or a recycle). */
+    let failures = -1;
+    return (handlers) => {
+        let link: ReturnType<SocketConnect> | null = null;
+        let timer: unknown = null;
+        let opened = false;
+        let ended = false;
+        const end = (): void => {
+            bus.delete(waker);
+            if (ended) return;
+            ended = true;
+            handlers.onClose();
+        };
+        const go = (): void => {
+            timer = null;
+            if (ended) return;
+            try {
+                // An attempt this seam already ended (closed, recycled) is retired: its late events are ignored.
+                link = dial({
+                    onOpen() {
+                        if (ended) return;
+                        opened = true;
+                        failures = 0;
+                        handlers.onOpen();
+                    },
+                    onMessage(message) {
+                        if (!ended) handlers.onMessage(message);
+                    },
+                    onClose() {
+                        if (ended) return;
+                        link = null;
+                        failures = opened ? 0 : failures + 1;
+                        end();
+                    }
+                });
+            } catch {
+                // A dial that throws (a malformed URL, no `WebSocket`) is a failed attempt, retried like one.
+                failures++;
+                end();
+            }
+        };
+        const waker: Waker = ({ refetch }) => {
+            if (ended) return;
+            if (timer !== null) {
+                clearTimer(timer);
+                go();
+            } else if (refetch && opened && link) {
+                // Ended at once, not on the close event: a socket that died silently can take long to finish closing.
+                const retired = link;
+                link = null;
+                failures = -1;
+                end();
+                retired.close();
+            }
+        };
+        bus.add(waker);
+        const wait = failures < 0 ? 0 : backoffDelay(failures, options);
+        if (wait > 0) timer = setTimer(go, wait);
+        else go();
+        return {
+            send: (message) => link?.send(message),
+            close() {
+                if (timer !== null) {
+                    clearTimer(timer);
+                    timer = null;
+                }
+                const retired = link;
+                link = null;
+                end();
+                retired?.close();
+            }
+        };
+    };
+}
+
 /** Dial `url` on the global `WebSocket`, as `socketTransport({ url })` does. */
 const webSocketConnect =
     (url: string): SocketConnect =>
@@ -78,7 +215,8 @@ const webSocketConnect =
 export function browserSocketFor(type: string, key: string, report: SocketReport = {}): ActorTransport {
     const url = new URL(actorSocketPath(type, key), location.href);
     url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
-    return socketTransport({ connect: reportingConnect(webSocketConnect(url.href), report) });
+    // The transport's own backoff is off: `resilientConnect` paces the redials (jittered, cut short by a wake).
+    return socketTransport({ connect: reportingConnect(resilientConnect(webSocketConnect(url.href)), report), retryMs: 0 });
 }
 
 export interface LiveOverSocketsOptions {

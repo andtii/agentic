@@ -25,6 +25,7 @@ import type { AnyActorDefinition, Host } from '@sigx/actors';
 import { defineActorApp, type ActorApp } from '@sigx/actors/host';
 import { createFetchHandler } from '@sigx/actors/server';
 import { createHostDurableObject, durableObjectStubResolver, durableObjects, objectSocketRoute, unhostedStorage, type DurableObjectNamespaceLike, type DurableObjectStateLike, type DurableWebSocketLike } from '@sigx/actors-cloudflare';
+import { closeOrphanedLiveSockets } from './actors/hibernation';
 import type { ActorDefs } from './actors/defs';
 import type { AuthWiring } from './auth';
 import { actorKeyOfObject, createDaemonSocketHost, createDaemonSocketRegistry, forwardDaemonSocket, DAEMON_SOCKET_PREFIX } from './daemon';
@@ -154,9 +155,12 @@ export function createActorHost(actors: readonly AnyActorDefinition[] = defaultA
     return class ActorHost extends Base {
         readonly #daemon;
         readonly #purge;
+        readonly #orphans;
         constructor(state: DurableObjectStateLike, env: PlatformEnv) {
             ensureServerApp(env, actors);
             super(state, env);
+            // A fresh instance holds no live session: sockets left open across a hibernation are told to redial (#714).
+            this.#orphans = closeOrphanedLiveSockets(state);
             const own = actorKeyOfObject(state);
             if (own?.type === 'machine') daemonSockets.bind(own.key, state);
             this.#daemon = createDaemonSocketHost({ state, host: () => this.host(), machine: Machine, registry: daemonSockets });
@@ -173,6 +177,7 @@ export function createActorHost(actors: readonly AnyActorDefinition[] = defaultA
             return runWithHost(host, () => this.#purge.fetch(request) ?? this.#daemon.fetch(request) ?? super.fetch(request));
         }
         override async webSocketMessage(ws: DurableWebSocketLike, message: unknown): Promise<void> {
+            if (this.#orphans.has(ws)) return;
             const host = await this.host();
             return runWithHost(host, () => (this.#daemon.owns(ws) ? this.#daemon.message(ws, message) : super.webSocketMessage(ws, message)));
         }
