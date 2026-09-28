@@ -6,6 +6,7 @@ import {
     applyAgentEntry,
     configAtVersion,
     defaultAgentConfig,
+    grantHistory,
     initialAgentState,
     mergeAgentConfig,
     parseAgentKey
@@ -119,5 +120,28 @@ describe('applyAgentEntry / configAtVersion', () => {
         const state = initialAgentState('ws_9:agent:agent_x');
         expect(state.id).toBe('agent_x' as AgentId);
         expect(state.workspaceId).toBe('ws_9');
+    });
+});
+
+describe('grantHistory (#1032)', () => {
+    it('keeps one row per change to the grants, dated by the version that made it, and nothing a dependency does not read', () => {
+        const d = defaultAgentConfig();
+        const versions = [
+            entry(1, { name: 'a', instructions: 'x'.repeat(10_000) }),
+            entry(2, { connectors: [{ id: 'github' }] }),
+            entry(3, { instructions: 'y'.repeat(10_000) }),
+            entry(4, { tools: [{ name: 'github.search' }] }),
+            entry(5, { role: 'reviewer' })
+        ];
+        const rows = grantHistory(versions);
+        expect(rows.map((r) => r.at)).toEqual([1_001, 1_002, 1_004]);
+        expect(rows[2]).toEqual({ at: 1_004, connectors: [{ id: 'github' }], tools: [{ name: 'github.search' }], execution: { runtime: d.execution.runtime, offlinePolicy: d.execution.offlinePolicy } });
+        expect(JSON.stringify(rows)).not.toContain('xxx');
+        expect(grantHistory([])).toEqual([]);
+    });
+
+    it('a grant removed and added again is three rows, so the re-add keeps its own date', () => {
+        const rows = grantHistory([entry(1, { connectors: [{ id: 'github' }] }), entry(2, { connectors: [] }), entry(3, { connectors: [{ id: 'github' }] })]);
+        expect(rows.map((r) => [r.at, r.connectors.length])).toEqual([[1_001, 1], [1_002, 0], [1_003, 1]]);
     });
 });

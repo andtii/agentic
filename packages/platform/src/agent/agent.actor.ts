@@ -22,7 +22,7 @@ import {
 import { recordAudit } from '../audit/port.js';
 import { type AgentConfigPatch, assertAgentConfigPatch, clone } from './config.js';
 import {
-    type AgentConfigAt,
+    type AgentGrantsAt,
     type AgentConfigEntry,
     type AgentState,
     type AgentVersionInfo,
@@ -33,7 +33,7 @@ import {
     appendInstruction,
     applyAgentEntry,
     configAtVersion,
-    configHistory,
+    grantHistory,
     initialAgentState,
     versionInfo
 } from './entries.js';
@@ -266,9 +266,9 @@ export const AgentActor = defineActor({
                 return ctx.state.versions.map(versionInfo);
             },
 
-            /** Every version's whole config, oldest first — what the Registry dates a plugin grant from (#681). */
-            async configHistory(): Promise<readonly AgentConfigAt[]> {
-                return ctx.snapshot(configHistory(ctx.state.versions));
+            /** Its grants over its versions, one row per change, oldest first — what the Registry dates a plugin grant from (#681, #1032). */
+            async grantHistory(): Promise<readonly AgentGrantsAt[]> {
+                return ctx.snapshot(grantHistory(ctx.state.versions));
             },
 
             /**

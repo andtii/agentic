@@ -85,20 +85,20 @@ describe('dependentSince (#681)', () => {
     const none = cfg({});
 
     it('dates the grant from the oldest version of the run that ends with the newest', () => {
-        const history = [{ at: 1, config: none }, { at: 2, config: using }, { at: 3, config: tools }];
+        const history = [{ at: 1, ...none }, { at: 2, ...using }, { at: 3, ...tools }];
         expect(dependentSince({ id: 'a' as AgentId, config: tools, history }, gh)).toBe(2);
         const deps = computeDependents(gh, [{ id: 'a' as AgentId, config: tools, history }], []);
         expect(deps.agents).toEqual([{ id: 'a', name: 'a', via: ['connector', 'tool'], since: 2 }]);
     });
 
     it('a grant removed and added again dates from the re-add', () => {
-        const history = [{ at: 1, config: using }, { at: 2, config: none }, { at: 3, config: using }];
+        const history = [{ at: 1, ...using }, { at: 2, ...none }, { at: 3, ...using }];
         expect(dependentSince({ id: 'a' as AgentId, config: using, history }, gh)).toBe(3);
     });
 
     it('is undefined without a history, or when the newest version does not depend on it; computeDependents then omits since', () => {
         expect(dependentSince({ id: 'a' as AgentId, config: using }, gh)).toBeUndefined();
-        expect(dependentSince({ id: 'a' as AgentId, config: none, history: [{ at: 1, config: using }, { at: 2, config: none }] }, gh)).toBeUndefined();
+        expect(dependentSince({ id: 'a' as AgentId, config: none, history: [{ at: 1, ...using }, { at: 2, ...none }] }, gh)).toBeUndefined();
         expect(computeDependents(gh, [{ id: 'a' as AgentId, config: using }], []).agents[0]).not.toHaveProperty('since');
     });
 });
