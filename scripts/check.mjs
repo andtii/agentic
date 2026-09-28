@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 /**
- * `pnpm check [--base <ref>] [--workers] [--all]` — the local gate before the
+ * `pnpm check [--base <ref>] [--workers] [--node] [--all]` — the local gate before the
  * one push (AGENTS.md). Runs what CI's PR lanes would run for this diff, minus
  * e2e: typecheck and lint always; the unit tests the change can reach
  * (`vitest --changed`); `pnpm build && pnpm size` when a size-limited package
- * changed; the scripts tests when `scripts/` changed; workerd with `--workers`.
+ * changed; the scripts tests when `scripts/` changed; workerd with `--workers`;
+ * the same acceptance suite on the Node host with `--node` (or `--workers`).
  *
  * - `--base <ref>`: what to diff against (default `origin/main`; fetch first).
  * - `--all`: the whole unit suite instead of `--changed`.
@@ -39,6 +40,7 @@ if (lanes.scripts) steps.push(['scripts', ['test:scripts']]);
 if (lanes.size || (flag('--workers') && lanes.workers)) steps.push(['build', ['build']]);
 if (lanes.size) steps.push(['size', ['size']]);
 if (flag('--workers') && lanes.workers) steps.push(['workers', ['--filter', '@agentic/web', 'test:workers']]);
+if ((flag('--node') || flag('--workers')) && lanes.node) steps.push(['node', ['--filter', '@agentic/web', 'test:node']]);
 
 for (const [name, args] of steps) {
     const started = Date.now();

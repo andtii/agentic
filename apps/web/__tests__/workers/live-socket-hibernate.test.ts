@@ -12,6 +12,7 @@ import { socketTransport } from '@sigx/actors-ws/client';
 import { SELF, env, evictDurableObject } from 'cloudflare:test';
 import { chatKeyOf } from '../../src/actors/keys';
 import { actorSocketPath, liveOverSockets, resilientConnect } from '../../src/actors/live-socket';
+import { onWorkerd } from './host-kind';
 import { overHttp, signIn } from './http';
 
 const userId = 'gh_live_hibernate';
@@ -73,7 +74,8 @@ const texts = (value: unknown): string[] =>
     (((value as { entries?: IndexedEntry[] } | undefined)?.entries ?? []) as IndexedEntry[]).flatMap((e) => (e.entry.t === 'msg' ? e.entry.parts.flatMap((p) => (p.type === 'text' ? [p.text] : [])) : []));
 
 describe('worker: a live socket across hibernation', () => {
-    it('hibernate with the socket open, wake on a state change, the frame arrives after a redial', async () => {
+    // Hibernation is a Durable Object's: the Node host never evicts an actor a live socket holds (#995).
+    it.skipIf(!onWorkerd)('hibernate with the socket open, wake on a state change, the frame arrives after a redial', async () => {
         const cookie = await signIn(userId);
         const { chatId } = await overHttp(Workspace, workspaceKey(WS), cookie).createChat({});
         const chatKey = chatKeyOf(WS, chatId as ChatId);

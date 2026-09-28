@@ -3,7 +3,7 @@ name: CI
 # One fast lane per PR, the full matrix on main (AGENTS.md → "Development workflow"):
 #
 # - PR: `changes` decides which lanes the diff can break (scripts/ci-changes.mjs);
-#   static checks, the unit suite in 4 shards, workerd, e2e (phone + desktop)
+#   static checks, the unit suite in 4 shards, workerd, the Node host, e2e (phone + desktop)
 #   and size run in parallel, each only when needed. `gate` is the ONE required
 #   check — it passes when every lane that ran passed (skipped counts as passed).
 # - push to main + nightly: every lane, plus Windows and Node 20, e2e at all
@@ -37,6 +37,7 @@ jobs:
     outputs:
       code: ${{ steps.lanes.outputs.code }}
       workers: ${{ steps.lanes.outputs.workers }}
+      node: ${{ steps.lanes.outputs.node }}
       e2e: ${{ steps.lanes.outputs.e2e }}
       size: ${{ steps.lanes.outputs.size }}
       scripts: ${{ steps.lanes.outputs.scripts }}
@@ -96,6 +97,18 @@ jobs:
       - uses: ./.github/actions/setup
       - run: pnpm build
       - run: pnpm --filter @agentic/web ${{ matrix.suite }}
+
+  # The same acceptance suite (apps/web/__tests__/workers) against the Node host
+  # (apps/node) on in-memory SQLite (#995). Runs from source: no build.
+  node:
+    needs: changes
+    if: needs.changes.outputs.node == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+      - run: pnpm --filter @agentic/web test:node
 
   # Playwright against the dev server. PRs: phone-400 + desktop-1280 in two
   # shards; main: all three widths.
@@ -168,6 +181,8 @@ jobs:
         run: pnpm --filter @agentic/web test:workers
       - if: matrix.node-version == '22'
         run: pnpm --filter @agentic/web test:acceptance
+      - if: matrix.node-version == '22'
+        run: pnpm --filter @agentic/web test:node
 
   coverage:
     if: github.event_name != 'pull_request'
@@ -186,7 +201,7 @@ jobs:
   # The one required check (scripts/apply-branch-protection.mjs).
   gate:
     if: always()
-    needs: [changes, static, unit, workers, e2e, size]
+    needs: [changes, static, unit, workers, node, e2e, size]
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:

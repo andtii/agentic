@@ -116,7 +116,8 @@ happens *before* the push, not after it:
 4. **`pnpm check`** — the local gate (`scripts/check.mjs`): typecheck, lint,
    `vitest --changed origin/main`, plus build + size when a size-limited
    package changed and the scripts tests when `scripts/` changed. `--workers`
-   adds workerd, `--all` the whole unit suite. `git fetch` first.
+   adds workerd and the Node host, `--node` the Node host alone, `--all` the
+   whole unit suite. `git fetch` first.
 5. **Review locally, before pushing.** Claude Code: commit locally, then the
    `code-review` skill with args `low <branch>` (name the branch — from a
    subagent it runs in `<repo>/main` and would see no diff); other agents: an equivalent self-review of the diff
@@ -155,7 +156,8 @@ happens *before* the push, not after it:
 - **On a PR**, only the lanes the diff can break (`scripts/ci-changes.mjs`
   decides; docs-only PRs run nothing): `static` (lint, catalog, typecheck,
   scripts tests), `unit` (the vitest suite in 4 shards), `workers` (workerd +
-  acceptance, when web/platform-side code changed), `e2e` (phone + desktop in 2
+  acceptance, when web/platform-side code changed), `node` (that acceptance
+  suite on the Node host, when web/platform-side or `apps/node` code changed), `e2e` (phone + desktop in 2
   shards, when web/ui/platform/core changed), `size` (when core/ui/connectors/
   plugins-git changed). `gate` aggregates them — the only required check.
 - **On `main` and nightly**, everything: plus Windows and Node 20 (`compat`),
@@ -174,10 +176,11 @@ pnpm test:coverage
 pnpm typecheck        # tsc --noEmit over packages/*/src, __tests__, apps/*/src
 pnpm lint             # oxlint packages apps
 pnpm size             # size-limit (.size-limit.json)
-pnpm check            # the pre-push gate for this diff (scripts/check.mjs; --all, --workers)
+pnpm check            # the pre-push gate for this diff (scripts/check.mjs; --all, --workers, --node)
 pnpm verify:catalog   # single-minor core catalog guard (CI runs it too)
 pnpm test:scripts     # node --test for scripts/
 pnpm --filter @agentic/web test:workers  # Worker + ActorHost DO inside workerd (Node >= 22)
+pnpm --filter @agentic/web test:node     # the same suite against the Node host (apps/node), in-memory SQLite (Node >= 22.13)
 ```
 
 Run the platform on Node instead (#988, `docs/runbook.md` §4b): `pnpm --filter @agentic/node bundle`

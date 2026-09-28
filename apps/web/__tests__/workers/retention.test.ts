@@ -9,6 +9,7 @@ import type { AgentId, ChatId, WorkspaceId } from '@agentic/core';
 import { AgentActor, Chat, Registry, Workspace, agentKey, registryKey, workspaceKey } from '@agentic/platform';
 import { durableObjectName } from '@sigx/actors-cloudflare';
 import { PURGE_HEADER, PURGE_PATH } from '../../src/retention';
+import { onWorkerd } from './host-kind';
 import { overHttp, signIn } from './http';
 
 const userId = 'gh_3003';
@@ -52,7 +53,7 @@ describe('worker: workspace retention over the Durable Object bindings (OPS-10)'
         const listed = await bindings.ARTIFACTS.list({ prefix: `${op.prefix}/` });
         const files = listed.objects.map((o) => o.key.slice(op.prefix!.length + 1));
         expect(files).toEqual(expect.arrayContaining(['manifest.json', 'workspace.ndjson', 'agents.ndjson', 'chats.ndjson', 'registry.ndjson']));
-        const registryRows = await (await bindings.ARTIFACTS.get(`${op.prefix}/registry.ndjson`))!.text();
+        const registryRows = new TextDecoder().decode(await (await bindings.ARTIFACTS.get(`${op.prefix}/registry.ndjson`))!.arrayBuffer());
         expect(registryRows).toContain('github-token');
         expect(registryRows).not.toContain('ghp_example');
 
@@ -69,7 +70,8 @@ describe('worker: workspace retention over the Durable Object bindings (OPS-10)'
         expect(await registry.secrets()).toEqual([]);
     });
 
-    it("refuses a purge without the deployment's secret", async () => {
+    // The purge endpoint is a Durable Object's own (`PURGE_PATH`); the Node host purges on its storage directly (#995).
+    it.skipIf(!onWorkerd)("refuses a purge without the deployment's secret", async () => {
         const key = agentKey(workspaceId, 'agent_kept' as AgentId);
         const cookie = await signIn(userId);
         await overHttp(AgentActor, key, cookie).update({ name: 'Kept', instructions: 'Stay.' }, 'create');
