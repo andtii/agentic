@@ -18,7 +18,7 @@
  */
 import type { ActorStorage } from '@sigx/actors';
 import { manualScheduler, shardedReminders } from '@sigx/actors/host';
-import type { ExportLine } from '../../../web/src/export';
+import type { ExportedReminder, ExportLine } from '../../../web/src/export';
 
 export interface ImportCounts {
     readonly records: number;
@@ -68,7 +68,12 @@ export async function importDump(lines: AsyncIterable<string> | Iterable<string>
         }
         const api = reminders.apiFor({ type: line.type, key: line.key });
         for (const [name, reminder] of Object.entries(line.reminders)) {
-            await api.set(name, { due: reminder.nextDue - Date.now(), ...(reminder.period === undefined ? {} : { period: reminder.period }) });
+            const { nextDue, period } = (reminder ?? {}) as Partial<ExportedReminder>;
+            if (typeof nextDue !== 'number' || !Number.isFinite(nextDue) || (period !== undefined && (typeof period !== 'number' || !Number.isFinite(period)))) {
+                throw new Error(`[import] line ${n}: reminder "${name}" of ${line.type}/${line.key} has no finite nextDue / period`);
+            }
+            // One already due fires on the node's first tick.
+            await api.set(name, { due: Math.max(0, nextDue - Date.now()), ...(period === undefined ? {} : { period }) });
             reminderCount++;
         }
     }

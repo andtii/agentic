@@ -56,6 +56,8 @@ describe.skipIf(!nodeSqlite)('importDump (Cloudflare export → node)', () => {
         const storage = mod!.sqliteStorage({ database: new nodeSqlite!.DatabaseSync(':memory:'), table: 'records' });
         await expect(importDump(['', '{"type":"X"}'], storage)).rejects.toThrow('line 2');
         await expect(importDump(['nope'], storage)).rejects.toThrow('not JSON');
+        const badReminder = JSON.stringify({ type: 'T', key: 'k', record: null, reminders: { r: { nextDue: 'soon' } } });
+        await expect(importDump([badReminder], storage)).rejects.toThrow('reminder "r"');
     });
 });
 
