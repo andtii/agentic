@@ -1072,7 +1072,21 @@ Both chat pages (mock `Chat.tsx`, live `chat/LiveChat.tsx`) render the conversat
 
 #### #1059 web: chat Team view and the automatic Focus/Team switch
 
-_not yet_
+- **Rows** (`views/team/model.ts`, `teamRows(view, open)`): pure over the one `ChatViewModel`, no new seam.
+  Handoffs are the `delegate` steps of finished turns (`msg.steps`: `delegate.to`, the target less a leading
+  `<to> · `, `item` as `#21`, else the task id). A working card per agent in `view.live`, keyed by its feed's
+  `taskId`, else its last handoff; its steps are the feed's turn in flight (`stepsFromToolParts`), or the mock
+  line's step, and the feed's in-flight rows fold into it (rows with an approval open on a call stay). A done
+  card per handoff answered since: the agent's last message to people before its next handoff, whose prose is
+  the card's result and whose row it replaces. Agent-to-agent talk is `audienceOf` over the `@` names in the
+  text (`mentionsIn`); each run folds into one `FoldedTalk`, opened per visit. A loose input request is a
+  question under its asker's last row with `blocks <its assignment ref>`; its asker is the feed holding it,
+  else the requester the page names, else the member waiting; an asker keeps its rows and gets no working
+  card. The crew: needs-you, then working, done, failed, else idle (`waiting on A and B`).
+- **View** (`views/team/index.tsx`): the `CrewStrip` over the `Thread`, whose transcript is the rows left and
+  whose inserts are the handoffs, folded talk, questions and cards by time (a working card after every row).
+  Answers go through `thread.onRespond`. The parts do not tick; the view ticks `now` each second while an
+  agent works. The composer's coordinator hint is the page's (`chatAddressing`).
 
 #### #1060 web: chat Follow panel over the live session stream
 
