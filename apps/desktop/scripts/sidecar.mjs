@@ -69,8 +69,19 @@ export function seaConfig(main, output) {
     return { main, output, disableExperimentalSEAWarning: true, useSnapshot: false, useCodeCache: false };
 }
 
+/**
+ * `args` as a shell will split them (#1100): with `shell`, Node joins the arguments with spaces and quotes none,
+ * so a path with a space (`C:\Users\First Last\…`) would reach the command as two. Any argument with whitespace,
+ * a quote or a shell metacharacter is double-quoted (inner quotes doubled, as cmd.exe reads them).
+ */
+export function shellArgs(args, shell) {
+    if (!shell) return args;
+    return args.map((a) => (/[\s"&|<>^()]/.test(a) ? `"${a.replace(/"/g, '""')}"` : a));
+}
+
 function run(command, args, options = {}) {
-    const result = spawnSync(command, args, { stdio: 'inherit', shell: process.platform === 'win32' && !command.includes('\\'), ...options });
+    const shell = options.shell ?? (process.platform === 'win32' && !command.includes('\\'));
+    const result = spawnSync(command, shellArgs(args, shell), { stdio: 'inherit', ...options, shell });
     if (result.status !== 0) throw new Error(`sidecar: ${command} ${args.join(' ')} failed (${result.error?.message ?? `exit ${result.status}`})`);
     return result;
 }

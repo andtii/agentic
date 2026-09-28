@@ -1,11 +1,19 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { hostPlatform, nodeDownload, nodePlatforms, seaConfig, sidecarFile } from './sidecar.mjs';
+import { hostPlatform, nodeDownload, nodePlatforms, seaConfig, shellArgs, sidecarFile } from './sidecar.mjs';
 import { releaseConfig, withNode } from './release-config.mjs';
+
+test('a path with a space stays one argument through the shell (#1100)', () => {
+    const args = ['-e', 'console.log(JSON.stringify(process.argv.slice(1)))', 'C:\\Users\\First Last\\out.exe', 'plain'];
+    assert.deepEqual(shellArgs(args, false), args);
+    const r = spawnSync('node', shellArgs(args, true), { shell: true, encoding: 'utf8' });
+    assert.equal(r.status, 0, r.stderr);
+    assert.deepEqual(JSON.parse(r.stdout), ['C:\\Users\\First Last\\out.exe', 'plain']);
+});
 
 test("the sidecar is named as Tauri's externalBin expects", () => {
     assert.equal(sidecarFile('x86_64-pc-windows-msvc'), 'agentic-node-x86_64-pc-windows-msvc.exe');
