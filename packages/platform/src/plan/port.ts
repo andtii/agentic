@@ -160,7 +160,8 @@ export function createPlanPort(deps: PlanPortDeps): PlanPort {
             run(call, async (scope): Promise<PlanBoard> => {
                 const { plans } = await scope.plan.list();
                 const manager = scope.project.members.coordinator;
-                return { plans, members: planMembers(scope), me, ...(manager ? { manager } : {}), limit: planLimitOf(scope.project, me) };
+                const task = deps.taskId?.();
+                return { plans, members: planMembers(scope), me, ...(manager ? { manager } : {}), limit: planLimitOf(scope.project, me), ...(task ? { task } : {}) };
             }),
         claim: (item, leaseMs, call) =>
             run(call, async (scope) => {

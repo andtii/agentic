@@ -58,7 +58,7 @@ const plan = (p: Principal = user) => app.as(p).actor(Plan, planKey(ws, project)
 describe('Plan actor: settings', () => {
     it('claimLimit, the project lease and agentsMayTick come from the Plan feature settings', async () => {
         settings = { claimLimit: 2, leaseMinutes: 45, agentsMayTick: false };
-        await plan().create({ title: 'P', phases: [{ title: 'One', items: [{ title: 'a', doneWhen: ['x'] }, { title: 'b' }, { title: 'c' }] }] });
+        await plan().create({ title: 'P', phases: [{ title: 'One', items: [{ title: 'a', doneWhen: ['x'], touches: ['a/'] }, { title: 'b', touches: ['b/'] }, { title: 'c', touches: ['c/'] }] }] });
         const forge = plan(agentP(FORGE));
         expect((await forge.claim(1)).item.claim!.leaseUntil).toBe(1_000_000 + 45 * 60_000);
         await forge.claim(2);

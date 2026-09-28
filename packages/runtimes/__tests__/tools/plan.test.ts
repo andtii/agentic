@@ -139,12 +139,12 @@ describe('plan tools', () => {
     it('plan_claim refuses blocked, taken, queued-elsewhere and over-limit items without calling claim', async () => {
         const mine = board({}, [
             item(8, { state: 'done' }),
-            item(9, { state: 'claimed', claim: { agentId: FORGE, leaseUntil: LATER }, assignee: { kind: 'agent', agentId: FORGE } }),
+            item(9, { state: 'claimed', claim: { agentId: FORGE, leaseUntil: LATER }, assignee: { kind: 'agent', agentId: FORGE }, touches: ['src/a/'] }),
             item(10, { state: 'claimed', claim: { agentId: LINT, leaseUntil: LATER } }),
             item(11, { after: [9] }),
             item(12, { assignee: { kind: 'agent', agentId: LINT } }),
             item(13),
-            item(14, { state: 'claimed', claim: { agentId: LINT, leaseUntil: EARLIER } })
+            item(14, { state: 'claimed', claim: { agentId: LINT, leaseUntil: EARLIER }, touches: ['src/b/'] })
         ]);
         const fake = fakePlanPort(mine);
         const claim = tool(fake.port, 'plan_claim');

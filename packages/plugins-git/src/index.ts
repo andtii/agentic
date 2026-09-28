@@ -44,7 +44,7 @@ export const gitProjectSettings: ConfigSchema = {
         worktreePerChat: {
             type: 'boolean',
             title: 'Worktree per chat',
-            description: 'Give each chat its own branch and worktree beside the project folder, created on the machine the session runs on.',
+            description: 'Give each chat its own branch and worktree beside the project folder, created on the machine the session runs on. A task that carries a plan item gets a worktree of the item instead (branch plan/<project>-<n>), so items worked in parallel never share a folder.',
             default: false
         },
         branchPrefix: {
@@ -227,14 +227,38 @@ export function chatWorktreeFor(settings: Readonly<Record<string, unknown>>, inp
         branch = expandTemplate(branchTemplate, common, BRANCH_TOKENS);
         if (!isValidBranchName(branch)) throw new Error(`git worktree: "${branch}" (from the branch template "${branchTemplate}") is not a valid branch name`);
     } else branch = gitBranchFor(input.chatId, prefix);
-    const values = { ...common, ...repoValues(input.cwd, os), branch, branchSlug: branch.replace(/\//g, '-') };
+    return placed(settings, input.cwd, branch, common);
+}
+
+/** Where the worktree of `branch` goes (`worktreePath`, default `auto`), and every template value for it. */
+function placed(settings: Readonly<Record<string, unknown>>, cwd: string, branch: string, common: TemplateValues): { readonly branch: string; readonly path: string; readonly values: TemplateValues } {
+    const os = hostOsOfPath(cwd);
+    const values = { ...common, ...repoValues(cwd, os), branch, branchSlug: branch.replace(/\//g, '-') };
     const pathTemplate = templateSetting(settings, 'worktreePath');
     let path: string | null;
     if (!pathTemplate || pathTemplate === AUTO_WORKTREE_PATH) {
-        path = suggestWorktreePath(input.cwd, branch, os);
-        if (path === null) throw new Error(`git worktree: the project's folder "${input.cwd}" is not an absolute path`);
+        path = suggestWorktreePath(cwd, branch, os);
+        if (path === null) throw new Error(`git worktree: the project's folder "${cwd}" is not an absolute path`);
     } else path = expandPath(pathTemplate, values, os);
     return { branch, path, values: { ...values, path } };
+}
+
+/** What a plan item's branch starts with (#1047): `plan/<project>-<n>`. */
+export const PLAN_ITEM_BRANCH_PREFIX = 'plan/';
+
+/**
+ * The branch and folder of a plan item's worktree (#1047): a task that carries plan item `#n` works on its own branch,
+ * `plan/<project>-<n>`, so items running in parallel never share a folder. The folder follows `worktreePath` like a
+ * chat's does, `{chatId}` and `{chatId8}` standing for `item-<n>`. Deterministic for an item: a task that picks the
+ * item up again lands in the same folder.
+ */
+export function planItemWorktreeFor(settings: Readonly<Record<string, unknown>>, input: { readonly planItem: number; readonly cwd: string; readonly projectName: string }): { readonly branch: string; readonly path: string; readonly values: TemplateValues } {
+    if (!Number.isSafeInteger(input.planItem) || input.planItem < 1) throw new Error(`git worktree: plan item ${String(input.planItem)} is not an item number`);
+    const project = slugOf(input.projectName) || 'project';
+    const branch = `${PLAN_ITEM_BRANCH_PREFIX}${project}-${input.planItem}`;
+    if (!isValidBranchName(branch)) throw new Error(`git worktree: "${branch}" is not a valid branch name`);
+    const id = `item-${input.planItem}`;
+    return placed(settings, input.cwd, branch, { chatId: id, chatId8: id, branchPrefix: stringSetting(settings, 'branchPrefix') ?? DEFAULT_BRANCH_PREFIX, project });
 }
 
 /** Every template setting the project has that cannot expand, by key (#619): what the settings form shows. */
@@ -279,13 +303,19 @@ function noticeFor(settings: Readonly<Record<string, unknown>>, path: string, br
  *   `worktreeStrategy: 'command'` the project's `worktreeCreate` command, unless that worktree is already there.
  *   So nothing is remembered: every task of the chat asks again and lands in the same folder.
  * - In a worktree just made (not reused), the `worktreeSetup` commands run in order.
+ * - A task that carries a plan item (`planItem`, #1047) opens in the item's worktree (`planItemWorktreeFor`) instead,
+ *   made the same way; a chosen worktree is not reused for it, so parallel items never share a folder.
  * Any daemon error — `worktree-mismatch` (something else at the folder), `branch-exists` (the branch checked out in
  * another folder), `not-a-repo`, … — throws, so the router parks the task `waiting { project-feature }` with the
  * daemon's message (EXE-12). The agent is told it is already isolated (`worktreeNotice`), so a repo guide that says
  * "create a worktree first" does not make it leave the folder the user watches.
  */
-async function beforeSession({ settings, project, chatId, environmentId, machineId, cwd, fs }: ProjectFeatureSessionInput): Promise<ProjectFeatureSessionEffect | undefined> {
-    if (settings['worktreePerChat'] !== true || !chatId) return undefined;
+async function beforeSession({ settings, project, chatId, planItem, environmentId, machineId, cwd, fs }: ProjectFeatureSessionInput): Promise<ProjectFeatureSessionEffect | undefined> {
+    if (settings['worktreePerChat'] !== true) return undefined;
+    // A task carrying a plan item gets the item's worktree (#1047), never the chat's or one chosen for the chat: items
+    // running in parallel from one chat each need a folder of their own.
+    if (planItem !== undefined) return open(settings, fs, cwd, planItemWorktreeFor(settings, { planItem, cwd, projectName: project.name }));
+    if (!chatId) return undefined;
     if (settings['reuseExisting'] !== false) {
         const own = projectFolderFor(project, environmentId, machineId);
         const os = hostOsOfPath(cwd);
@@ -299,7 +329,12 @@ async function beforeSession({ settings, project, chatId, environmentId, machine
             }
         }
     }
-    const { branch, path, values } = chatWorktreeFor(settings, { chatId, cwd, projectName: project.name });
+    return open(settings, fs, cwd, chatWorktreeFor(settings, { chatId, cwd, projectName: project.name }));
+}
+
+/** Make (or reuse) the worktree `target` names the project's way, run the setup in a fresh one, and tell the agent. */
+async function open(settings: Readonly<Record<string, unknown>>, fs: ProjectFeatureSessionInput['fs'], cwd: string, target: { readonly branch: string; readonly path: string; readonly values: TemplateValues }): Promise<ProjectFeatureSessionEffect> {
+    const { branch, path, values } = target;
     const made = settings['worktreeStrategy'] === 'command' ? await byCommand(settings, fs, cwd, branch, path, values) : await builtin(settings, fs, cwd, branch, path);
     if (made.fresh) for (const line of setupOf(settings)) await run(fs, made.path, line, { ...values, path: made.path }, 'setup');
     const instructions = noticeFor(settings, made.path, made.branch);

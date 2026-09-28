@@ -26,6 +26,13 @@ function book(items: PlanItemInput[] = [{ title: 'one' }, { title: 'two' }, { ti
     return b;
 }
 
+/** Items independent of each other (#1047): each touches its own path. */
+const DISJOINT: PlanItemInput[] = [
+    { title: 'one', touches: ['a/'] },
+    { title: 'two', touches: ['b/'] },
+    { title: 'three', touches: ['c/'] }
+];
+
 const code = (fn: () => unknown): string | undefined => {
     try {
         fn();
@@ -66,7 +73,7 @@ describe('claimLimit and the project lease', () => {
     it('an agent claims up to the project’s claimLimit; its own limit overrides it', () => {
         const p = project({ claimLimit: 2 }, { [LINT]: 1 });
         const c = (a: AgentId) => call(agent(a), { limitOf: (id) => planLimitOf(p, id) });
-        const b = book();
+        const b = book(DISJOINT);
         claim(b, c(FORGE), 1);
         claim(b, c(FORGE), 2);
         expect(code(() => claim(b, c(FORGE), 3))).toBe('over-limit');
@@ -76,7 +83,7 @@ describe('claimLimit and the project lease', () => {
     });
 
     it('a claim naming no lease gets the project’s; one naming a lease keeps it', () => {
-        const b = book();
+        const b = book(DISJOINT);
         claim(b, call(agent(FORGE), { leaseMs: 45 * 60_000, limitOf: () => 2 }), 1);
         expect(itemOf(b, 1).claim).toMatchObject({ leaseUntil: T0 + 45 * 60_000, leaseMs: 45 * 60_000 });
         claim(b, call(agent(FORGE), { leaseMs: 45 * 60_000, limitOf: () => 2 }), 2, { leaseMs: 10 * 60_000 });

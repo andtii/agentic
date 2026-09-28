@@ -53,6 +53,11 @@ function book(items: PlanItemInput[] = [{ title: 'one' }, { title: 'two' }, { ti
     return b;
 }
 
+/** Give every item its own path, so none overlaps another (#1047). */
+const touchEach = (b: PlanBook): void => {
+    for (const item of Object.values(b.items)) item.touches = [`src/${item.id}/`];
+};
+
 const code = (fn: () => unknown): string | undefined => {
     try {
         fn();
@@ -116,8 +121,9 @@ describe('claim', () => {
         ['an item that needs a person', (b) => (assign(b, call(person), 1, agent(FORGE)), update(b, call(person), 1, { state: 'needs-you' })), FORGE, 1, 'needs-person'],
         ['a stuck item', (b) => (assign(b, call(person), 1, agent(FORGE)), update(b, call(person), 1, { state: 'stuck' })), FORGE, 1, undefined],
         ['over the default limit of 1', (b) => claim(b, call(agent(FORGE)), 2), FORGE, 1, 'over-limit'],
-        ['within a limit of 2', (b) => claim(b, call(agent(LINT)), 2), LINT, 1, undefined],
-        ['over a limit of 2', (b) => (claim(b, call(agent(LINT)), 2), claim(b, call(agent(LINT)), 3)), LINT, 1, 'over-limit'],
+        ['within a limit of 2, touches disjoint (#1047)', (b) => (touchEach(b), claim(b, call(agent(LINT)), 2)), LINT, 1, undefined],
+        ['over a limit of 2', (b) => (touchEach(b), claim(b, call(agent(LINT)), 2), claim(b, call(agent(LINT)), 3)), LINT, 1, 'over-limit'],
+        ['within a limit of 2, but naming no touches: it runs alone (#1047)', (b) => claim(b, call(agent(LINT)), 2), LINT, 1, 'not-independent'],
         ['re-claiming its own item (renews, no limit)', (b) => claim(b, call(agent(FORGE)), 1), FORGE, 1, undefined],
         ['an unknown item', () => {}, FORGE, 99, 'not-found']
     ];
@@ -244,13 +250,14 @@ describe('touches', () => {
         } else expect(b.notices).toEqual([]);
     });
 
-    it('does not warn about the agent’s own items', () => {
+    it('refuses, rather than warns about, overlapping the agent’s own items (#1047)', () => {
         const b = book([
             { title: 'a', touches: ['x.ts'] },
             { title: 'b', touches: ['x.ts'] }
         ]);
         claim(b, call(agent(LINT)), 1);
-        expect(claim(b, call(agent(LINT)), 2).value.warnings).toEqual([]);
+        expect(code(() => claim(b, call(agent(LINT)), 2))).toBe('not-independent');
+        expect(b.notices).toEqual([]);
     });
 });
 
