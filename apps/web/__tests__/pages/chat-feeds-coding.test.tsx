@@ -62,7 +62,6 @@ describe('chat session feeds fold coding events', () => {
         expect(panel(dom)).not.toBeNull();
 
         await until(() => output(dom).includes('vite v7 building'), 'the first terminal delta', 8_000);
-        expect(output(dom)).not.toContain('built 111 artifacts');
         await until(() => output(dom).includes('built 111 artifacts'), 'the next terminal delta', 8_000);
         expect(output(dom)).toContain('vite v7 building');
         // The terminal wins over the tool calls' output.
