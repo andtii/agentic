@@ -23,6 +23,15 @@
 [data-plan-bar] > span { display: block; block-size: 100%; background: var(--color-primary); }
 [data-plan-bar="phase"] { inline-size: 80px; }
 
+/* Add item (#926) with its After and Touches (#1074); the same fields edit them on the detail panel. */
+[data-plan-add-form] { display: flex; flex-direction: column; gap: var(--space-sm); flex: 1 1 100%; max-inline-size: 640px; }
+[data-plan-link-fields] { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: var(--space-sm); }
+[data-plan-form-actions] { display: flex; gap: var(--space-xs); }
+[data-plan-links-form] { display: flex; flex-direction: column; gap: var(--space-sm); inline-size: 100%; }
+[data-plan-links-form] [data-plan-link-fields] { grid-template-columns: minmax(0, 1fr); }
+[data-plan-links-edit] { display: flex; }
+@media (--below-md) { [data-plan-link-fields] { grid-template-columns: minmax(0, 1fr); } }
+
 [data-plan-views] { display: inline-flex; padding: 2px; border: var(--border) solid var(--ag-line-strong); border-radius: var(--radius-field); }
 [data-plan-views] a { padding: var(--space-2xs) var(--space-md); border-radius: calc(var(--radius-field) - 2px); font-size: var(--text-sm); color: var(--ag-text-muted); text-decoration: none; }
 [data-plan-views] a[aria-current="page"] { background: var(--color-base-300); color: var(--color-base-content); font-weight: var(--weight-semibold); }
