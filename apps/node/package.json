@@ -1,0 +1,17 @@
+{
+  "name": "@agentic/node",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The local Node + SQLite host: the platform's actors on one machine, persisted in one SQLite file.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@sigx/actors": "catalog:",
+    "@sigx/actors-sqlite": "catalog:"
+  },
+  "engines": {
+    "node": ">=22.13.0"
+  }
+}

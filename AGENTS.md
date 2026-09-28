@@ -205,6 +205,7 @@ Run the desktop app: `pnpm --filter @agentic/desktop dev` (`tauri dev`; needs a 
 | `packages/mcp` | `@agentic/mcp` | MCP client + platform MCP server (orchestration surface) |
 | `packages/a2a` | `@agentic/a2a` | A2A 1.0 server + client adapter |
 | `apps/web` | `@agentic/web` | sigx SSR app + actors host on Cloudflare Workers |
+| `apps/node` | `@agentic/node` | local Node + SQLite host (Node ≥ 22.13): `sqliteStorage` on `node:sqlite` so far; the host, HTTP and sockets follow |
 | `apps/daemon` | `@agentic/daemon` | `agentic-daemon` machine daemon (Windows first) |
 | `apps/desktop` | `@agentic/desktop` | Tauri 2 desktop shell (Windows, macOS, Linux) around a deployed server; Rust in `src-tauri/` |
 

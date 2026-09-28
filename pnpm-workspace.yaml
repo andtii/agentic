@@ -27,6 +27,7 @@ catalog:
   "@sigx/actors": ^0.11.0
   "@sigx/actors-cloudflare": ^0.11.0
   "@sigx/actors-ws": ^0.11.0
+  "@sigx/actors-sqlite": ^0.11.0
   "@sigx/router": ^0.13.0
   "@sigx/store": ^0.14.0
   "@sigx/richtext": ^0.4.0
