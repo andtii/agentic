@@ -262,7 +262,8 @@ export const Message = component<MessageProps>(({ props, signal }) => {
         const folded = detail !== 'raw';
         // Folded, the reasoning sits behind the chip and the tool calls in the steps box (or nowhere): the body keeps the rest.
         const runs = folded ? bodyRuns(message.parts, from, to) : runsOf(message.parts, from, to);
-        const reasoning = folded ? message.parts.filter((p): p is ReasoningPartState => p.type === 'reasoning' && (p.done !== true || nonBlank(p.text) !== undefined)) : [];
+        // The chip speaks for the whole message, so only the row that holds its first part carries it.
+        const reasoning = folded && from === 0 ? message.parts.filter((p): p is ReasoningPartState => p.type === 'reasoning' && (p.done !== true || nonBlank(p.text) !== undefined)) : [];
         // The calls whose open request still needs the reader: their approval or question stays in the thread.
         const requests = props.transcript?.requests;
         const calls = folded && props.onRespond && requests
