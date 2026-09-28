@@ -20,6 +20,7 @@ import {
     type PlanDoc, type PlanFilter
 } from '../shared/model';
 import { ItemDetail, detailWrites } from './ItemDetail';
+import type { ItemLinks } from '../shared/item-form';
 
 const CrewStrip = (doc: PlanDoc, members: ProjectPageProps['project']['members'], identity: PlanIdentity) => (
     <section data-plan-crew="" aria-label="Crew">
@@ -122,7 +123,7 @@ export const PlanList = component<ProjectPageProps>(({ props }) => {
                     plans={docs.map((d) => d.plan)}
                     onSelectPlan={nav.select}
                     {...(nav.create ? { onNewPlan: nav.create } : {})}
-                    {...(writes ? { onAdd: async (title: string) => (await writes.addItem(doc.plan, title)) !== undefined } : {})}
+                    {...(writes ? { onAdd: async (title: string, links: ItemLinks) => (await writes.addItem(doc.plan, title, links)) !== undefined } : {})}
                 />
                 {Note()}
                 {CrewStrip(doc, props.project.members, identity)}

@@ -9,14 +9,15 @@ import { component, signal, type Define, type JSXElement } from 'sigx';
 import { Link } from '@sigx/router';
 import { Checkbox } from '@sigx/zero';
 import { formatRef, parseRefs, planClaimLive, type AgentId, type PlanActor, type PlanItem, type ProjectMembers, type Ref } from '@agentic/core';
-import { Composer, Icon, Tag, type ComposerInsert, type Mention, type Tone } from '@agentic/ui';
+import { Button, Composer, Icon, Tag, type ComposerInsert, type Mention, type Tone } from '@agentic/ui';
 import { formatAge } from '../../../../../mock/workspace';
 import { mentionsIn, unknownAgent } from '../../../../chat/live';
 import { chatRefSources } from '../../../../chat/project-context';
 import { mockPlanIdentity, type PlanIdentity, type PlanWrites } from '../shared/data';
 import { NeedsYouCard } from '../shared/NeedsYouCard';
 import type { PinSource } from '../shared/pins';
-import { ActorTile, useFollow } from '../shared/parts';
+import { draftOf, linksChanged, readItemLinks, type ItemLinks } from '../shared/item-form';
+import { ActorTile, LinkFields, useFollow } from '../shared/parts';
 import { REF_KIND_HINT, leaseMinutesLeft, pinLine, queuePlace, refIcon, refLabel, shortPath, touchOverlaps, unblocksOf, type PlanDoc, type PlanFilePin } from '../shared/model';
 
 type FileRef = Extract<Ref, { kind: 'file' }>;
@@ -38,6 +39,8 @@ export type ItemDetailProps =
     & Define.Prop<'onAnswer', (text: string) => Promise<boolean>>
     /** Mark a needs-you item done instead (live, #1044). */
     & Define.Prop<'onDone', () => Promise<boolean>>
+    /** Replace the item's after and/or touches (live, #1074); resolves whether it went. Absent, they cannot be edited. */
+    & Define.Prop<'onLinks', (links: Partial<ItemLinks>) => Promise<boolean>>
     /** The project's agents, whom `@` picks (#1044); none when absent. */
     & Define.Prop<'members', ProjectMembers>
     /** Who "You" is and how actors are named (#939); the mock workspace's when absent. */
@@ -46,13 +49,14 @@ export type ItemDetailProps =
     & Define.Prop<'pins', PinSource>;
 
 /** The panel's writes for item `itemId` (#926, #1044); none (read-only) without `writes`. */
-export function detailWrites(writes: PlanWrites | undefined, itemId: number): Pick<ItemDetailProps, 'onTick' | 'onComment' | 'onAnswer' | 'onDone'> {
+export function detailWrites(writes: PlanWrites | undefined, itemId: number): Pick<ItemDetailProps, 'onTick' | 'onComment' | 'onAnswer' | 'onDone' | 'onLinks'> {
     if (!writes) return {};
     return {
         onTick: (index: number, checked: boolean) => void writes.tick(itemId, index, checked),
         onComment: async (text: string, mentions: readonly AgentId[]) => (await writes.comment(itemId, text, mentions)) !== undefined,
         onAnswer: async (text: string) => (await writes.answer(itemId, text)) !== undefined,
-        onDone: async () => (await writes.done(itemId)) !== undefined
+        onDone: async () => (await writes.done(itemId)) !== undefined,
+        onLinks: async (links: Partial<ItemLinks>) => (await writes.setLinks(itemId, links)) !== undefined
     };
 }
 
@@ -78,6 +82,34 @@ const ItemChip = (n: number, items: readonly PlanItem[], onPick: (n: number) => 
 
 export const ItemDetail = component<ItemDetailProps>(({ props }) => {
     const st = signal({ pin: '' as string, draft: '', sending: false, insert: null as ComposerInsert | null });
+    // The After / Touches edit (#1074): open with the item's values, saved as only what changed.
+    const edit = signal({ open: false, after: '', touches: '', busy: false });
+    const startEdit = (): void => {
+        const d = draftOf(props.item);
+        edit.after = d.after;
+        edit.touches = d.touches;
+        edit.open = true;
+    };
+    const saveEdit = async (e: Event): Promise<void> => {
+        e.preventDefault();
+        const links = readItemLinks(edit).links;
+        if (!links || edit.busy || !props.onLinks) return;
+        const changed = linksChanged(props.item, links);
+        if (!changed.after && !changed.touches) {
+            edit.open = false;
+            return;
+        }
+        edit.busy = true;
+        let saved = false;
+        try {
+            saved = await props.onLinks({ ...(changed.after ? { after: links.after } : {}), ...(changed.touches ? { touches: links.touches } : {}) });
+        } catch {
+            saved = false;
+        } finally {
+            edit.busy = false;
+        }
+        if (saved) edit.open = false;
+    };
     let inserts = 0;
     const agentIds = (): readonly string[] => props.members?.agentIds ?? [];
     const agentName = (id: string): string => (props.identity ?? mockPlanIdentity).name({ kind: 'agent', agentId: id as AgentId });
@@ -236,9 +268,23 @@ export const ItemDetail = component<ItemDetailProps>(({ props }) => {
                             </dd>
                         </>
                         : null}
-                    {item.after.length ? <><dt>After</dt><dd data-fact="after">{item.after.map((n) => ItemChip(n, items, props.onPick))}</dd></> : null}
+                    {edit.open
+                        ? <>
+                            <dt>After, touches</dt>
+                            <dd data-fact="links-edit">
+                                <form data-plan-links-form="" aria-label={`After and touches of #${item.id}`} onSubmit={(e: Event) => void saveEdit(e)}>
+                                    {LinkFields(edit, `plan-item-${item.id}`)}
+                                    <div data-plan-form-actions="">
+                                        <Button type="submit" intent="primary" disabled={edit.busy || !readItemLinks(edit).links} loading={edit.busy}>Save</Button>
+                                        <Button onClick={() => { edit.open = false; }}>Cancel</Button>
+                                    </div>
+                                </form>
+                            </dd>
+                        </>
+                        : null}
+                    {!edit.open && item.after.length ? <><dt>After</dt><dd data-fact="after">{item.after.map((n) => ItemChip(n, items, props.onPick))}</dd></> : null}
                     {unblocks.length ? <><dt>Unblocks</dt><dd data-fact="unblocks">{unblocks.map((u) => ItemChip(u.id, items, props.onPick))}</dd></> : null}
-                    {item.touches.length
+                    {!edit.open && item.touches.length
                         ? <>
                             <dt>Touches</dt>
                             <dd data-fact="touches">
@@ -252,7 +298,13 @@ export const ItemDetail = component<ItemDetailProps>(({ props }) => {
                             </dd>
                         </>
                         : null}
+                    {!edit.open && !item.touches.length && item.state !== 'done' && item.state !== 'dropped'
+                        ? <><dt>Touches</dt><dd data-fact="touches"><span data-dim="">None named, so it runs alone</span></dd></>
+                        : null}
                 </dl>
+                {props.onLinks && !edit.open && item.state !== 'done' && item.state !== 'dropped'
+                    ? <div data-plan-links-edit=""><Button icon="edit" onClick={startEdit}>Edit after and touches</Button></div>
+                    : null}
 
                 {item.state === 'needs-you'
                     ? <NeedsYouCard item={item} now={props.now} name={name} {...(props.onAnswer ? { onAnswer: props.onAnswer } : {})} {...(props.onDone ? { onDone: props.onDone } : {})} />

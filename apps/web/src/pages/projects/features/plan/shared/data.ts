@@ -1,7 +1,7 @@
 /**
  * Where the Plan views read from and write to (#754, #926): on mock data the plans in `mock/projects/plan.ts`; live,
  * the project's Plan actor (#750) — `list()` read in setup, and the views' writes (add item, new plan, assign, tick,
- * comment) as its methods, a refusal kept as the page's note. Also how a plan names its actors and what "now" is.
+ * comment, after and touches) as its methods, a refusal kept as the page's note. Also how a plan names its actors and what "now" is.
  */
 import { signal, useData } from 'sigx';
 import { actor } from '@sigx/actors';
@@ -15,6 +15,7 @@ import { AGENTS, MOCK_NOW, USER } from '../../../../../mock/workspace';
 import { useAgentDirectory } from '../../../../chat/directory';
 import type { AgentLookup } from '../../../../chat/live';
 import { usePlans } from '../../../work/live';
+import { newItemInput, type ItemLinks } from './item-form';
 import type { PlanDoc, PlanItemRun } from './model';
 
 /** A project's plans on mock data. */
@@ -24,8 +25,10 @@ type PlanClient = ReturnType<typeof actor<ActorDefs['Plan']>>;
 
 /** The Plan actor's writes the views make (#926). Each resolves to its result, or `undefined` when refused (the note says why). */
 export interface PlanWrites {
-    /** Add an item to the plan's last phase — opening a first phase when the plan has none. */
-    addItem(plan: Plan, title: string): Promise<readonly PlanItem[] | undefined>;
+    /** Add an item to the plan's last phase — opening a first phase when the plan has none — with its after and touches (#1074). */
+    addItem(plan: Plan, title: string, links?: ItemLinks): Promise<readonly PlanItem[] | undefined>;
+    /** Replace what an item waits on and the paths it touches (#1074); only the ones named are written (at least one). */
+    setLinks(itemId: number, links: Partial<ItemLinks>): Promise<PlanItem | undefined>;
     newPlan(title: string): Promise<Plan | undefined>;
     /** Into `to`'s queue at `index`, or `null` back to the open pool. */
     assign(itemId: number, to: PlanActor | null, index?: number): Promise<PlanItem | undefined>;
@@ -134,10 +137,20 @@ export function usePlanStore(projectId: string | (() => string)): PlanStore {
         }
     };
     const writes: PlanWrites = {
-        addItem: (plan, title) => run('add the item', async (c) => {
+        addItem: (plan, title, links) => run('add the item', async (c) => {
             let phase = plan.phases.at(-1)?.n;
             if (phase === undefined) phase = (await c.addPhase(plan.id, 'Phase 1')).phases.at(-1)?.n ?? 1;
-            return c.add(plan.id, phase, [{ title }]);
+            return c.add(plan.id, phase, [newItemInput(title, links ?? { after: [], touches: [] })]);
+        }),
+        setLinks: (itemId, links) => run(`change #${itemId}`, async (c) => {
+            let out: PlanItem | undefined;
+            // `after` first: it is the one the actor may refuse on its own (an unknown item, a cycle). `touches` is
+            // refused only for what `after` would have been refused for too (who, a done item), or a bad path, which
+            // the form checks before it sends — so a half-saved edit is not expected.
+            if (links.after) out = await c.after(itemId, [...links.after]);
+            if (links.touches) out = await c.touches(itemId, [...links.touches]);
+            if (!out) throw new Error('nothing to change');
+            return out;
         }),
         newPlan: (title) => run('start a plan', (c) => c.create({ title })),
         assign: (itemId, to, index) => run(`move #${itemId}`, (c) => c.assign(itemId, to, index)),

@@ -6,10 +6,11 @@ import { component, signal, type Define } from 'sigx';
 import { Link, useRouter } from '@sigx/router';
 import { Input } from '@sigx/zero';
 import type { Plan, PlanActor } from '@agentic/core';
-import { AgentTile, Button, Icon, ItemGlyph } from '@agentic/ui';
+import { AgentTile, Button, Icon, ItemGlyph, TextField, TextareaField } from '@agentic/ui';
 import type { ProjectPageProps } from '../../../layout/types';
 import { actorLook, usePlanIdentity, usePlanStore, type PlanActorLook, type PlanStore } from './data';
 import { PlanSwitcher, PlanViews, planHref } from './switcher';
+import { AFTER_HINT, TOUCHES_HINT, readItemLinks, type ItemLinks } from './item-form';
 import { nextItems, planProgress, progressText, type PlanDoc, type Progress } from './model';
 import { chatHref } from '../../../../chat/href';
 
@@ -57,6 +58,20 @@ export const ActorTile = (a: PlanActor, size: 18 | 20 | 22 | 24, lookOf: (a: Pla
     return <AgentTile name={look.name} hue={look.hue} person={look.person} monogram={look.monogram} size={size} />;
 };
 
+/**
+ * An item's After and Touches fields (#1074), bound to `st.after` / `st.touches`: the add form's and the item
+ * detail's edit. Each says what is wrong with it as it is typed; the touches hint says an empty list runs alone.
+ */
+export const LinkFields = (st: { after: string; touches: string; busy: boolean }, name: string) => {
+    const read = readItemLinks(st);
+    return (
+        <div data-plan-link-fields="">
+            <TextField model={() => st.after} name={`${name}-after`} label="After" placeholder="#3, #5" description={AFTER_HINT} disabled={st.busy} {...(read.afterError ? { error: read.afterError } : {})} />
+            <TextareaField model={() => st.touches} name={`${name}-touches`} label="Touches" rows={2} placeholder="packages/platform/src/plan/" description={TOUCHES_HINT} disabled={st.busy} {...(read.touchesError ? { error: read.touchesError } : {})} />
+        </div>
+    );
+};
+
 export type PlanHeaderProps =
     & Define.Prop<'projectId', string, true>
     & Define.Prop<'doc', PlanDoc, true>
@@ -69,21 +84,30 @@ export type PlanHeaderProps =
     & Define.Prop<'onSelectPlan', (id: string) => void>
     /** New plan from the switcher; absent, it is disabled. */
     & Define.Prop<'onNewPlan', () => void>
-    /** Add an item titled so (live, #926); resolves whether it was added. Absent, Add item is disabled. */
-    & Define.Prop<'onAdd', (title: string) => Promise<boolean>>;
+    /** Add an item titled so, with its after and touches (live, #926, #1074); resolves whether it was added. Absent, Add item is disabled. */
+    & Define.Prop<'onAdd', (title: string, links: ItemLinks) => Promise<boolean>>;
 
 export const PlanHeader = component<PlanHeaderProps>(({ props }) => {
     const follow = useFollow();
-    const st = signal({ adding: false, title: '', busy: false });
+    const st = signal({ adding: false, title: '', after: '', touches: '', busy: false });
     const submit = async (e: Event): Promise<void> => {
         e.preventDefault();
         const title = st.title.trim();
-        if (!title || st.busy || !props.onAdd) return;
+        const read = readItemLinks({ after: st.after, touches: st.touches });
+        if (!title || !read.links || st.busy || !props.onAdd) return;
         st.busy = true;
-        const added = await props.onAdd(title);
-        st.busy = false;
+        let added = false;
+        try {
+            added = await props.onAdd(title, read.links);
+        } catch {
+            added = false;
+        } finally {
+            st.busy = false;
+        }
         if (added) {
             st.title = '';
+            st.after = '';
+            st.touches = '';
             st.adding = false;
         }
     };
@@ -136,8 +160,11 @@ export const PlanHeader = component<PlanHeaderProps>(({ props }) => {
                                     <Input.Input placeholder="What needs doing" />
                                 </Input.Control>
                             </Input.Root>
-                            <Button type="submit" intent="primary" disabled={st.busy || !st.title.trim()}>Add</Button>
-                            <Button onClick={() => { st.adding = false; }}>Cancel</Button>
+                            {LinkFields(st, 'plan-item')}
+                            <div data-plan-form-actions="">
+                                <Button type="submit" intent="primary" disabled={st.busy || !st.title.trim() || !readItemLinks(st).links}>Add</Button>
+                                <Button onClick={() => { st.adding = false; }}>Cancel</Button>
+                            </div>
                         </form>
                     )
                     : null}
