@@ -4,8 +4,9 @@
  * with nobody calling. One wake per manager per turn, however many notices it carries.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { defineActor } from '@sigx/actors';
 import { manualScheduler, type ManualScheduler } from '@sigx/actors/host';
-import { PLAN_LEASE_DEFAULT_MS, type AgentId, type Principal, type ProjectId, type ProjectMembers, type SessionId, type WorkspaceId } from '@agentic/core';
+import { PLAN_LEASE_DEFAULT_MS, type TaskId, type AgentId, type Principal, type ProjectId, type ProjectMembers, type SessionId, type WorkspaceId } from '@agentic/core';
 import { capturingAuditPort } from '../../src/audit/port';
 import { definePlanActor, planKey } from '../../src/plan/index';
 import type { PlanWake, PlanWakePort } from '../../src/plan/wake';
@@ -24,6 +25,7 @@ let wakes: PlanWake[];
 let scheduler: ManualScheduler;
 let app: TestActorApp;
 let Plan: ReturnType<typeof definePlanActor>;
+let Merges: ReturnType<typeof defineActor>;
 
 const yieldTurns = async (n: number) => {
     for (let i = 0; i < n; i++) await new Promise((r) => (typeof setImmediate === 'function' ? setImmediate(r) : setTimeout(r, 0)));
@@ -42,7 +44,18 @@ beforeEach(() => {
     };
     scheduler = manualScheduler();
     Plan = definePlanActor({ audit: capturingAuditPort(), wake, projects: { project: async (_ctx, _ws, id) => (id === project ? { id: project, members } : undefined) } });
-    app = testActorApp([Plan], { scheduler, defaults: { reminderTickMs: 60_000 } });
+    // The Pulls actor's hop, the only way `pullMerged` is reached.
+    Merges = defineActor({
+        type: 'merges',
+        allowAnonymous: true,
+        state: () => ({}),
+        methods: (ctx) => ({
+            async merged(number: number, taskId: TaskId) {
+                return ctx.actor(Plan, planKey(ws, project)).pullMerged({ number, taskId });
+            }
+        })
+    });
+    app = testActorApp([Plan, Merges], { scheduler, defaults: { reminderTickMs: 60_000 } });
     return app.start();
 });
 afterEach(async () => {
@@ -67,6 +80,17 @@ describe('the manager hears', () => {
         expect(kinds(w!)).toEqual(['done', 'idle']);
         expect(w!.notices[0]!.text).toBe('#1 done (every done-when ticked), pr:978: Reconnect');
         expect(w!.notices[1]!.text).toContain(`@${FORGE} holds no item and its queue is empty`);
+    });
+
+    it('an item done by its pull request merging, naming the PR', async () => {
+        await plan().create({ title: 'P', phases: [{ title: 'One', items: [{ title: 'Reconnect' }] }] });
+        await plan().assign(1, { kind: 'agent', agentId: FORGE });
+        await plan(agentP(FORGE)).claim(1, { taskId: 'task_a' as TaskId });
+        await plan(agentP(FORGE)).handoff(1, null, 'PR open');
+        wakes = [];
+        await (app.as(user).actor(Merges, 'm') as unknown as { merged(n: number, t: TaskId): Promise<number[]> }).merged(1033, 'task_a' as TaskId);
+        expect(managerWakes().map(kinds)).toEqual([['done']]);
+        expect(managerWakes()[0]!.notices[0]!.text).toBe('#1 done (pull request #1033 merged): Reconnect');
     });
 
     it('an item an agent set to needs-you, with the question', async () => {
