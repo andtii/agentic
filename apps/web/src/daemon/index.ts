@@ -58,8 +58,19 @@ export function parseDaemonSocketPath(pathname: string): string | null {
 
 const isUpgrade = (request: Request): boolean => request.headers.get('upgrade')?.toLowerCase() === 'websocket';
 
-/** The ids a daemon request names when its path and bearer token agree; a refusal otherwise. */
-function identify(request: Request): { workspaceId: WorkspaceId; machineId: MachineId; key: string; token: string } | Response {
+/** Who a daemon upgrade says it is: the ids its bearer token names (matching the path), the actor key and the token itself. */
+export interface DaemonIdentity {
+    readonly workspaceId: WorkspaceId;
+    readonly machineId: MachineId;
+    readonly key: string;
+    readonly token: string;
+}
+
+/**
+ * The ids a daemon request names when its path and bearer token agree; a refusal otherwise.
+ * Host-neutral (#987): only the request is read, so any socket host checks the upgrade the same way.
+ */
+export function identifyDaemon(request: Request): DaemonIdentity | Response {
     const machineId = parseDaemonSocketPath(new URL(request.url).pathname);
     if (machineId === null) return json({ error: 'not_found' }, 404);
     if (!isUpgrade(request)) return json({ error: 'upgrade_required', detail: 'the daemon socket is a WebSocket' }, 426);
@@ -70,9 +81,19 @@ function identify(request: Request): { workspaceId: WorkspaceId; machineId: Mach
     return { ...ref, key: machineKey(ref.workspaceId, ref.machineId), token };
 }
 
+/**
+ * The Machine actor's stored hash decides (#36): `null` when the token proves the machine, the 401 refusal
+ * otherwise (a revoked machine included). Host-neutral (#987): it reads the actor through `host`, never a socket.
+ */
+export async function verifyDaemonToken(who: DaemonIdentity, host: Host, machine: MachineActor): Promise<Response | null> {
+    const record = await host.actor(machine, who.key).with({ context: asPrincipal(machinePrincipal(who.workspaceId, who.machineId)) }).tokenRecord();
+    const verdict = await verifyMachineToken(who.token, record);
+    return verdict.ok ? null : json({ error: 'unauthorized', reason: verdict.reason }, 401);
+}
+
 /** Worker half: forward the upgrade to the machine's Durable Object, or refuse it before any object wakes. */
 export function forwardDaemonSocket(request: Request, namespace: DurableObjectNamespaceLike): Response | Promise<Response> {
-    const who = identify(request);
+    const who = identifyDaemon(request);
     if (who instanceof Response) return who;
     return durableObjectStubResolver({ namespace }).stub({ type: 'machine', key: who.key }).fetch(request);
 }
@@ -164,7 +185,7 @@ export function createDaemonSocketHost(options: DaemonSocketHostOptions): Daemon
         fetch(request) {
             if (parseDaemonSocketPath(new URL(request.url).pathname) === null) return null;
             return (async () => {
-                const who = identify(request);
+                const who = identifyDaemon(request);
                 if (who instanceof Response) return who;
                 const expected = durableObjectName({ type: 'machine', key: who.key });
                 if (state.id.name !== expected) return json({ error: 'misrouted', detail: `this object is not ${who.key}` }, 403);
@@ -172,10 +193,8 @@ export function createDaemonSocketHost(options: DaemonSocketHostOptions): Daemon
                 const Pair = (globalThis as { WebSocketPair?: WebSocketPairLike }).WebSocketPair;
                 if (typeof Pair !== 'function') return json({ error: 'unsupported', detail: 'WebSocketPair is not available' }, 500);
 
-                const principal = machinePrincipal(who.workspaceId, who.machineId);
-                const record = await (await as(principal, who.key)).tokenRecord();
-                const verdict = await verifyMachineToken(who.token, record);
-                if (!verdict.ok) return json({ error: 'unauthorized', reason: verdict.reason }, 401);
+                const refused = await verifyDaemonToken(who, await options.host(), machine);
+                if (refused) return refused;
 
                 registry.bind(who.key, state);
                 // One daemon per machine: a redial replaces the socket it lost.

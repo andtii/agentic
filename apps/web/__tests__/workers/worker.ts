@@ -14,7 +14,7 @@ import type { AnyActorDefinition } from '@sigx/actors';
 import { allowAll } from '@sigx/ai-agent';
 import { mockAgent } from '@sigx/ai-agent/testing';
 import { createA2aMount } from '../../src/a2a/mount';
-import { createActorHost, createActorWorker, defaultPorts, pairingWiring, platformActors, platformFiles, type PlatformEnv } from '../../src/actors.app';
+import { createActorHost, createActorWorker, defaultPorts, pairingWiring, platformActors, platformFiles, type PlatformEnv } from '../../src/actors.cloudflare';
 import { createAuthMount } from '../../src/auth/mount';
 import { devLoginRouteFor } from '../../src/auth/dev-login';
 import { createFilesMount, type WaitUntilLike } from '../../src/files/route';

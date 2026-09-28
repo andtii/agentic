@@ -14,7 +14,7 @@ import { handleServerFnRequest, matchesServerFn } from '@sigx/server/server';
 import { serverFns, serverFnBase } from 'virtual:sigx-server-fns';
 import { createApp } from './entry-server';
 import { createA2aMount } from './a2a/mount';
-import { createActorHost, createActorWorker, pairingWiring, platformFiles, platformRegistry, type PlatformEnv } from './actors.app';
+import { createActorHost, createActorWorker, pairingWiring, platformFiles, platformRegistry, type PlatformEnv } from './actors.cloudflare';
 import { devLoginEnabled, devLoginRouteFor } from './auth/dev-login';
 import { createAuthMount, githubEnabled } from './auth/mount';
 import { setSignInOptions } from './auth/sign-in';
