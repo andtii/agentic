@@ -82,7 +82,7 @@ const LiveSessionFrame = component<SessionFrameProps>(({ props }) => {
         const spec = info.value?.spec;
         const chatId = spec?.chatId;
         const agentId = spec?.agentId;
-        const fileActions = liveEditedBy({ id: props.id, root: spec?.cwd ?? '', runtime: spec?.runtime, events: events.value ?? [], agent: { name: agent.name, hue: agent.hue } });
+        const fileActions = liveEditedBy({ id: props.id, root: spec?.cwd ?? '', runtime: spec?.runtime, events: events.value ?? [], agent: { name: agent.name, hue: agent.hue }, time: zoneFormat(zone()).time });
         if (!chatId || !agentId) return fileActions ? { fileActions } : {};
         const chat = actor(defs.Chat, chatKeyOf(ws, chatId));
         return {

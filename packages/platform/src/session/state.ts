@@ -258,6 +258,7 @@ export function optionsOf(s: Pick<SessionState, 'spec' | 'options'>): SessionOpt
 export type SessionPatch = Partial<Pick<SessionState, 'opened' | 'spec' | 'mode' | 'ref' | 'capabilities' | 'status' | 'head' | 'transcript' | 'running' | 'gap' | 'closedAt' | 'learning' | 'corrections' | 'platformRequests' | 'detachedRequests' | 'answeredDetached' | 'options'>>;
 
 export type SessionEntry =
+    /** One event, stamped with when the platform received it (`at`, #580) — absent on entries from before that. */
     | { readonly t: 'ev'; readonly ev: AgentEvent }
     | { readonly t: 'set'; readonly patch: SessionPatch }
     /** A command sent to a daemon whose reply is still out; `taskId` is the task a prompt is sent for (#390). */
@@ -270,6 +271,25 @@ export type SessionEntry =
 
 export function initialSessionState(): SessionState {
     return { opened: false, status: 'idle', head: { epoch: 0, seq: 0 }, events: [], openRequests: [], commands: {}, commandOrder: [] };
+}
+
+/**
+ * When the platform received an event (#580), epoch ms — `undefined` on an entry recorded before events carried one,
+ * or on one the machine's history served without it. Every reader tolerates its absence.
+ */
+export function eventTime(ev: object): number | undefined {
+    const at = (ev as { readonly at?: unknown }).at;
+    return typeof at === 'number' && Number.isFinite(at) ? at : undefined;
+}
+
+/**
+ * `ev` as the log keeps it (#580): stamped with `at` — the time the wire already carries when it does, else `received`
+ * — never before `after` (the previous event's), so the times read back are monotonic. The actor passes the clock in;
+ * the reducer never reads one.
+ */
+export function stampEvent(ev: AgentEvent, received: number, after?: number): AgentEvent {
+    const at = Math.max(eventTime(ev) ?? received, after ?? -Infinity);
+    return eventTime(ev) === at ? ev : ({ ...ev, at } as AgentEvent);
 }
 
 /** `ev` is strictly after `head`. */

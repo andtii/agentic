@@ -26,6 +26,8 @@ const S1 = 'session_1' as SessionId;
 const SESSION_KEY = actorKey(WS, 'session', S1);
 const asMachine = (id: MachineId): Principal => ({ kind: 'machine', workspaceId: WS, machineId: id });
 const TICK = 60_000;
+/** Events as the daemon streamed them: the platform stamps its own copy with when it received each (#580), the machine's log carries no such stamp. */
+const untimed = (events: readonly AgentEvent[]): AgentEvent[] => events.map((e) => { if (e.type === 'request-resolved' || !('at' in e)) return e; const { at: _at, ...rest } = e as AgentEvent & { at: number }; return rest as AgentEvent; });
 
 const config: FrozenAgentConfig = {
     agentId: 'agent_1' as FrozenAgentConfig['agentId'],
@@ -198,22 +200,22 @@ describe('the machine owns a daemon session’s history (#397)', { timeout: 120_
         const before = historyRequests();
         const all = await session().events();
         expect(historyRequests()).toBeGreaterThan(before + 1);
-        expect(all).toEqual(streamed);
+        expect(untimed(all)).toEqual(streamed);
         // From inside the forgotten range: exactly what follows the cursor.
         const mid = streamed[100]!;
-        expect(await session().events({ epoch: mid.epoch, seq: mid.seq })).toEqual(streamed.slice(101));
+        expect(untimed(await session().events({ epoch: mid.epoch, seq: mid.seq }))).toEqual(streamed.slice(101));
         // From the frontier on: the platform's own pages and window, no round trip.
         const own = historyRequests();
         const since = await session().events(info.archivedTo);
         expect(historyRequests()).toBe(own);
-        expect(since).toEqual(streamed.filter((e) => e.epoch > info.archivedTo!.epoch || (e.epoch === info.archivedTo!.epoch && e.seq > info.archivedTo!.seq)));
+        expect(untimed(since)).toEqual(streamed.filter((e) => e.epoch > info.archivedTo!.epoch || (e.epoch === info.archivedTo!.epoch && e.seq > info.archivedTo!.seq)));
         // A late joiner's tail from the start folds the same log.
         const tailed: AgentEvent[] = [];
         for await (const ev of session().tail({ epoch: 0, seq: 0 })) {
             tailed.push(ev);
             if (ev.epoch === info.head.epoch && ev.seq === info.head.seq) break;
         }
-        expect(tailed).toEqual(streamed);
+        expect(untimed(tailed)).toEqual(streamed);
     });
 
     it('a machine whose log was truncated past the cursor answers a named gap, and a machine that cannot be asked a named unavailability — never a silent hole', async () => {
@@ -223,13 +225,13 @@ describe('the machine owns a daemon session’s history (#397)', { timeout: 120_
         await expect(session().events()).rejects.toThrow(/history-gap: machine machine_1 no longer holds the events of session "session_1" before \(0, 300\)/);
         await expect(session().events({ epoch: 0, seq: 10 })).rejects.toThrow(/history-gap/);
         // What the log still holds is answered; so is what the platform holds itself.
-        expect(await session().events(cut)).toEqual(streamed.slice(300));
-        expect(await session().events(state.archivedTo)).toEqual(streamed.filter((e) => e.seq > state.archivedTo!.seq));
+        expect(untimed(await session().events(cut))).toEqual(streamed.slice(300));
+        expect(untimed(await session().events(state.archivedTo))).toEqual(streamed.filter((e) => e.seq > state.archivedTo!.seq));
         // The daemon goes away: the platform cannot ask, and says so.
         sockets.seats.get(K1)!.drop();
         await until(async () => !(await machine().get()).online, 'offline');
         await expect(session().events()).rejects.toThrow(/history-unavailable: session ".*" holds no events before .*machine machine_1 could not be asked: machine-offline/);
-        expect(await session().events(state.archivedTo)).toEqual(streamed.filter((e) => e.seq > state.archivedTo!.seq));
+        expect(untimed(await session().events(state.archivedTo))).toEqual(streamed.filter((e) => e.seq > state.archivedTo!.seq));
     });
 
     it('historyRequest / historyAnswer: an unanswered request times out through the liveness reminder, a disconnect fails a pending one, a stray response is ignored', async () => {
