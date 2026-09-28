@@ -49,6 +49,8 @@ describe('projectManagerConfig (#784)', () => {
         const config = projectManagerConfig(project, DEFAULT_PM_SPEC);
         expect(config.tools.map((t) => t.name)).toEqual(expect.arrayContaining(['chat_post', 'delegate']));
         expect(PM_PLAYBOOK).toContain('`chat_post` that mentions it');
+        // What to do with each plan notice the manager is woken with (#982).
+        for (const kind of ['`stalled`', '`idle`', '`needs-you`', '`done`']) expect(PM_PLAYBOOK).toContain(kind);
     });
 
     it('withPmTools appends only the manager tools a config lacks, keeping its own grants and a deny (#975)', () => {

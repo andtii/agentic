@@ -13,7 +13,9 @@
  * Notices (lease ran out, touches overlap, handoffs) wake their addressee once the turn is saved (#938, `wake.ts`): a
  * chat message addressed to an agent, an Inbox row for a person; one that reaches nobody waits on the actor until its
  * addressee takes it (`takeNotices`, which the plan tools do on each call). After every write an idle agent whose queue
- * has ready work is told so once (`ready`, #981, `tellReady`), so a queue drains without anyone nudging its agent.
+ * has ready work is told so once (`ready`, #981, `watchMembers`), so a queue drains without anyone nudging its agent;
+ * the manager hears of items done or set to needs-you, and of members going idle or stalling (#982). The reminder is
+ * armed for the next lease end or stall, whichever is first.
  *
  * The Plan feature's project settings are enforced here (#938, `settings.ts`): `claimLimit` (a member's own limit
  * overriding it), `leaseMinutes`, `agentsMayTick`, and `starter` for a new plan given no phases. A merged pull request
@@ -74,7 +76,8 @@ import {
     renewLeases,
     splitItem,
     takeNotices,
-    tellReady,
+    watchMembers,
+    nextWatchDue,
     update,
     viewState,
     AFTER_MAX,
@@ -311,7 +314,9 @@ export function definePlanActor(options: PlanActorOptions = {}) {
     /** Save, re-arm the lease reminder for the next lease end, audit, then wake the notices' addressees — all inside the turn. */
     const commit = async (ctx: Ctx, changes: readonly PlanChange[], at: number, turn?: Turn): Promise<void> => {
         const s = ctx.state;
-        const due = nextLeaseEnd(s);
+        const leaseEnd = nextLeaseEnd(s);
+        const stallDue = nextWatchDue(s);
+        const due = leaseEnd === undefined ? stallDue : stallDue === undefined ? leaseEnd : Math.min(leaseEnd, stallDue);
         // Re-arm only when the next end moved earlier (or there is none left): a renewal moves it later, and a
         // reminder that fires early just re-arms from `onReminder` — so a busy agent does not re-arm on every call.
         const rearm = due === undefined ? s.leaseAlarm !== undefined : s.leaseAlarm === undefined || due < s.leaseAlarm;
@@ -328,8 +333,8 @@ export function definePlanActor(options: PlanActorOptions = {}) {
         if (turn) await wakeAddressees(ctx, turn);
     };
 
-    /** `tellReady` with this project's cross-project waits: an item waiting on another project is not counted ready. */
-    const tellIdle = (s: PlanState, call: PlanCall): void => tellReady(s, call, (item) => crossAfterOf(item).length > 0);
+    /** `watchMembers` with this project's cross-project waits: an item waiting on another project is not counted ready. */
+    const tellIdle = (s: PlanState, call: PlanCall): void => watchMembers(s, call, (item) => crossAfterOf(item).length > 0);
 
     const toServerError = (error: unknown): never => {
         if (error instanceof PlanRuleError) throw new ServerFnError(error.status, error.message, { code: error.code });

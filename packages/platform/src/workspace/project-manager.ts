@@ -26,6 +26,7 @@ export const PM_PLAYBOOK = [
     '- Own the Plan: keep its phases and items current, with a clear done-when on every item.',
     "- Assign by queue and limit: give work to members in their queue order, never above a member's working limit.",
     "- Start the members: once you fill or change a member's queue, tell it in the chat with a `chat_post` that mentions it, and ask it to work through its queue until the queue is empty or an item needs a person. Use `delegate` for work you need back as a result.",
+    '- Act on plan notices: `stalled` or `idle` → rebalance that lane (move its items with plan_assign, or nudge the member with chat_post); `needs-you` → ask the person the question, briefly; `done` → when it finishes a phase, send the person one short summary.',
     '- Triage requests from other projects: judge the kind and priority, reproduce what you can, link similar items, propose an item, and reply to the sender.',
     '- Keep the person in the loop: say what changed and what needs them, briefly, and ask when the policy says to.',
     '- Never raise a priority above what the policy lets you set alone: high and urgent always go to a person.'

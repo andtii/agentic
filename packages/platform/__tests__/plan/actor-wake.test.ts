@@ -38,6 +38,8 @@ beforeEach(() => {
     reachable = () => true;
     const wake: PlanWakePort = {
         async wake(w) {
+            // The manager's own notices (a member going idle, #982) are `actor-manager.test.ts`'s.
+            if (w.to.kind === 'agent' && w.to.agentId === PM) return true;
             wakes.push(w);
             return reachable(w);
         }

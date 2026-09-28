@@ -67,12 +67,24 @@ export function planWakeText(notices: readonly PlanNotice[]): string {
     return notices.length === 1 ? `Plan: ${notices[0]!.text}` : ['Plan notices:', ...notices.map((n) => `- #${n.itemId}: ${n.text}`)].join('\n');
 }
 
+const NOTICE_TITLES: Record<PlanNotice['kind'], string> = {
+    handoff: 'handed off',
+    'lease-expired': 'lease ran out',
+    touches: 'touches overlap',
+    reassigned: 'moved',
+    ready: 'ready for you',
+    done: 'done',
+    'needs-you': 'needs a person',
+    idle: 'member idle',
+    stalled: 'member stalled'
+};
+
 /** The Inbox row for a person's notices. */
 export function planWakeRow(notices: readonly PlanNotice[], chatId?: ChatId): NotificationInput {
     const first = notices[0]!;
     return {
         kind: 'input',
-        title: notices.length === 1 ? `Plan #${first.itemId}: ${first.kind === 'handoff' ? 'handed off' : first.kind === 'lease-expired' ? 'lease ran out' : first.kind === 'touches' ? 'touches overlap' : first.kind === 'ready' ? 'ready for you' : 'moved'}` : `${notices.length} plan notices`,
+        title: notices.length === 1 ? `Plan #${first.itemId}: ${NOTICE_TITLES[first.kind]}` : `${notices.length} plan notices`,
         body: notices.map((n) => n.text).join('\n'),
         ...(chatId !== undefined ? { ref: { kind: 'chat', chatId } } : {})
     };

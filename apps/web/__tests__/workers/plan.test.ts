@@ -66,7 +66,8 @@ describe('worker: Plan lease alarm', () => {
         // fires it on time; `runDurableObjectAlarm` runs it now if it has not fired yet.
         await sleep(1_200);
         await runDurableObjectAlarm(stub);
-        expect(await alarmAt()).toBeNull();
+        // The spent lease end is gone; the alarm is re-armed only for Forge's ready item stalling a lease from now (#982).
+        expect((await alarmAt()) ?? Infinity).toBeGreaterThan(Date.now() + 60_000);
         const first = async () => (await plan.get('plan-1')).phases[0]!.items[0]!;
         expect(await first()).toMatchObject({ state: 'ready', assignee: { kind: 'agent', agentId: forge }, queueIndex: 0 });
         const asPm = await asAgent(Plan, key, pm);

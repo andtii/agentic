@@ -124,13 +124,15 @@ export interface StoredPlan {
 
 /**
  * Something an agent or person is told: a lease ran out, touches overlap, an item was handed to them or moved off them,
- * or (`ready`, #981) an idle agent's queue has an item it can claim now.
+ * or (`ready`, #981) an idle agent's queue has an item it can claim now. The manager also hears (#982) when an item is
+ * `done`, set to `needs-you`, when a member goes `idle` (no claim, empty queue) and when one has `stalled` (ready work
+ * at the head of its queue, unclaimed for longer than the lease).
  */
 export interface PlanNotice {
     readonly seq: number;
     readonly at: number;
     readonly to: PlanActor;
-    readonly kind: 'lease-expired' | 'touches' | 'handoff' | 'reassigned' | 'ready';
+    readonly kind: 'lease-expired' | 'touches' | 'handoff' | 'reassigned' | 'ready' | 'done' | 'needs-you' | 'idle' | 'stalled';
     readonly itemId: number;
     readonly text: string;
     /** `touches`: the other item and the suggested order (first to last). */
@@ -157,6 +159,13 @@ export interface PlanBook {
      * or run out of ready work. Absent on books stored before it.
      */
     readyTold?: AgentId[];
+    /**
+     * What `watchMembers` tracks for the manager (#982), by agent id: the ready item at the head of an idle member's
+     * queue and when it counts as stalled (`due`, once told `stalled`); and the members that had work at the last
+     * look (`working`), so going idle is told once, on the change. Absent on books stored before it.
+     */
+    heads?: Record<string, { itemId: number; due: number; stalled?: true }>;
+    working?: AgentId[];
 }
 
 export function emptyBook(workspaceId: WorkspaceId, projectId: ProjectId): PlanBook {
@@ -419,7 +428,12 @@ function tell(book: PlanBook, notice: Omit<PlanNotice, 'seq'>): void {
     if (book.notices.length > NOTICES_KEPT) book.notices.splice(0, book.notices.length - NOTICES_KEPT);
 }
 
-function finish(book: PlanBook, item: StoredItem, call: PlanCall, how: string): PlanChange {
+/** Tell the project's manager, when it has one (#982). */
+function tellManager(book: PlanBook, call: PlanCall, notice: Omit<PlanNotice, 'seq' | 'at' | 'to'>): void {
+    if (call.manager !== null) tell(book, { ...notice, at: call.now, to: agentActor(call.manager) });
+}
+
+function finish(book: PlanBook, item: StoredItem, call: PlanCall, how: string, pr?: number): PlanChange {
     if (item.claim?.taskId !== undefined) item.finishedClaim = { agentId: item.claim.agentId, taskId: item.claim.taskId, at: call.now };
     else if (item.handedOff) item.finishedClaim = { ...item.handedOff, at: call.now };
     delete item.claim;
@@ -427,6 +441,9 @@ function finish(book: PlanBook, item: StoredItem, call: PlanCall, how: string): 
     dequeue(book, item.id);
     item.state = 'done';
     note(item, call.now, call.actor, how);
+    // The manager hears, with the item's PR when it names one (a merge names its own in `how`).
+    const prs = pr !== undefined ? [] : item.refs.filter((r) => r.kind === 'pr').map((r) => formatRef(r));
+    tellManager(book, call, { kind: 'done', itemId: item.id, text: `#${item.id} done (${how})${prs.length ? `, ${prs.join(', ')}` : ''}: ${item.title}` });
     return { op: 'done', actor: call.actor, planId: item.planId, itemId: item.id, summary: `#${item.id} done (${how}): ${item.title}` };
 }
 
@@ -781,7 +798,7 @@ export function pullMerged(book: PlanBook, call: PlanCall, pr: { readonly number
         const byTask = pr.taskId !== undefined && item.handedOff.taskId === pr.taskId;
         const byRef = item.refs.some((r) => r.kind === 'pr' && r.n === pr.number);
         if (!byTask && !byRef) continue;
-        changes.push(finish(book, item, call, `pull request #${pr.number} merged`));
+        changes.push(finish(book, item, call, `pull request #${pr.number} merged`, pr.number));
         done.push(item);
     }
     return { value: done, changes };
@@ -857,6 +874,8 @@ export function update(book: PlanBook, call: PlanCall, itemId: number, patch: Pl
         if (was === 'done' && item.assignee) enqueue(book, item.assignee, item.id, 0);
         else if (agent !== undefined && item.assignee) enqueue(book, item.assignee, item.id, 0);
         note(item, call.now, actor, `${was} → ${state}`);
+        // An agent asking for a person: the manager asks them (#982).
+        if (state === 'needs-you' && actor.kind === 'agent') tellManager(book, call, { kind: 'needs-you', itemId: item.id, text: `${who(actor)} set #${item.id} to needs-you: ${noteLine ?? item.title}` });
         changes.push({ op: agent !== undefined ? 'released' : 'updated', actor, planId: item.planId, itemId: item.id, summary: `#${item.id} ${was} → ${state}: ${item.title}` });
     }
     return { value: item, changes };
@@ -965,27 +984,53 @@ export function openItems(book: PlanBook, now: number): OpenPlanItem[] {
 export const READY_WORK_TEXT = 'work your queue: plan_next → plan_claim → do the work → tick its done-when with plan_update; repeat until plan_next returns nothing or an item needs a person, then post one status';
 
 /**
- * Tell each idle member agent whose queue has ready work (#981): an agent holding no live claim whose queue holds an
- * item it could claim now (`claimRefusal`, no touches clash, not waiting on another project — `waitsElsewhere`) gets
- * one `ready` notice naming the first such item. Run after every write, so work that is assigned, unblocked by a done
- * item (ticked, marked or merged) or released back to a queue reaches its assignee.
+ * Watch the members after every write and on the reminder (#981, #982):
  *
- * Told once per idle spell (`readyTold`): not again until the agent claims an item or has no ready work left. An
- * unread notice already about that item (a handoff) counts as the telling.
+ * - **ready** — an agent holding no live claim whose queue holds an item it could claim now (`claimRefusal`, no touches
+ *   clash, not waiting on another project — `waitsElsewhere`) is told once, naming the first such item. So work that is
+ *   assigned, unblocked by a done item (ticked, marked or merged) or released back to a queue reaches its assignee.
+ *   Once per idle spell (`readyTold`): not again until it claims an item or has no ready work left. An unread handoff
+ *   (or ready) notice about that item counts as the telling.
+ * - **idle** — the manager hears once when a member that had work holds no claim and has an empty queue.
+ * - **stalled** — the manager hears once when that first ready item has sat unclaimed for longer than the project's
+ *   lease (`heads[..].due`; `nextWatchDue` arms the reminder for it, so it fires with nobody calling).
+ *
+ * The manager itself is not watched for idle or stalled.
  */
-export function tellReady(book: PlanBook, call: PlanCall, waitsElsewhere: (item: StoredItem) => boolean = () => false): void {
+export function watchMembers(book: PlanBook, call: PlanCall, waitsElsewhere: (item: StoredItem) => boolean = () => false): void {
     const told = new Set(book.readyTold ?? []);
+    const wasWorking = new Set(book.working ?? []);
+    const working: AgentId[] = [];
+    const heads: NonNullable<PlanBook['heads']> = {};
+    const leaseMs = call.leaseMs ?? PLAN_LEASE_DEFAULT_MS;
     for (const agentId of new Set(call.members)) {
+        const watched = call.manager !== null && agentId !== call.manager;
+        const queued = (book.queues[`agent:${agentId}`] ?? []).map((n) => book.items[String(n)]).filter((item): item is StoredItem => !!item && item.state !== 'done');
+        if (claimsOf(book, agentId, call.now).length || queued.length) working.push(agentId);
+        else if (watched && wasWorking.has(agentId)) {
+            // Named by the item it last had, which the wake reads for its chat and task.
+            const last = all(book)
+                .filter((i) => i.finishedClaim?.agentId === agentId || i.handedOff?.agentId === agentId || (i.assignee?.kind === 'agent' && i.assignee.agentId === agentId))
+                .sort((a, b) => b.updatedAt - a.updatedAt || b.id - a.id)[0];
+            tellManager(book, call, { kind: 'idle', itemId: last?.id ?? 0, text: `@${agentId} holds no item and its queue is empty${last ? ` (last: #${last.id} ${last.title})` : ''}` });
+        }
         if (claimsOf(book, agentId, call.now).length) {
             told.delete(agentId);
             continue;
         }
-        const head = (book.queues[`agent:${agentId}`] ?? [])
-            .map((n) => book.items[String(n)])
-            .find((item): item is StoredItem => !!item && !waitsElsewhere(item) && !claimRefusal(book, call, agentId, item) && !clashes(book, call, agentId, item).length);
+        const head = queued.find((item) => !waitsElsewhere(item) && !claimRefusal(book, call, agentId, item) && !clashes(book, call, agentId, item).length);
         if (!head) {
             told.delete(agentId);
             continue;
+        }
+        if (watched) {
+            const was = book.heads?.[agentId];
+            const h = was && was.itemId === head.id ? { ...was } : { itemId: head.id, due: call.now + leaseMs };
+            if (!h.stalled && call.now >= h.due) {
+                h.stalled = true;
+                tellManager(book, call, { kind: 'stalled', itemId: head.id, text: `@${agentId} has not started #${head.id}, ready at the head of its queue for over ${Math.round(leaseMs / 60_000)} minutes: ${head.title}` });
+            }
+            heads[agentId] = h;
         }
         if (told.has(agentId)) continue;
         told.add(agentId);
@@ -995,6 +1040,17 @@ export function tellReady(book: PlanBook, call: PlanCall, waitsElsewhere: (item:
     }
     if (told.size) book.readyTold = [...told];
     else delete book.readyTold;
+    if (working.length) book.working = working;
+    else delete book.working;
+    if (Object.keys(heads).length) book.heads = heads;
+    else delete book.heads;
+}
+
+/** When the next unclaimed head of a queue counts as stalled (#982), if any does not yet. */
+export function nextWatchDue(book: PlanBook): number | undefined {
+    let min: number | undefined;
+    for (const h of Object.values(book.heads ?? {})) if (!h.stalled && (min === undefined || h.due < min)) min = h.due;
+    return min;
 }
 
 /** Take (remove and return) the notices addressed to `to`, oldest first. */
