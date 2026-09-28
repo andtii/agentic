@@ -1,7 +1,8 @@
 /**
  * The Plan board (#755, PRJ-13): a column for Not assigned, each agent and You — WORKING, then QUEUE in order.
  * Dragging a card assigns or reorders it, with the pointer or the keyboard (Space picks up, arrows move, Space or
- * Enter drops, Escape cancels). Dropping a card an agent is working asks for a handoff note first. Board
+ * Enter drops, Escape cancels). A click, or Enter on a card not picked up, opens its details beside the board (#1037).
+ * Dropping a card an agent is working asks for a handoff note first. Board
  * `docs/design/projects/boards/PlanBoard.dc.html`, docs/design/projects/HANDOFF.md → "Board view".
  */
 import { component, signal, type Define, type JSXElement } from 'sigx';
@@ -34,7 +35,13 @@ export type BoardViewProps =
     & Define.Prop<'planId', string>
     & Define.Prop<'onSelectPlan', (id: string) => void>
     /** New plan from the switcher; absent, it is disabled. */
-    & Define.Prop<'onNewPlan', () => void>;
+    & Define.Prop<'onNewPlan', () => void>
+    /** The item whose details are open (#1037). */
+    & Define.Prop<'openId', number>
+    /** Open an item's details: a click on its card, or Enter when it is not picked up. */
+    & Define.Prop<'onOpen', (id: number) => void>
+    /** The open item's detail panel, beside the columns. */
+    & Define.Prop<'detail', () => JSXElement | null>;
 
 interface Drag {
     readonly id: number;
@@ -104,6 +111,9 @@ export const BoardView = component<BoardViewProps>(({ props }) => {
                 const slot = startSlot(item, columns());
                 st.drag = { id: item.id, slot, keyboard: true };
                 st.said = `Picked up #${item.id}. Arrow keys move it, Space drops, Escape cancels.`;
+            } else if (e.key === 'Enter' && !drag) {
+                e.preventDefault();
+                props.onOpen?.(item.id);
             }
             return;
         }
@@ -171,6 +181,7 @@ export const BoardView = component<BoardViewProps>(({ props }) => {
                     data-state={item.state}
                     data-working={isWorking(item, props.now) ? '' : undefined}
                     data-lifted={lifted ? '' : undefined}
+                    data-open={props.openId === item.id ? '' : undefined}
                     tabIndex={0}
                     role="button"
                     aria-roledescription="draggable plan item"
@@ -179,6 +190,7 @@ export const BoardView = component<BoardViewProps>(({ props }) => {
                     draggable={true}
                     onDragStart={(e: DragEvent) => onDragStart(item, e)}
                     onDragEnd={onDragEnd}
+                    onClick={() => { if (!st.drag) props.onOpen?.(item.id); }}
                     onKeyDown={(e: KeyboardEvent) => onCardKey(item, e)}
                 >
                     <span data-plan-card-top>
@@ -251,6 +263,7 @@ export const BoardView = component<BoardViewProps>(({ props }) => {
         const pending = st.pending ? itemOf(st.pending.id) : undefined;
         const owner = pending?.claim ? props.lookup(pending.claim.agentId).name : pending?.assignee ? nameOf(pending.assignee) : '';
         const base = `/projects/${props.projectId}/plan`;
+        const detail = props.detail?.() ?? null;
         return (
             <section aria-label="Plan board" data-plan-board="">
                 <header data-plan-board-top>
@@ -261,11 +274,12 @@ export const BoardView = component<BoardViewProps>(({ props }) => {
                                 ? <PlanSwitcher compact plans={props.plans} current={props.plans.find((p) => p.id === props.planId)} onSelect={(id: string) => props.onSelectPlan?.(id)} {...(props.onNewPlan ? { onNew: props.onNewPlan } : {})} />
                                 : null}
                         </div>
-                        <p data-plan-board-lede>Board by agent. Drag a card to assign it; the order in a column is the order they work.</p>
+                        <p data-plan-board-lede>Board by agent. Open a card for its details; drag it to assign it. The order in a column is the order they work.</p>
                     </div>
                     {PlanViews(props.projectId, 'board', follow, props.plans && props.plans.length > 1 ? props.planId : undefined)}
                 </header>
 
+                <div data-plan-board-body data-detail={detail ? 'open' : 'closed'}>
                 <div data-plan-board-columns data-dragging={st.drag ? '' : undefined}>
                     {cols.map((col) => (
                         <section
@@ -289,6 +303,8 @@ export const BoardView = component<BoardViewProps>(({ props }) => {
                             </div>
                         </section>
                     ))}
+                </div>
+                {detail}
                 </div>
 
                 <footer data-plan-board-foot>
