@@ -25,7 +25,7 @@ const agentP = (agentId: AgentId, taskId?: TaskId): Principal => ({ kind: 'agent
 let members: ProjectMembers;
 let settings: Record<string, unknown>;
 let wakes: PlanWake[];
-let reachable: (w: PlanWake) => boolean | { chatId: ChatId };
+let reachable: (w: PlanWake) => boolean | { chatId: ChatId; reached: boolean };
 let app: TestActorApp;
 let Plan: ReturnType<typeof definePlanActor>;
 
@@ -133,13 +133,15 @@ describe('Plan actor: waking addressees', () => {
         expect(wakes.every((w) => w.notices.every((n) => n.kind === 'mention'))).toBe(true);
     });
 
-    it('a chat a wake opened is offered to the next wake of that agent (#1043)', async () => {
+    it.each([true, false])('a chat a wake opened is offered to the next wake of that agent, reached: %s (#1043)', async (reached) => {
         await plan().create({ title: 'P', phases: [{ title: 'One', items: [{ title: 'a' }] }] });
-        reachable = () => ({ chatId: 'chat_opened' as ChatId });
+        reachable = () => ({ chatId: 'chat_opened' as ChatId, reached });
         await plan(user).update(1, { note: 'hey', mentions: [LINT] });
         expect(wakes.at(-1)!.chats).toEqual([]);
         await plan(user).update(1, { note: 'again', mentions: [LINT] });
         expect(wakes.at(-1)!.chats).toEqual(['chat_opened']);
+        // Not reached: the notices still wait for Lint's next plan call.
+        expect((await plan(agentP(LINT)).takeNotices()).length).toBe(reached ? 0 : 2);
     });
 
     it('a wake that throws leaves the notice waiting and never fails the call', async () => {

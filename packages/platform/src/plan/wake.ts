@@ -39,12 +39,15 @@ export interface PlanWake {
 }
 
 export interface PlanWakePort {
-    /**
-     * Wake `wake.to` with its notices; truthy when they reached it (they are then taken off the actor) — `{ chatId }`
-     * when it opened a chat to do so, which the actor offers again next time (#1043).
-     */
-    wake(wake: PlanWake): Promise<boolean | { readonly chatId: ChatId }>;
+    /** Wake `wake.to` with its notices: whether they reached it (they are then taken off the actor). */
+    wake(wake: PlanWake): Promise<PlanWakeResult>;
 }
+
+/**
+ * `true` when the notices reached their addressee. `{ chatId, reached }` when the wake opened a chat for it (#1043): the
+ * actor keeps that chat and offers it next time, whether or not this post got through — so a retry opens no second one.
+ */
+export type PlanWakeResult = boolean | { readonly chatId: ChatId; readonly reached: boolean };
 
 /** The notices a person caused, which open a chat with an agent no other chat reaches (#1043). */
 const OPENS_CHAT: ReadonlySet<PlanNotice['kind']> = new Set(['answer', 'mention']);
@@ -156,10 +159,15 @@ export function chatPlanWake(options: ChatPlanWakeOptions = {}): PlanWakePort {
             const { chatId } = await actor(Workspace, workspaceKey(workspaceId))
                 .with({ context: driver })
                 .createChat({ projectId, title: `Plan #${notices.find((n) => OPENS_CHAT.has(n.kind))!.itemId}` });
-            const chat = chatOf(chatId);
-            await chat.addAgent(agentId, 'all');
-            await chat.setCoordinator(agentId);
-            return (await postIn(chatId)) ? { chatId } : false;
+            try {
+                const chat = chatOf(chatId);
+                await chat.addAgent(agentId, 'all');
+                await chat.setCoordinator(agentId);
+                return { chatId, reached: await postIn(chatId) };
+            } catch (error) {
+                console.warn(`[plan] posting to the chat opened for ${agentId} failed:`, error);
+                return { chatId, reached: false };
+            }
         }
     };
 }

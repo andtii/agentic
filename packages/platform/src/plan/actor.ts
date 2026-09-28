@@ -289,6 +289,7 @@ export function definePlanActor(options: PlanActorOptions = {}) {
         const byTo = new Map<string, PlanNotice[]>();
         for (const n of fresh) byTo.set(labelOf(n.to), [...(byTo.get(labelOf(n.to)) ?? []), n]);
         const woken = new Set<number>();
+        let opened = false;
         for (const notices of byTo.values()) {
             const tasks: TaskId[] = [];
             const chats: ChatId[] = [];
@@ -308,13 +309,16 @@ export function definePlanActor(options: PlanActorOptions = {}) {
             add(chats, s.wakeChats?.[label]);
             try {
                 const reached = await wakePort.wake({ workspaceId: s.workspaceId, projectId: s.projectId, to: notices[0]!.to, notices, tasks, chats });
-                if (reached) for (const n of notices) woken.add(n.seq);
-                if (typeof reached === 'object') (s.wakeChats ??= {})[label] = reached.chatId;
+                if (reached === true || (typeof reached === 'object' && reached.reached)) for (const n of notices) woken.add(n.seq);
+                if (typeof reached === 'object') {
+                    (s.wakeChats ??= {})[label] = reached.chatId;
+                    opened = true;
+                }
             } catch (error) {
                 console.warn(`[plan] waking ${labelOf(notices[0]!.to)} failed:`, error);
             }
         }
-        if (!woken.size) return;
+        if (!woken.size && !opened) return;
         s.notices = s.notices.filter((n) => !woken.has(n.seq));
         await ctx.save();
     };

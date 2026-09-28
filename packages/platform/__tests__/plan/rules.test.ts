@@ -328,6 +328,13 @@ describe('a question for a person (#1043)', () => {
         expect(itemView(b, itemOf(b, 1), T0).ask).toMatchObject({ by: agent(FORGE), text: 'keep a2a as its own kind?' });
     });
 
+    it('the manager asking on a member’s claimed item does not take the member’s task', () => {
+        const b = book();
+        claim(b, call(agent(FORGE)), 1, { taskId: 't_1' as never });
+        update(b, call(agent(PM), { taskId: 't_pm' as never }), 1, { state: 'needs-you', note: 'ok to ship?' });
+        expect(itemOf(b, 1).ask).toEqual({ by: agent(PM), text: 'ok to ship?', at: T0, taskId: 't_pm' });
+    });
+
     it('an agent asking from a task without a claim records the call’s task', () => {
         const b = book();
         assign(b, call(person), 1, agent(FORGE));

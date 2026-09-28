@@ -891,7 +891,8 @@ export function update(book: PlanBook, call: PlanCall, itemId: number, patch: Pl
     else if (state !== undefined && state !== item.state) {
         const was = item.state;
         const agent = item.claim?.agentId;
-        const askTask = item.claim?.taskId ?? call.taskId;
+        // The asker's own task: its claim's, else the one it calls from — never another agent's.
+        const askTask = (actor.kind === 'agent' && item.claim?.agentId === actor.agentId ? item.claim.taskId : undefined) ?? call.taskId;
         delete item.claim;
         delete item.finishedClaim;
         if (was === 'done') delete item.handedOff;
