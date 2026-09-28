@@ -25,6 +25,7 @@ export const PM_PLAYBOOK = [
     'You are the project manager of this project. Your job:',
     '- Own the Plan: keep its phases and items current, with a clear done-when on every item.',
     "- Assign by queue and limit: give work to members in their queue order, never above a member's working limit.",
+    "- Start the members: once you fill or change a member's queue, tell it in the chat with a `chat_post` that mentions it, and ask it to work through its queue until the queue is empty or an item needs a person. Use `delegate` for work you need back as a result.",
     '- Triage requests from other projects: judge the kind and priority, reproduce what you can, link similar items, propose an item, and reply to the sender.',
     '- Keep the person in the loop: say what changed and what needs them, briefly, and ask when the policy says to.',
     '- Never raise a priority above what the policy lets you set alone: high and urgent always go to a person.'
@@ -43,9 +44,22 @@ export function suggestPmName(projectId: string): string {
     return PM_NAME_SUGGESTIONS[h % PM_NAME_SUGGESTIONS.length]!;
 }
 
-/** The tools a manager is granted: the `plan_*` and `requests_*` families, and `projects_request`. */
+/** The chat tools a manager starts members with (#975): `chat_post` mentions one, `delegate` hands it work to return. */
+export const PM_CHAT_TOOLS = ['chat_post', 'delegate'] as const;
+
+/** The tools a manager is granted: the `plan_*` and `requests_*` families, `projects_request`, and `chat_post` and `delegate`. */
 export function pmTools(): ToolGrant[] {
-    return [...PLAN_TOOLS, ...REQUEST_TOOLS].map((name) => ({ name }));
+    return [...PLAN_TOOLS, ...REQUEST_TOOLS, ...PM_CHAT_TOOLS].map((name) => ({ name }));
+}
+
+/**
+ * `config` with every `pmTools()` grant it lacks appended (#975): routing applies it when a session starts for a
+ * project's manager, so a manager written before a tool joined `pmTools()` gets it without a new config version.
+ * Grants it already has, and any others, are kept as they are.
+ */
+export function withPmTools<C extends { readonly tools: readonly ToolGrant[] }>(config: C): C {
+    const missing = pmTools().filter((g) => !config.tools.some((t) => t.name === g.name));
+    return missing.length ? { ...config, tools: [...config.tools, ...missing] } : config;
 }
 
 /** The playbook, then the personality paragraph. */
@@ -100,7 +114,7 @@ export function checkedPmSpec(spec: unknown): ProjectManagerSpec {
 
 /**
  * The manager's `AgentConfig` for `project` (pure): role `Project manager`, the spec's name (a suggestion when
- * none), the playbook then the personality, the spec's skills, the plan and requests tools, the platform runtime,
+ * none), the playbook then the personality, the spec's skills, `pmTools()`, the platform runtime,
  * and the project's other members as collaborators. Throws `PmSpecError` for a spec it cannot write.
  */
 export function projectManagerConfig(project: Pick<ProjectRecord, 'id' | 'name' | 'members' | 'pm'>, spec: ProjectManagerSpec): AgentConfig {

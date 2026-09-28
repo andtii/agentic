@@ -97,6 +97,7 @@ import { freeSlots, machineKey, runningIn, type FsResultView, type MachineView, 
 import { isInterruptedTurnEnd, resumeTurnId, SESSION_PAGE_TYPE, SESSION_TRANSCRIPT_PAGE_TYPE, sessionPageKey, transcriptPageKey, type SessionCommandResult, type SessionInfo, type SessionOpenSpec, type SessionRequestView } from '../session/index.js';
 import { TaskActor, taskKey, type TaskOutcome, type TaskView } from '../task/index.js';
 import { Workspace } from '../workspace/index.js';
+import { withPmTools } from '../workspace/project-manager.js';
 import { FALLBACK_RUNTIME } from '../registry/dependents.js';
 import { registryKey } from '../registry/key.js';
 import type { RegistryGate } from '../registry/types.js';
@@ -1361,6 +1362,8 @@ export function defineRoutingActor(ports: RoutingPorts) {
                     }
                     // The task's project (#332), read once here: gone from the Workspace → the task fails, visibly (EXE-12); its connectors join the gate.
                     const { project, error: projectError } = await projectOf(t);
+                    // The project's manager gets the manager tools it lacks (#975): one written before `chat_post` joined them still starts members.
+                    if (project?.pm?.agentId === t.assignee) config = withPmTools(config);
                     // The plugin behind the runtime, asked once and before anything is written (§9, AC-13); the answer rides on the route and the spec.
                     const gated = projectError ? {} : await gate(runtime, undefined, connectorIds(config, project));
                     const host = hostOf(runtime);

@@ -9,7 +9,7 @@ import { AuditActor, auditKey } from '../../src/audit/index';
 import { workspaceKey } from '../../src/auth/index';
 import { statusOf, testActorApp, userPrincipal, type TestActorApp } from '../../src/testing/index';
 import { Workspace } from '../../src/workspace/index';
-import { DEFAULT_PM_SPEC, PM_PLAYBOOK, PM_ROLE, pmCoordinatorError, projectManagerConfig, suggestPmName } from '../../src/workspace/project-manager';
+import { DEFAULT_PM_SPEC, PM_CHAT_TOOLS, PM_PLAYBOOK, PM_ROLE, pmCoordinatorError, projectManagerConfig, suggestPmName, withPmTools } from '../../src/workspace/project-manager';
 
 const WS = 'u1' as WorkspaceId;
 const owner = userPrincipal('u1');
@@ -41,8 +41,23 @@ describe('projectManagerConfig (#784)', () => {
         expect(config).toMatchObject({ name: 'Nova', role: PM_ROLE, skills: [{ id: 'triage' }], execution: { runtime: 'anthropic-api' }, collaborators: ['agent_a'] });
         expect(config.instructions.startsWith(PM_PLAYBOOK)).toBe(true);
         expect(config.instructions.endsWith(coach.instructions)).toBe(true);
-        expect(config.tools.map((t) => t.name)).toEqual([...PLAN_TOOLS, ...REQUEST_TOOLS]);
+        expect(config.tools.map((t) => t.name)).toEqual([...PLAN_TOOLS, ...REQUEST_TOOLS, ...PM_CHAT_TOOLS]);
         expect(config.tools.map((t) => t.name)).toContain('projects_request');
+    });
+
+    it('grants chat_post and delegate, and the playbook says to start members with a chat_post mention (#975)', () => {
+        const config = projectManagerConfig(project, DEFAULT_PM_SPEC);
+        expect(config.tools.map((t) => t.name)).toEqual(expect.arrayContaining(['chat_post', 'delegate']));
+        expect(PM_PLAYBOOK).toContain('`chat_post` that mentions it');
+    });
+
+    it('withPmTools appends only the manager tools a config lacks, keeping its own grants and a deny (#975)', () => {
+        const config = { tools: [{ name: 'plan_next' }, { name: 'chat_post', mode: 'deny' as const }, { name: 'web_fetch' }] };
+        const out = withPmTools(config);
+        expect(out.tools.slice(0, 3)).toEqual(config.tools);
+        expect(out.tools.filter((t) => t.name === 'chat_post')).toEqual([{ name: 'chat_post', mode: 'deny' }]);
+        expect(out.tools.map((t) => t.name)).toContain('delegate');
+        expect(withPmTools(out)).toBe(out);
     });
 
     it('suggests a stable name when none is given, and takes custom personality text', () => {
