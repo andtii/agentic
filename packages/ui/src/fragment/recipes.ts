@@ -19,6 +19,7 @@
  * without loading the sigx runtime.
  */
 import type { RecipeInput } from '@sigx/zero-kit';
+import { teamRecipes } from '../team/recipes.js';
 
 const motion = 'var(--duration-fast) var(--ease-standard)';
 const mono = 'var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace)';
@@ -947,4 +948,4 @@ const shell: RecipeInput = {
     }
 };
 
-export const recipes: readonly RecipeInput[] = [thread, message, toolCall, reasoning, approval, question, composer, form, shell, steps, liveLine];
+export const recipes: readonly RecipeInput[] = [thread, message, toolCall, reasoning, approval, question, composer, form, shell, steps, liveLine, ...teamRecipes];

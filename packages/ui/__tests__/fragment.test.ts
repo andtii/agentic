@@ -12,7 +12,7 @@ describe('the ai-* fragment', () => {
     it('owns the seven transcript scopes of the architecture and the kit ag-* scopes, vendor-prefixed', () => {
         expect(fragment.package).toBe('@agentic/ui');
         expect(SCOPES.slice(0, 7)).toEqual(['ai-thread', 'ai-message', 'ai-tool-call', 'ai-reasoning', 'ai-approval', 'ai-question', 'ai-composer']);
-        expect(SCOPES.slice(7)).toEqual(['ag-env-line', 'ag-needs-item', 'ag-task-node', 'ag-connection', 'ag-version', 'ag-env-card', 'ag-banner', 'ag-workdir', 'ag-workdir-picker', 'ag-readiness', 'ag-secret', 'ag-map-field', 'ag-quota', 'ag-quota-panel', 'ag-quota-rings', 'ag-markdown', 'ag-code', 'ag-status-tile', 'ag-diff-counts', 'ag-changes', 'ag-file-tree', 'ag-find', 'ag-session-bar', 'ag-file-header', 'ag-line-composer', 'ai-form', 'ai-shell', 'ai-steps', 'ai-live-line']);
+        expect(SCOPES.slice(7)).toEqual(['ag-env-line', 'ag-needs-item', 'ag-task-node', 'ag-connection', 'ag-version', 'ag-env-card', 'ag-banner', 'ag-workdir', 'ag-workdir-picker', 'ag-readiness', 'ag-secret', 'ag-map-field', 'ag-quota', 'ag-quota-panel', 'ag-quota-rings', 'ag-markdown', 'ag-code', 'ag-status-tile', 'ag-diff-counts', 'ag-changes', 'ag-file-tree', 'ag-find', 'ag-session-bar', 'ag-file-header', 'ag-line-composer', 'ai-form', 'ai-shell', 'ai-steps', 'ai-live-line', 'ai-crew', 'ai-handoff', 'ai-work-card', 'ai-folded-talk', 'ai-lane', 'ai-follow']);
         for (const scope of SCOPES) expect(scope).toMatch(/^a[ig]-/);
     });
 

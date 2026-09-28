@@ -37,7 +37,8 @@ export type StepsProps =
      */
     & Define.Prop<'now', number, false>;
 
-const StepLine = component<Define.Prop<'step', TranscriptStep, true> & Define.Prop<'fullHref', StepHrefFn, false> & Define.Prop<'now', number, false>>(({ props }) => () => {
+/** One step line of the box (`ai-steps` `step`); the team parts (#1057) reuse it inside an `ai-steps` `list`. */
+export const StepLine = component<Define.Prop<'step', TranscriptStep, true> & Define.Prop<'fullHref', StepHrefFn, false> & Define.Prop<'now', number, false>>(({ props }) => () => {
     const step = props.step;
     const look = stepLook(step.state);
     const result = stepResult(step);
