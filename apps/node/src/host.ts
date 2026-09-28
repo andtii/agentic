@@ -11,7 +11,7 @@
  *
  * `fetch` serves every HTTP route in the Worker's order (`entry.cloudflare.ts`):
  *
- *     local owner / dev login / auth / A2A / files / connectors  ->  actor mount (`/_sigx/actor`)
+ *     local owner / dev login / auth / A2A / files / connectors  ->  daemon path refusal  ->  actor mount (`/_sigx/actor`)
  *                    ->  `fallback` (server functions, then the document render)
  *
  * The local owner's claim link and passphrase login (#989) come first when a
@@ -19,6 +19,10 @@
  * `X-Forwarded-Proto: https`) the auth cookies travel as `agentic-*` instead
  * of `__Host-*` — `fetch` and `openActorSocket` rename them at this edge with
  * `@agentic/platform`'s cookie-prefix seam, so a LAN address can sign in.
+ *
+ * A plain-HTTP request on the daemon socket path gets `identifyDaemon`'s
+ * refusal (426, as the Worker answers, #1008) — the upgrade itself is the
+ * server's (`daemon` below), so nothing on that path reaches the actor mount.
  *
  * Static assets are the server's (`server.ts`), before this. The sockets are
  * transport-free here: `openActorSocket` builds the `@sigx/actors` socket
@@ -35,7 +39,7 @@ import { devLoginEnabled, devLoginRouteFor } from '../../web/src/auth/dev-login'
 import { createAuthMount, githubEnabled } from '../../web/src/auth/mount';
 import { setSignInOptions } from '../../web/src/auth/sign-in';
 import { createConnectorMount } from '../../web/src/connectors/routes';
-import { DAEMON_PING, identifyDaemon, verifyDaemonToken, type DaemonIdentity } from '../../web/src/daemon';
+import { DAEMON_PING, identifyDaemon, parseDaemonSocketPath, verifyDaemonToken, type DaemonIdentity } from '../../web/src/daemon';
 import { createFilesMount, type WaitUntilLike } from '../../web/src/files/route';
 import { runWithHost } from '../../web/src/host-scope';
 import { createPlatform, machineDefinition, pairingWiring, stampServerApp, type HostPorts, type PlatformPorts } from '../../web/src/platform.app';
@@ -147,6 +151,13 @@ export async function createNodeHost(options: NodeHostOptions): Promise<NodeHost
             ? createLocalOwnerRoutes({ store: options.localOwner, secret: env.SESSION_SECRET, ...(options.passphraseIterations ? { iterations: options.passphraseIterations } : {}) })
             : null;
 
+    // The daemon socket is upgraded by the server (`daemon`); a request that reaches `fetch` on its path is refused as the Worker does.
+    const daemonRefusal = (request: Request): Response | null => {
+        if (parseDaemonSocketPath(new URL(request.url).pathname) === null) return null;
+        const who = identifyDaemon(request);
+        return who instanceof Response ? who : Response.json({ error: 'upgrade_required', detail: 'the daemon socket is a WebSocket' }, { status: 426 });
+    };
+
     const asMachine = (who: DaemonIdentity) => host.actor(Machine, who.key).with({ context: asPrincipal(machinePrincipal(who.workspaceId, who.machineId)) });
 
     return {
@@ -168,7 +179,7 @@ export async function createNodeHost(options: NodeHostOptions): Promise<NodeHost
                     a2aRoute(request, env) ??
                     filesRoute(request, env, ctx) ??
                     connectorsRoute(request, env);
-                const response = await (route ? route(request) : actorFetch(request));
+                const response = await (route ? route(request) : daemonRefusal(request) ?? actorFetch(request));
                 return plain ? plainCookieResponse(response) : response;
             });
         },

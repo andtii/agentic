@@ -5,7 +5,6 @@ import { DAEMON_PROTOCOL_VERSION } from '@agentic/daemon-protocol';
 import { IN_MEMORY_CAPABILITIES, inMemoryEnvironment } from '@agentic/daemon-protocol/testing';
 import { Workspace, defineMachineActor, machineKey, workspaceKey } from '@agentic/platform';
 import { fetchTransport } from '@sigx/actors/client';
-import { onWorkerd } from './host-kind';
 import { overHttp, signInElevated } from './http';
 
 const userId = 'gh_daemon';
@@ -100,8 +99,8 @@ describe('worker: daemon socket on the Machine Durable Object', () => {
         // Right shape, wrong secret: the hash does not match.
         const forged = m.token.slice(0, -1) + (m.token.endsWith('A') ? 'B' : 'A');
         expect((await connect(m.machineId, forged)).status).toBe(401);
-        // Not a WebSocket upgrade: the Worker answers 426; the Node host has no plain-HTTP daemon route (404, #1008).
-        expect((await SELF.fetch(`${ORIGIN}/_agentic/daemon/${m.machineId}`, { headers: { authorization: `Bearer ${m.token}` } })).status).toBe(onWorkerd ? 426 : 404);
+        // Not a WebSocket upgrade: 426 on either host (#1008).
+        expect((await SELF.fetch(`${ORIGIN}/_agentic/daemon/${m.machineId}`, { headers: { authorization: `Bearer ${m.token}` } })).status).toBe(426);
 
         expect((await connect(m.machineId, m.token)).status).toBe(101);
         await m.machine.revoke();
