@@ -2,7 +2,7 @@ import '@agentic/ui/register';
 import { defineApp } from 'sigx';
 import { installThemes } from '@agentic/ui/design-system';
 import { actorsPlugin } from '@sigx/actors/app';
-import { platformDefs } from './actors.app';
+import { platformDefs } from './actors.cloudflare';
 import { useActorDefs, useViewer } from './actors/defs';
 import { viewerHook } from './actors/viewer';
 import { App } from './App';

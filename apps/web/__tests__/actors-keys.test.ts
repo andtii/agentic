@@ -1,7 +1,7 @@
 import { ledgerKey, ledgerMonth, memoryActorKey, registryKey, taskIndexKey } from '@agentic/platform';
 import { ledgerKeyOf, ledgerMonthOf, memoryKeyOf, registryKeyOf, taskIndexKeyOf } from '../src/actors/keys';
 import { clientDefs } from '../src/actors/client';
-import { platformDefs } from '../src/actors.app';
+import { platformDefs } from '../src/actors.cloudflare';
 
 describe('actor keys (#150)', () => {
     it('spell the platform keys exactly', () => {

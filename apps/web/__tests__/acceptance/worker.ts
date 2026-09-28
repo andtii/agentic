@@ -11,7 +11,7 @@ import { ANTHROPIC_API_PLUGIN_ID, CLAUDE_CODE_PLUGIN_ID } from '@agentic/runtime
 import type { RuntimeCatalogue } from '@agentic/platform';
 import { allowAll } from '@sigx/ai-agent';
 import { mockAgent } from '@sigx/ai-agent/testing';
-import { createActorHost, createActorWorker, defaultPorts, platformActors, type PlatformEnv } from '../../src/actors.app';
+import { createActorHost, createActorWorker, defaultPorts, platformActors, type PlatformEnv } from '../../src/actors.cloudflare';
 import { createDevLoginRoute, DEV_LOGIN_PATH } from '../../src/auth/dev-login';
 import { pluginCatalogue } from '../../src/plugins/catalogue';
 import { runWithHost } from '../../src/host-scope';

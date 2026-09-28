@@ -1,21 +1,14 @@
 /**
- * The platform actor app on Cloudflare (architecture §3, issue #33).
+ * The platform actor wiring, host-neutral (architecture §3 "Hosts", issues #33, #987).
  *
- * One registry, two halves of one bundle:
- *
- * - `ActorHost` — the Durable Object class. One object per actor, SQLite
- *   backed; `createHostDurableObject` derives `durableObjectStorage()` and
- *   `durableObjectReminders()` from the object's own state, and terminates
- *   client sockets inside the object (`socket`), hibernation-ready. A
- *   Machine's object also accepts its daemon's socket (`src/daemon`, #36).
- * - `createActorWorker()` — the Worker half: the HTTP actor mount
- *   (`/_sigx/actor`), the forwarded socket upgrade
- *   (`/_sigx/socket/{type}/{key}`), the daemon upgrade
- *   (`/_agentic/daemon/{machineId}`), everything else to `fallback`.
- *
- * Both halves stamp the same server app (`authenticate` + principal `codec`)
- * on first use, so a principal resolved in the Worker survives the hop into
- * the object and every `ctx.actor()` call after it.
+ * `createPlatform(host)` builds the actor registry over a host's `HostPorts` —
+ * its secrets, its chat-file bucket, its artifact sink, its workspace store,
+ * its daemon sockets and its host scope. Nothing here imports
+ * `@sigx/actors-cloudflare` or `cloudflare:*`: `actors.cloudflare.ts` builds
+ * the ports from the Worker's `env` and adds the `ActorHost` Durable Object
+ * and the Worker half; another host (Node) builds its own ports and reuses
+ * this file verbatim. `stampServerApp` stamps the server app (`authenticate`
+ * + principal `codec`) every host half shares.
  *
  * Plugins (#231): the Registry lists the build's plugins (`src/plugins/
  * catalogue.ts`); the Session factory and the Routing actor share one
@@ -90,6 +83,7 @@ import {
     serverAuth,
     userPrincipal,
     type MachineActor,
+    type MachineSocketPort,
     type NotificationChannel,
     type ChannelCatalogue,
     type CatalogueEntry,
@@ -115,44 +109,43 @@ import {
 } from '@agentic/platform';
 import { learningDefaultPlugin } from '@agentic/learning';
 import { actor, type AnyActorDefinition, type Host } from '@sigx/actors';
-import { defineActorApp, type ActorApp } from '@sigx/actors/host';
-import { createFetchHandler } from '@sigx/actors/server';
-import { createHostDurableObject, durableObjectStubResolver, durableObjects, objectSocketRoute, unhostedStorage, type DurableObjectNamespaceLike, type DurableObjectStateLike, type DurableWebSocketLike } from '@sigx/actors-cloudflare';
 import { createServerApp, setPrincipal } from '@sigx/server/server';
 import type { ActorDefs } from './actors/defs';
 import type { AuthWiring } from './auth';
-import { actorKeyOfObject, createDaemonSocketHost, createDaemonSocketRegistry, forwardDaemonSocket, DAEMON_SOCKET_PREFIX } from './daemon';
-import { r2ChatFileStore } from './files/store';
+import { r2ChatFileStore, type R2ChatFileStore } from './files/store';
 import { connectorTrigger } from './connectors/trigger';
 import type { ConnectorHttp } from './connectors/engine';
 import { channelCatalogue, connectorOpener, learningCatalogue, memoryCatalogue, pluginCatalogue, projectFeatureCatalogue, runtimeCatalogue } from './plugins/catalogue';
-import { createPurgeHandler, durableObjectWorkspaceStore, r2ArtifactSink, type R2BucketLike } from './retention';
-import { runWithHost } from './host-scope';
-import { observeSlowTurns } from './actors/slow-turns';
+import type { R2BucketLike } from './retention';
 import { githubPullSources, githubRequestIssues, pullsAutopilot, pullsPlacement } from './actors/pulls';
 
-export { DAEMON_SOCKET_PREFIX };
-
-/** Bindings and secrets the worker reads (wrangler.jsonc; secrets via `wrangler secret put`). */
-export interface PlatformEnv {
-    /** The one Durable Object namespace — every actor is an `ActorHost` object. */
-    readonly ACTORS: DurableObjectNamespaceLike;
-    /** Artifacts and exports (`Workspace.exportAll`); chat attachments under `files/` (`src/files`, #207). */
-    readonly ARTIFACTS?: R2BucketLike;
-    /** ≥ 32 chars; signs `__Host-session`, OAuth transients and agent tokens. Absent → every call is anonymous. */
-    readonly SESSION_SECRET?: string;
-    readonly GITHUB_CLIENT_ID?: string;
-    readonly GITHUB_CLIENT_SECRET?: string;
+/** The deployment secrets the wiring reads — thunks, since a host may learn them only with its first request. */
+export interface HostSecrets {
+    /** ≥ 32 chars when set; signs sessions, OAuth transients and agent tokens. */
+    sessionSecret(): string | undefined;
     /** base64, 32 bytes — `importWorkspaceKek`. */
-    readonly WORKSPACE_KEK?: string;
+    workspaceKek(): string | undefined;
     /** Public origin, e.g. `https://agentic.example`. */
-    readonly APP_ORIGIN?: string;
-    /**
-     * PREVIEW ONLY (#35): when set (≥ 16 chars), `POST /auth/dev-login` mints a
-     * `dev_<user>` session for a caller presenting it, so a scripted walk-through
-     * can sign in without GitHub. Never set it on production; unset → no route.
-     */
-    readonly AGENTIC_DEV_LOGIN?: string;
+    appOrigin(): string | undefined;
+}
+
+/**
+ * What a host gives the platform wiring (#987): everything the actor registry needs that is not the
+ * same on every host. Cloudflare builds it from `env` (`actors.cloudflare.ts`); a Node host from its own
+ * config, disk and sockets.
+ */
+export interface HostPorts {
+    readonly secrets: HostSecrets;
+    /** The bucket chat attachments live in (`files/`, #207) — read at call time. */
+    readonly files: () => R2BucketLike | undefined;
+    /** Where `Workspace.exportAll` writes. */
+    readonly artifacts: ArtifactSink;
+    /** How `Workspace.deleteAll` (and a "new session") purges a record. */
+    readonly workspaceStore: WorkspaceStore;
+    /** The daemon sockets the Machine actor sends through. */
+    readonly daemonSockets: MachineSocketPort;
+    /** Run `fn` with every ambient `actor()` inside resolving through `host` (#137). */
+    readonly runWithHost: <T>(host: Host | (() => Host | undefined), fn: () => T) => T;
 }
 
 /** The seams an app (or a test) may override; the defaults are the real wiring. */
@@ -199,34 +192,40 @@ export interface PlatformPorts {
     readonly pulls?: PullSourcePort;
 }
 
-/** Secrets and bindings the actor registry reads lazily: it is built once per isolate, before any request carries `env`. */
-const secrets: { sessionSecret?: string; workspaceKek?: string; appOrigin?: string; actors?: DurableObjectNamespaceLike; artifacts?: R2BucketLike } = {};
+/** A host's platform: its chat file store, its default ports and the actor registry over them. */
+export interface Platform {
+    /**
+     * The deployment's chat file store (#207): the host's bucket under `files/`. One per
+     * isolate — the actors' ports and the upload routes (`src/files/route.ts`) share it,
+     * and so may any other route that serves chat files (the platform MCP server, #209).
+     */
+    readonly files: R2ChatFileStore;
+    /** The real wiring over the host's ports; an app (or a test) overrides any of them. */
+    readonly defaultPorts: PlatformPorts;
+    /** Every platform actor this deployment hosts. */
+    actors(ports?: PlatformPorts): readonly AnyActorDefinition[];
+}
 
-/**
- * The deployment's chat file store (#207): R2, the `ARTIFACTS` bucket under `files/`. One per
- * isolate — the actors' ports and the Worker's upload routes (`src/files/route.ts`) share it,
- * and so may any other Worker route that serves chat files (the platform MCP server, #209).
- */
-export const platformFiles = r2ChatFileStore(() => secrets.artifacts);
+/** Build the platform over a host's ports (#987). */
+export function createPlatform(host: HostPorts): Platform {
+    const files = r2ChatFileStore(host.files);
+    const defaultPorts: PlatformPorts = {
+        sink: host.artifacts,
+        files,
+        store: host.workspaceStore,
+        // Throws before the import when the secret is missing, so the Registry does not cache the refusal.
+        kek: () => {
+            const workspaceKek = host.secrets.workspaceKek();
+            if (!workspaceKek) throw new RegistryError('no-kek', '[actors.app] WORKSPACE_KEK is not set: secrets cannot be stored (wrangler secret put WORKSPACE_KEK)');
+            return importWorkspaceKek(workspaceKek);
+        },
+        // Web Push is a notification plugin (#244): `channelPlugins`, opened per workspace while its plugin is on.
+        channels: []
+    };
+    return { files, defaultPorts, actors: (ports = defaultPorts) => platformActors(host, defaultPorts, ports) };
+}
 
-export const defaultPorts: PlatformPorts = {
-    sink: r2ArtifactSink(() => secrets.artifacts),
-    files: platformFiles,
-    store: durableObjectWorkspaceStore({ namespace: () => secrets.actors, secret: () => secrets.sessionSecret }),
-    // Throws before the import when the secret is missing, so the Registry does not cache the refusal.
-    kek: () => {
-        if (!secrets.workspaceKek) throw new RegistryError('no-kek', '[actors.app] WORKSPACE_KEK is not set: secrets cannot be stored (wrangler secret put WORKSPACE_KEK)');
-        return importWorkspaceKek(secrets.workspaceKek);
-    },
-    // Web Push is a notification plugin (#244): `channelPlugins`, opened per workspace while its plugin is on.
-    channels: []
-};
-
-/** The daemon sockets every Machine object in this isolate holds — the Machine actor's `MachineSocketPort`. */
-export const daemonSockets = createDaemonSocketRegistry();
-
-/** Every platform actor this deployment hosts. */
-export function platformActors(ports: PlatformPorts = defaultPorts): readonly AnyActorDefinition[] {
+function platformActors(host: HostPorts, defaultPorts: PlatformPorts, ports: PlatformPorts): readonly AnyActorDefinition[] {
     // Session, Machine and Routing reference each other: every cross-reference is a thunk resolved at call time.
     // Chat attachments (#207): one store, passed everywhere it is used (architecture §7, "Wiring the file store").
     const files = ports.files ?? defaultPorts.files;
@@ -244,7 +243,7 @@ export function platformActors(ports: PlatformPorts = defaultPorts): readonly An
     const learning = platformLearningPorts({ plugin: learningCatalogue[learningDefaultPlugin.id]!({}), memoryPlugins: memoryCatalogue, learningPlugins: learningCatalogue });
     const memory = (gate: RegistryGate | undefined): SessionMemory => memoryAccess(learning, gate);
     // Conduit connectors (#533): a session's engine names the deployment's callback, though it never begins a sign-in.
-    const runtimes = ports.runtimes ?? runtimeCatalogue({ routing: () => Routing, sessions: () => Session, machines: () => Machine, pulls: () => Pulls, memory, ...withFiles }, { origin: () => secrets.appOrigin });
+    const runtimes = ports.runtimes ?? runtimeCatalogue({ routing: () => Routing, sessions: () => Session, machines: () => Machine, pulls: () => Pulls, memory, ...withFiles }, { origin: host.secrets.appOrigin });
     const Session = defineSessionActor({
         factory: ports.factory ?? createSessionFactory({ routing: () => Routing, sessions: () => Session, machines: () => Machine, pulls: () => Pulls, registry, runtimes, ...withFiles }),
         commands: { send: (t, command) => actor(Machine, machineKey(t.workspaceId, t.machineId)).with({ context: asPrincipal(userPrincipal(t.workspaceId, t.workspaceId)) }).sendCommand(t.sessionId, command) },
@@ -265,13 +264,13 @@ export function platformActors(ports: PlatformPorts = defaultPorts): readonly An
     // Daemon updates (#365): the global release directory every Machine compares its daemon against; update notices go to the Inbox.
     const Releases = defineReleaseDirectory(ports.releasesFetch ? { fetch: ports.releasesFetch } : {});
     const Machine: MachineActor = defineMachineActor({
-        socket: daemonSockets.port,
+        socket: host.daemonSockets,
         sessions: () => Session,
         routing: () => Routing,
         releases: () => Releases,
         inbox: () => Inbox,
         // A daemon session's conduit connectors run here, through the opener local sessions use (#534).
-        tools: ports.tools ?? createToolCallPort({ routing: () => Routing, sessions: () => Session, machines: () => Machine, pulls: () => Pulls, registry, memory, connectors: connectorOpener({ origin: () => secrets.appOrigin }), ...withFiles })
+        tools: ports.tools ?? createToolCallPort({ routing: () => Routing, sessions: () => Session, machines: () => Machine, pulls: () => Pulls, registry, memory, connectors: connectorOpener({ origin: host.secrets.appOrigin }), ...withFiles })
     });
     // A firing's task goes to the router (queued, or parked `waiting {environment-offline}` by the trigger for the router to resolve, #42/#37).
     // Fire and forget: the observer never fails a firing, and the Schedule alarm does not wait on the run.
@@ -295,7 +294,7 @@ export function platformActors(ports: PlatformPorts = defaultPorts): readonly An
                     }
                 }),
                 route: (ws, taskId) => route(ws, taskId, 'a connector trigger'),
-                origin: () => secrets.appOrigin,
+                origin: host.secrets.appOrigin,
                 ...(ports.connectorHttp ? { http: ports.connectorHttp } : {})
             })
         });
@@ -322,16 +321,11 @@ export function platformActors(ports: PlatformPorts = defaultPorts): readonly An
     ];
 }
 
-/** The registry this isolate serves — what the OAuth/MCP mount binds its `PlatformPort` to (#50). */
-export function platformRegistry(): readonly AnyActorDefinition[] {
-    return defaultActors();
-}
-
 /**
  * The `POST /auth/pair` wiring over the registry: the anonymous directory
  * lookup, then `Machine.pair` as the machine the code was issued for.
  */
-export function pairingWiring(actors: readonly AnyActorDefinition[] = defaultActors()): NonNullable<AuthWiring['pairing']> {
+export function pairingWiring(actors: readonly AnyActorDefinition[]): NonNullable<AuthWiring['pairing']> {
     const Machine = machineDefinition(actors);
     const anonymous = (): { locals: Record<string, unknown> } => {
         const context = { locals: {} as Record<string, unknown> };
@@ -347,14 +341,8 @@ export function pairingWiring(actors: readonly AnyActorDefinition[] = defaultAct
     };
 }
 
-let shared: readonly AnyActorDefinition[] | undefined;
-/** One registry per isolate, so the Worker, the objects and the `machines` lookup agree on the definitions. */
-function defaultActors(): readonly AnyActorDefinition[] {
-    return (shared ??= platformActors());
-}
-
 /** The definitions the pages read through during SSR (`useActorDefs`, #34): the registry's own objects, picked by type. */
-export function platformDefs(actors: readonly AnyActorDefinition[] = defaultActors()): ActorDefs {
+export function platformDefs(actors: readonly AnyActorDefinition[]): ActorDefs {
     const byType = (type: string): AnyActorDefinition => {
         const def = actors.find((d) => (d as { type: string }).type === type);
         if (!def) throw new Error(`[actors.app] no \`${type}\` actor in the registry`);
@@ -398,21 +386,21 @@ const MIN_SECRET = 32;
 
 let stampedFor: string | undefined;
 
+/** A session secret as the platform takes it: shorter than `MIN_SECRET` is treated as absent. */
+export function sessionSecretOf(value: string | undefined): string | undefined {
+    return value && value.length >= MIN_SECRET ? value : undefined;
+}
+
 /**
- * Stamp `createServerApp` once per isolate (last-wins seam in `@sigx/server`).
- * Without `SESSION_SECRET` the app still decodes principals propagated by a
- * hop but authenticates nobody — fail-closed, never a dev fallback secret.
- * A machine bearer token is checked against the Machine actor's stored hash
- * (`tokenRecord`, read as that machine: the ids in a token are an address,
- * the hash match is the proof).
+ * Stamp `createServerApp` once per isolate (last-wins seam in `@sigx/server`);
+ * a later call with the same secret is a no-op. Without a session secret the
+ * app still decodes principals propagated by a hop but authenticates nobody —
+ * fail-closed, never a dev fallback secret. A machine bearer token is checked
+ * against the Machine actor's stored hash (`tokenRecord`, read as that
+ * machine: the ids in a token are an address, the hash match is the proof).
  */
-export function ensureServerApp(env: PlatformEnv, actors: readonly AnyActorDefinition[] = defaultActors()): void {
-    const secret = env.SESSION_SECRET && env.SESSION_SECRET.length >= MIN_SECRET ? env.SESSION_SECRET : '';
-    secrets.sessionSecret = secret || undefined;
-    secrets.workspaceKek = env.WORKSPACE_KEK || undefined;
-    secrets.appOrigin = env.APP_ORIGIN || undefined;
-    secrets.actors = env.ACTORS;
-    secrets.artifacts = env.ARTIFACTS;
+export function stampServerApp(sessionSecret: string | undefined, actors: readonly AnyActorDefinition[]): void {
+    const secret = sessionSecretOf(sessionSecret) ?? '';
     if (stampedFor === secret) return;
     stampedFor = secret;
     if (secret) {
@@ -432,134 +420,4 @@ export function ensureServerApp(env: PlatformEnv, actors: readonly AnyActorDefin
 /** Test seam: forget the stamp so the next request re-stamps. */
 export function resetServerAppStamp(): void {
     stampedFor = undefined;
-}
-
-const namespace = (env: PlatformEnv): DurableObjectNamespaceLike => env.ACTORS;
-
-/**
- * Build the Durable Object class over `actors`. A Machine's object also
- * accepts its daemon socket: the upgrade at `/_agentic/daemon/{machineId}`
- * is verified against the actor's token hash and accepted under the
- * `agentic:daemon` tag; the hibernation handlers route those sockets to the
- * Machine actor and everything else back to the actor host's own session.
- *
- * Every entry point runs under the object's OWN host (`runWithHost`, #137):
- * `@sigx/actors` resolves an ambient `actor()` through one global that the
- * last-booted object owns, and the platform hops ambiently wherever a call
- * carries its own principal (`actor(def, key).with({ context })` — the
- * Routing driver's clients, `routing().machineOnline`, the tool and learning
- * ports, the Session's command sink). Unscoped, a hop from this object to an
- * actor the last-booted object hosts ran it HERE, on that object's storage.
- * Booting (`this.host()`) happens before the scope is entered: it starts the
- * host and hops nowhere.
- */
-export function createActorHost(actors: readonly AnyActorDefinition[] = defaultActors()) {
-    const Base = createHostDurableObject<PlatformEnv>({ actors: [...actors], namespace, socket: {} });
-    const Machine = machineDefinition(actors);
-    return class ActorHost extends Base {
-        readonly #daemon;
-        readonly #purge;
-        constructor(state: DurableObjectStateLike, env: PlatformEnv) {
-            ensureServerApp(env, actors);
-            super(state, env);
-            const own = actorKeyOfObject(state);
-            if (own?.type === 'machine') daemonSockets.bind(own.key, state);
-            this.#daemon = createDaemonSocketHost({ state, host: () => this.host(), machine: Machine, registry: daemonSockets });
-            this.#purge = createPurgeHandler({ state, host: () => this.host(), own, secret: () => secrets.sessionSecret });
-        }
-        /** The running host, with the slow-turn log attached (#492) — once; the base memoizes the host. */
-        override async host(): Promise<Host> {
-            const host = await super.host();
-            observeSlowTurns(host);
-            return host;
-        }
-        override async fetch(request: Request): Promise<Response> {
-            const host = await this.host();
-            return runWithHost(host, () => this.#purge.fetch(request) ?? this.#daemon.fetch(request) ?? super.fetch(request));
-        }
-        override async webSocketMessage(ws: DurableWebSocketLike, message: unknown): Promise<void> {
-            const host = await this.host();
-            return runWithHost(host, () => (this.#daemon.owns(ws) ? this.#daemon.message(ws, message) : super.webSocketMessage(ws, message)));
-        }
-        override async webSocketClose(ws: DurableWebSocketLike): Promise<void> {
-            const host = await this.host();
-            return runWithHost(host, () => (this.#daemon.owns(ws) ? this.#daemon.close(ws) : super.webSocketClose(ws)));
-        }
-        override async webSocketError(ws: DurableWebSocketLike): Promise<void> {
-            const host = await this.host();
-            return runWithHost(host, () => (this.#daemon.owns(ws) ? this.#daemon.close(ws) : super.webSocketError(ws)));
-        }
-        override async alarm(): Promise<void> {
-            const host = await this.host();
-            return runWithHost(host, () => super.alarm());
-        }
-    };
-}
-
-export interface ActorWorkerOptions {
-    readonly actors?: readonly AnyActorDefinition[];
-    /** Requests the actor mount does not own (server functions, SSR). */
-    readonly fallback?: (request: Request) => Response | Promise<Response> | undefined;
-}
-
-/**
- * The Worker half: daemon socket forwarding, actor HTTP mount,
- * object-terminated socket forwarding. Its requests must run under the
- * Worker's own host (`runWithHost`, #137): the Worker hosts nothing, so a hop
- * it makes ambiently (the machine token lookup in `serverAuth`, `pairingWiring`,
- * the MCP mount) must go OUT to the object — never run locally because an
- * object sharing the isolate stamped the global last. The scope is entered
- * ONCE, at the top of the Worker's `fetch`, around every route — the auth
- * routes hop too (#172) — as `runWithHost(worker.host, ...)`; this `fetch`
- * does not wrap itself, so the entry's scope is the only one.
- *
- * The host boots once per isolate, from `env` alone (`boot`, #182): the app
- * is built the way `createWorkerHandler` builds it (`unhostedStorage`, the
- * `durableObjects` placement, the object-terminated socket route, the public
- * mount with `fallback`) but started on demand rather than by the first
- * MOUNT request — an auth route hops before any mount request on a cold
- * isolate (a daemon's `POST /auth/pair` retry), and found no host
- * (upstream: signalxjs/actors#457 asks for `boot(env)` on the handler). `host` is
- * a thunk the entry's `runWithHost` reads at call time, so a scope entered
- * before the boot resolves to the host once it is up. A failed boot is never
- * cached: the next request retries instead of poisoning the isolate.
- */
-export function createActorWorker(options: ActorWorkerOptions = {}) {
-    const actors = options.actors ?? defaultActors();
-    let app: ActorApp | undefined;
-    let booting: Promise<(request: Request) => Promise<Response>> | undefined;
-    const build = async (env: PlatformEnv): Promise<(request: Request) => Promise<Response>> => {
-        const built = defineActorApp({ storage: unhostedStorage(), actors: [...actors] });
-        // The BINDING is captured once (safe: a stub, which workerd refuses to carry across requests, is derived fresh per dispatch); no `isSelf` — the Worker hosts nothing.
-        built.use(durableObjects({ namespace: namespace(env), hostId: 'cf-worker' }));
-        // `/_sigx/socket/{type}/{key}` is forwarded to that actor's object, which terminates it (`createActorHost`'s `socket`).
-        const socket = objectSocketRoute({ resolver: durableObjectStubResolver({ namespace: namespace(env) }) });
-        built.use({ name: 'cloudflare:object-socket', setup: (registry) => registry.route(socket) });
-        const handle = createFetchHandler(built, options.fallback ? { fallback: options.fallback } : {});
-        await built.start();
-        app = built;
-        return handle;
-    };
-    const boot = (env: PlatformEnv): Promise<(request: Request) => Promise<Response>> => {
-        ensureServerApp(env, actors);
-        return (booting ??= build(env).catch((e: unknown) => {
-            booting = undefined;
-            throw e;
-        }));
-    };
-    return {
-        /** The Worker's own host once `boot` ran — what the entry's `runWithHost` resolves through. */
-        host: (): Host | undefined => app?.host ?? undefined,
-        /** Stamp the server app for `env` and start the Worker host if this isolate has none yet — before any route that hops. */
-        boot: async (env: PlatformEnv): Promise<void> => {
-            await boot(env);
-        },
-        async fetch(request: Request, env: PlatformEnv, _ctx?: unknown): Promise<Response> {
-            if (new URL(request.url).pathname.startsWith(DAEMON_SOCKET_PREFIX)) {
-                ensureServerApp(env, actors);
-                return forwardDaemonSocket(request, env.ACTORS);
-            }
-            return (await boot(env))(request);
-        }
-    };
 }

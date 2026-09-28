@@ -15,7 +15,7 @@ import { mockModel, type MockModel } from '@sigx/ai/testing';
 import type { ModelRequest } from '@sigx/ai';
 import type { ActorClient, AnyActorDefinition } from '@sigx/actors';
 import { testActorApp, userPrincipal, type PrincipalBinding, type TestActorApp } from '../../../../packages/platform/src/testing/index';
-import { defaultPorts, platformActors, platformDefs, type PlatformPorts } from '../../src/actors.app';
+import { defaultPorts, platformActors, platformDefs, type PlatformPorts } from '../../src/actors.cloudflare';
 import type { ActorDefs } from '../../src/actors/defs';
 import { routingKeyOf } from '../../src/actors/keys';
 import { TEST_WORKSPACE_KEK } from '../workers/secret';
