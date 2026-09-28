@@ -180,6 +180,11 @@ pnpm test:scripts     # node --test for scripts/
 pnpm --filter @agentic/web test:workers  # Worker + ActorHost DO inside workerd (Node >= 22)
 ```
 
+Run the platform on Node instead (#988, `docs/runbook.md` §4b): `pnpm --filter @agentic/node build`
+(the packages, then the web app's Vite build with `--mode node` into `apps/node/dist/main.js`) and
+`pnpm --filter @agentic/node start` — one process on http://localhost:8787, data in `$AGENTIC_HOME`
+(default `~/.agentic`).
+
 Run the web app: `pnpm dev` (the real Worker on `wrangler dev`, http://localhost:8787,
 `.dev.vars` generated, dev-login link printed — `docs/runbook.md` §4) or
 `pnpm dev:mock` (Vite on mock data). Run the daemon: `pnpm --filter @agentic/daemon start`.
@@ -205,7 +210,7 @@ Run the desktop app: `pnpm --filter @agentic/desktop dev` (`tauri dev`; needs a 
 | `packages/mcp` | `@agentic/mcp` | MCP client + platform MCP server (orchestration surface) |
 | `packages/a2a` | `@agentic/a2a` | A2A 1.0 server + client adapter |
 | `apps/web` | `@agentic/web` | sigx SSR app + actors host on Cloudflare Workers |
-| `apps/node` | `@agentic/node` | local Node + SQLite host (Node ≥ 22.13): `sqliteStorage` on `node:sqlite` so far; the host, HTTP and sockets follow |
+| `apps/node` | `@agentic/node` | local Node + SQLite host (Node ≥ 22.13): the whole platform in one process — actors on `sqliteStorage`, the Worker's routes, live and daemon sockets, files on disk (`$AGENTIC_HOME`) |
 | `apps/daemon` | `@agentic/daemon` | `agentic-daemon` machine daemon (Windows first) |
 | `apps/desktop` | `@agentic/desktop` | Tauri 2 desktop shell (Windows, macOS, Linux) around a deployed server; Rust in `src-tauri/` |
 

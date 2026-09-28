@@ -193,6 +193,23 @@ GITHUB_CLIENT_ID=<optional: an OAuth app whose callback is http://localhost:8787
 GITHUB_CLIENT_SECRET=<its secret>
 ```
 
+## 4b. Run locally on Node (#988)
+
+The whole platform in one Node process (Node ≥ 22.13, for `node:sqlite`) — no wrangler, no Durable Objects: the actors persist in one SQLite file, chat files on disk.
+
+```sh
+pnpm install
+pnpm --filter @agentic/node build   # the packages, then the web app's Vite build (--mode node) into apps/node/dist/main.js
+pnpm --filter @agentic/node start   # node apps/node/dist/main.js
+```
+
+- **Data** lives in `$AGENTIC_HOME` (default `~/.agentic`): `agentic.db` (with its `-wal` / `-shm` sidecars), `files/` (attachments and exports), `logs/`, and `.env`. The first run generates `SESSION_SECRET` and `WORKSPACE_KEK` into `.env` (mode 0600) and says so; they are never replaced — a new `WORKSPACE_KEK` would orphan every secret sealed under the old one. Back the directory up whole.
+- **Settings**, from the process env first, then `.env`: `PORT` (default 8787), `APP_ORIGIN` (default `http://localhost:PORT`), `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET`, and `AGENTIC_DEV_LOGIN` (≥ 16 characters) for the dev login — add it to `.env` and the start-up log prints the one-click link, as in §4.
+- **Sign in** with that link, add your Anthropic key at `/plugins/anthropic-api`, and chat as in §4. `BASE_URL=http://localhost:8787 AGENTIC_DEV_LOGIN=<.env value> ANTHROPIC_API_KEY=<key> pnpm --filter @agentic/web smoke:demo1` runs the scripted walk-through against it.
+- **Pair a daemon** from `/pair` exactly as in §4: `agentic-daemon pair <code> --url http://localhost:8787 --name <name>`, then `agentic-daemon run`. The daemon socket is `/_agentic/daemon/{machineId}` on the same port.
+- **Stop** with Ctrl+C (or SIGTERM): the host finishes its turns, flushes state and closes the database. A crash (`kill -9`) loses only the turn that was running: what earlier turns saved is in `agentic.db`, reminders that fell due meanwhile fire on the next start, and detached runs are picked up again.
+- There is no hot reload: after a source change, `pnpm --filter @agentic/node build` and start again.
+
 ## 5. Daemon on a machine (Windows, macOS, Linux)
 
 The daemon (`apps/daemon`, architecture §5b) runs on the user's machine, pairs once, and keeps one outbound WebSocket to the platform. It ships as a self-contained zip per OS and CPU, published by CI, and installs with one line from the Pair page; the machine needs nothing installed (#343). After that it keeps itself current (#358): a supervisor relaunches it (§5.4), the owner updates and rolls it back from its Machine page (§5.5), and the runtimes it drives are separately installed harnesses (§5.6).

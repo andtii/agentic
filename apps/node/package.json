@@ -2,14 +2,23 @@
   "name": "@agentic/node",
   "version": "0.0.0",
   "private": true,
-  "description": "The local Node + SQLite host: the platform's actors on one machine, persisted in one SQLite file.",
+  "description": "The local Node + SQLite host: the platform's actors, HTTP routes, live sockets, daemon socket and files on one machine, in one process.",
   "type": "module",
   "exports": {
     ".": "./src/index.ts"
   },
+  "scripts": {
+    "build": "pnpm --filter \"@agentic/web^...\" build && pnpm --dir ../web exec vite build --app --mode node",
+    "start": "node dist/main.js"
+  },
   "dependencies": {
+    "@agentic/platform": "workspace:*",
     "@sigx/actors": "catalog:",
-    "@sigx/actors-sqlite": "catalog:"
+    "@sigx/actors-sqlite": "catalog:",
+    "ws": "^8.21.0"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.18.1"
   },
   "engines": {
     "node": ">=22.13.0"
