@@ -45,6 +45,17 @@ export interface PlanOption {
     readonly detail?: string;
 }
 
+/** The question behind a `needs-you` item (#1042): who asked, what, when, and the task that asked — so an answer finds its way back. */
+export interface PlanAsk {
+    readonly by: PlanActor;
+    /** The question, when the asker gave one. */
+    readonly text?: string;
+    /** ms epoch. */
+    readonly at: number;
+    /** The asker's task, whose chat the answer is posted to. */
+    readonly taskId?: TaskId;
+}
+
 export interface PlanItem {
     /** The item's number, unique per project across its plans: `#n`. */
     readonly id: number;
@@ -64,6 +75,8 @@ export interface PlanItem {
     readonly doneWhen: readonly PlanDoneWhen[];
     readonly activity: readonly PlanActivity[];
     readonly options?: readonly PlanOption[];
+    /** While the item needs a person: the question it waits on. */
+    readonly ask?: PlanAsk;
 }
 
 export interface PlanPhase {
