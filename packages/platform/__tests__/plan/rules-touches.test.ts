@@ -63,6 +63,8 @@ describe('setTouches (#1074)', () => {
         { name: 'a path out of the project', by: person, item: 1, paths: ['a/../../b'], code: 'invalid' },
         { name: 'an empty path', by: person, item: 1, paths: ['  '], code: 'invalid' },
         { name: 'not a list', by: person, item: 1, paths: 'packages/a/', code: 'invalid' },
+        { name: 'no list (undefined): never read as clearing them', by: person, item: 1, paths: undefined, code: 'invalid' },
+        { name: 'no list (null)', by: person, item: 1, paths: null, code: 'invalid' },
         { name: 'too many', by: person, item: 1, paths: Array.from({ length: TOUCHES_MAX + 1 }, (_, i) => `p${i}/`), code: 'invalid' },
         { name: 'an unknown item', by: person, item: 99, paths: ['x/'], code: 'not-found' },
         { name: 'a done item', by: person, item: 1, paths: ['x/'], code: 'done', prep: (b) => update(b, call(person), 1, { state: 'done' }) },

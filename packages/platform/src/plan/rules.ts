@@ -1059,7 +1059,9 @@ export function setTouches(book: PlanBook, call: PlanCall, itemId: number, paths
     const actor = requireManager(call, 'change what an item touches');
     const item = itemOf(book, itemId);
     if (item.state === 'done' || item.state === 'dropped') fail('done', `#${item.id} is ${item.state}`);
-    const next = [...new Set(list(paths ?? [], 'touches', TOUCHES_MAX, checkPath))];
+    // A replacing write: a missing list is refused, never read as "clear them" (an empty list is how to clear).
+    if (!Array.isArray(paths)) fail('invalid', 'touches must be a list of paths (empty to clear them)');
+    const next = [...new Set(list(paths, 'touches', TOUCHES_MAX, checkPath))];
     if (next.length === item.touches.length && next.every((p, i) => p === item.touches[i])) return { value: item, changes: [] };
     item.touches = next;
     const line = next.length ? `touches ${next.join(', ')}` : 'touches nothing named, so it runs alone';
