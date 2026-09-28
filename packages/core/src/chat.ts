@@ -3,6 +3,7 @@
 import type { AgentId, ChatId, MachineId, MessageId, ProjectId, SessionId, TaskId } from './ids.js';
 import type { SessionOptions, SessionOptionsPatch } from './session-options.js';
 import type { TaskError } from './task.js';
+import type { TurnSteps } from './transcript.js';
 import type { WorkdirRef } from './workdir.js';
 
 /** The content a user or agent sends. Mirrors the shape of `@sigx/ai-agent`'s prompt parts without depending on it. */
@@ -57,6 +58,8 @@ export type ChatEntry =
            * contract copies it into each task as `machineId`.
            */
           readonly machine?: { readonly id: MachineId | null };
+          /** The tool calls of the turn this message ends, as runtime-neutral steps (#1053): the steps box. Absent on older entries. */
+          readonly steps?: TurnSteps;
       }
     | { readonly t: 'member'; readonly op: 'add' | 'remove'; readonly agentId: AgentId; readonly historyAccess: HistoryAccess; readonly at: number }
     | {
@@ -163,6 +166,8 @@ export type SessionEvent =
           readonly taskId?: TaskId;
           readonly parts: readonly PromptPart[];
           readonly mentions?: readonly AgentId[];
+          /** The turn's tool calls as steps (#1053); the chat copies them onto the `msg` entry. */
+          readonly steps?: TurnSteps;
           readonly at: number;
       }
     /** The runtime titled the conversation (#460): the chat takes it unless a person named the chat. */
