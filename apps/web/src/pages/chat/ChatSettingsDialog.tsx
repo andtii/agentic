@@ -36,6 +36,9 @@ export type ChatSettingsDialogProps =
     & Define.Event<'save', ChatSettingsChange>
     /** Archive (`true`) or restore (`false`) the chat (#884, `Chat.archive`) — at once, not with Save. */
     & Define.Event<'archive', boolean>
+    /** Offer "Delete chat" (#674): the page asks to confirm, then calls `Workspace.deleteChat`. */
+    & Define.Prop<'deletable', boolean>
+    & Define.Event<'delete'>
     & Define.Event<'cancel'>;
 
 /**
@@ -133,6 +136,12 @@ export const ChatSettingsDialog = component<ChatSettingsDialogProps>(({ props, e
                     <span data-panel-note>{props.archived ? 'Archived: out of the chat list, kept under Archived.' : 'Archive to take it out of the chat list; the thread and its members stay.'}</span>
                     <Button type="button" intent="default" icon={props.archived ? 'back' : 'download'} disabled={props.busy} onClick={() => emit('archive', !props.archived)}>{props.archived ? 'Restore chat' : 'Archive chat'}</Button>
                 </div>
+                {props.deletable ? (
+                    <div data-chat-settings-delete style="display:flex;align-items:center;justify-content:space-between;gap:var(--space-sm)">
+                        <span data-panel-note>Delete the chat for good: its thread, sessions and attachments.</span>
+                        <Button type="button" intent="danger" icon="trash" disabled={props.busy} onClick={() => emit('delete')}>Delete chat</Button>
+                    </div>
+                ) : null}
             </FormDialog>
         );
     };

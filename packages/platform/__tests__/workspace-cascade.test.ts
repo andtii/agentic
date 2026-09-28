@@ -236,6 +236,19 @@ describe('Workspace.deleteAll', () => {
         void (undefined as unknown as WorkspaceState);
     });
 
+    it('still purges a chat deleted before it, with no listing to help (#674)', async () => {
+        const { chatId } = await populate();
+        await ws().deleteChat(chatId);
+        expect((await ws().get()).chats).toEqual([]);
+        expect(await app.storage.load('Chat', `${WS}:chat:${chatId}`)).not.toBeNull();
+        listing = false;
+        await ws().deleteAll();
+        await until(async () => (await app.storage.load('Workspace', KEY)) === null, 'the delete');
+        expect(purged.map((r) => `${r.type} ${r.key}`)).toContain(`Chat ${WS}:chat:${chatId}`);
+        expect(await app.storage.load('Chat', `${WS}:chat:${chatId}`)).toBeNull();
+        expect(await app.storage.load('ChatPage', `${WS}:chat:${chatId}:p0`)).toBeNull();
+    });
+
     it('reaches a chat’s live session and every one of its pages through the binding, with no listing to help (#399)', async () => {
         const { agentId, chatId } = await populate();
         const chat = app.as(owner).actor(Chat, `${WS}:chat:${chatId}`);

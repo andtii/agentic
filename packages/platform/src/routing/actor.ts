@@ -1946,7 +1946,8 @@ export function defineRoutingActor(ports: RoutingPorts) {
                 },
 
                 /**
-                 * A chat leaves project `projectId` (#623): every enabled feature plugin with `onChatReleased` hears it once
+                 * A chat leaves project `projectId` (#623), or is deleted from it (#674, `reason: 'deleted'`, only once the
+                 * chat reads as deleted): every enabled feature plugin with `onChatReleased` hears it once
                  * per environment the project has a folder on whose machine is online, with that folder and its daemon;
                  * every call — or an offline machine it could not reach — is audited `project.chat-released`.
                  *
@@ -1966,6 +1967,8 @@ export function defineRoutingActor(ports: RoutingPorts) {
                     // Asked first, a chat that cannot be read is not released: the move must not go ahead as if it were.
                     if (before && !summary) throw new ServerFnError(409, `the chat ${chatId} could not be read to release it`);
                     if (before ? summary!.projectId !== projectId : reason === 'project-changed' && (!summary || summary.projectId === projectId)) return;
+                    // A deletion (#674) is released only once the chat itself says it is deleted, from the project it was in.
+                    if (reason === 'deleted' && (summary?.deleted !== true || summary.projectId !== projectId)) return;
                     const project = await as(Workspace, workspaceKey(workspaceId))
                         .projects()
                         .then((all) => all.find((p) => p.id === projectId), () => undefined);
@@ -2008,7 +2011,7 @@ export function defineRoutingActor(ports: RoutingPorts) {
                                 kind: 'project.chat-released',
                                 at,
                                 by: ROUTER,
-                                summary: `chat ${chatId} left project ${project.name}: ${id} on ${environmentId}: ${error ?? outcome}`,
+                                summary: `chat ${chatId} ${reason === 'deleted' ? 'deleted from' : 'left'} project ${project.name}: ${id} on ${environmentId}: ${error ?? outcome}`,
                                 data: { chatId, projectId, pluginId: id, environmentId, reason, ...(outcome !== undefined ? { outcome } : {}), ...(error !== undefined ? { error } : {}) }
                             }).catch(() => undefined);
                         }

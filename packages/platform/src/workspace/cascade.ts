@@ -249,7 +249,8 @@ export async function childRecords(snap: WorkspaceState): Promise<ActorRecordRef
         add(Memory.type, memoryActorKey(ws, scope));
         add(FlatMemory.type, memoryActorKey(ws, scope));
     }
-    for (const id of snap.chats) {
+    // Deleted chats too (#674): the index forgot them, but their records stay as the deleted mark.
+    for (const id of [...snap.chats, ...(snap.deletedChats ?? [])]) {
         const key = `${ws}:chat:${id as ChatId}`;
         let seq = 0;
         let sessions: readonly SessionId[] = [];

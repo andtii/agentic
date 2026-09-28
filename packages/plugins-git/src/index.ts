@@ -86,7 +86,7 @@ export const gitProjectSettings: ConfigSchema = {
         worktreeCleanup: {
             type: 'string',
             title: 'Remove chat worktrees',
-            description: '`never`: chat worktrees stay until you remove them. `on-chat-leave`: when a chat is moved out of the project, its worktree is removed on every machine that is online — never one with uncommitted changes.',
+            description: '`never`: chat worktrees stay until you remove them. `on-chat-leave`: when a chat is moved out of the project or deleted, its worktree is removed on every machine that is online — never one with uncommitted changes.',
             enum: ['never', 'on-chat-leave'],
             default: 'never'
         },
@@ -433,7 +433,8 @@ export function previewGitSettings({ project, settings, folder }: ProjectFeature
 }
 
 /**
- * A chat left the project (#623): with `worktreeCleanup: 'on-chat-leave'`, its worktree on this environment — the
+ * A chat left the project (#623), or was deleted in it (#674, `reason: 'deleted'` — deletion counts as leaving): with
+ * `worktreeCleanup: 'on-chat-leave'`, its worktree on this environment — the
  * one `chatWorktreeFor` names, never a worktree the user chose — is removed. Built in through the daemon's
  * `worktree-remove` (never forced; `worktreeDeleteBranch` then deletes a merged branch), or with the project's own
  * `worktreeRemove` command after a `git status` shows the worktree clean. A worktree with changes throws `dirty`, so

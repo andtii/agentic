@@ -43,15 +43,16 @@ import { createId, isChatFilePart, sessionFileUri, type AgentId, type ChatFilePa
 import { acrossProjects, activeIn, bringInVisitors, visitingManagers, visitorOf, visitorsIn, type IndexedEntry } from '@agentic/platform';
 import type { Decision, ToolPartState } from '@sigx/ai-agent';
 import type { AgentMessage } from '@sigx/ai-agent/app';
-import { Composer, EmptyState, ErrorNote, NOBODY_HINT, Thread, prepareImage, type ComposerInsert, type Mention, type MessageAuthor, type RespondOptions, type ThreadInsert } from '@agentic/ui';
+import { Composer, ConfirmDialog, EmptyState, ErrorNote, NOBODY_HINT, Thread, prepareImage, type ComposerInsert, type Mention, type MessageAuthor, type RespondOptions, type ThreadInsert } from '@agentic/ui';
 import { Page } from '../../components/Page';
 import { baseTurnId, capacityWaitText, FailureNotice, interruptionOf, machineOfflineText, useInterruptionReads } from '../../components/status';
 import { useActorDefs, useViewer } from '../../actors/defs';
-import { chatKeyOf, inboxKeyOf, machineKeyOf, routingKeyOf, sessionKeyOf, taskIndexKeyOf, taskKeyOf } from '../../actors/keys';
+import { chatKeyOf, inboxKeyOf, machineKeyOf, routingKeyOf, sessionKeyOf, taskIndexKeyOf, taskKeyOf, workspaceKeyOf } from '../../actors/keys';
 import type { MockChatMember, MockChatSummary } from '../../mock/workspace';
 import { useWorkspaceZone, zoneFormat } from '../../time';
 import { ChatSearchPanel, SEARCH_LIMIT } from './ChatSearchPanel';
 import { ChatSettingsDialog, type ChatSettingsChange } from './ChatSettingsDialog';
+import { deleteChatText } from './delete';
 import { ContextPanel } from './ContextPanel';
 import { DetachedQuestionCard } from './DetachedQuestionCard';
 import { ChatRequestsFrom, RequestCard, acceptedAt } from './entries/RequestCard';
@@ -119,7 +120,7 @@ export const LiveChat = component<{ id: string; projectId?: string }>(({ props }
         return { interruption: interruptionOf({ audit: cuts.audit(), ...(base ? { turnId: base } : {}), ...(taskId ? { taskId } : {}), route: route ?? null, machineName: machineNameOf }), ...(taskId ? { taskId } : {}) };
     };
 
-    const st = signal({ draft: '', error: '', sending: false, recovering: false, stopping: false, saving: false, resetting: false });
+    const st = signal({ draft: '', error: '', sending: false, recovering: false, stopping: false, saving: false, resetting: false, confirmDelete: false });
     const transcript = signal(chatTranscript('chat'));
     const authors = signal<{ value: Record<string, MessageAuthor> }>({ value: {} });
     const feeds = signal<{ list: FeedHandle[] }>({ list: [] });
@@ -465,6 +466,28 @@ export const LiveChat = component<{ id: string; projectId?: string }>(({ props }
         }
     };
 
+    /**
+     * Delete this chat (#674, `Workspace.deleteChat`) once confirmed: the project's feature plugins tidy up after it
+     * (Git's worktree cleanup), then the page opens the chat list it came from.
+     */
+    const deleteChat = async (): Promise<void> => {
+        const ws = viewer.workspaceId;
+        if (!ws || st.saving) return;
+        st.saving = true;
+        st.error = '';
+        try {
+            await actor(defs.Workspace, workspaceKeyOf(ws)).deleteChat(props.id as ChatId);
+            st.confirmDelete = false;
+            closeChatSettings();
+            await router.push(props.projectId ? `/projects/${encodeURIComponent(props.projectId)}/chats` : '/chats');
+        } catch (e) {
+            st.confirmDelete = false;
+            fail(e);
+        } finally {
+            st.saving = false;
+        }
+    };
+
     const search = (q: string) => actor(defs.Chat, key()!).search(q, SEARCH_LIMIT);
 
     // The topbar's requests are module-level (`head.ts`): leaving the page closes them.
@@ -648,7 +671,8 @@ export const LiveChat = component<{ id: string; projectId?: string }>(({ props }
                         </div>
                     </Drawer.Panel>
                 </Drawer.Root>
-                {chatSettingsRequest.open && s ? <ChatSettingsDialog model={() => chatSettingsRequest.open} title={s.title ?? ''} members={members} lookup={directory.lookup} machineId={s.machineId ?? ''} machines={workdirs.machines()} busy={st.saving} archived={s.archived === true} onArchive={(archived) => { void setArchived(archived); }} onCancel={closeChatSettings} onSave={(change) => { void saveSettings(change); }} /> : null}
+                {chatSettingsRequest.open && s ? <ChatSettingsDialog model={() => chatSettingsRequest.open} title={s.title ?? ''} members={members} lookup={directory.lookup} machineId={s.machineId ?? ''} machines={workdirs.machines()} busy={st.saving} archived={s.archived === true} onArchive={(archived) => { void setArchived(archived); }} deletable onDelete={() => { st.confirmDelete = true; }} onCancel={closeChatSettings} onSave={(change) => { void saveSettings(change); }} /> : null}
+                {s ? <ConfirmDialog model={() => st.confirmDelete} title="Delete this chat?" description={deleteChatText(projects.byId(s.projectId))} confirmLabel="Delete chat" busy={st.saving} onConfirm={() => { void deleteChat(); }} onCancel={() => { st.confirmDelete = false; }} /> : null}
                 <NewChatDialog model={() => newChatRequest.open} agents={directory.all()} environments={workdirs.list()} projects={projects.list()} lastProjectId={projects.lastProjectId()} machines={workdirs.machines()} lastMachineId={workdirs.lastMachineId()} onCancel={closeNewChat} onCreate={(e) => { void createChat(e.agentIds, e.coordinator, e.projectId, e.machineId, e.permissionMode); }} />
             </Page>
         );
