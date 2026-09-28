@@ -94,7 +94,8 @@ export function planPatch(input: Omit<PlanUpdateInput, 'item'>): PlanItemPatch {
         ...(tick.length ? { tick } : {}),
         ...(input.note !== undefined ? { note: input.note } : {}),
         // `blocked` is derived, never stored: the actor refuses it in its own words.
-        ...(input.state !== undefined ? { state: input.state as PlanItemPatch['state'] } : {})
+        ...(input.state !== undefined ? { state: input.state as PlanItemPatch['state'] } : {}),
+        ...(input.supersededBy !== undefined ? { supersededBy: input.supersededBy } : {})
     };
 }
 

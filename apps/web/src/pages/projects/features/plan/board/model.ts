@@ -47,10 +47,10 @@ const byQueue = (a: PlanItem, b: PlanItem): number => (a.queueIndex ?? Number.MA
 /**
  * The board's columns: Not assigned, each agent member (the coordinator only when it holds items — it assigns rather
  * than works), any other agent an item is assigned to, then You — the viewer `me`'s items only (#963; see `columnOf`).
- * Done items are left out.
+ * Done and dropped items are left out.
  */
 export function boardColumns(items: readonly PlanItem[], members: ProjectMembers, now: number, me?: string): BoardColumn[] {
-    const open = items.filter((i) => i.state !== 'done');
+    const open = items.filter((i) => i.state !== 'done' && i.state !== 'dropped');
     const agents: string[] = [];
     const add = (id: string): void => { if (!agents.includes(id)) agents.push(id); };
     const holds = (id: string): boolean => open.some((i) => columnOf(i, me) === agentColumn(id));
@@ -114,7 +114,7 @@ export function moveItem(items: readonly PlanItem[], id: number, slot: BoardSlot
     // The mover is the viewer: only their own items share the You queue (#963).
     const me = by.you.kind === 'user' ? by.you.userId : undefined;
     const from = columnOf(item, me);
-    const queueOf = (key: BoardColumnKey): PlanItem[] => items.filter((i) => i.state !== 'done' && columnOf(i, me) === key && !(key !== 'open' && key !== 'you' && isWorking(i, by.at))).sort(byQueue);
+    const queueOf = (key: BoardColumnKey): PlanItem[] => items.filter((i) => i.state !== 'done' && i.state !== 'dropped' && columnOf(i, me) === key && !(key !== 'open' && key !== 'you' && isWorking(i, by.at))).sort(byQueue);
     const target = queueOf(slot.column);
     const before = target.slice(0, Math.max(0, Math.min(slot.index, target.length))).filter((i) => i.id !== id);
     const after = target.slice(Math.max(0, Math.min(slot.index, target.length))).filter((i) => i.id !== id);

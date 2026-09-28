@@ -45,6 +45,8 @@ export interface PlanUpdateInput {
     readonly uncheck?: readonly number[];
     readonly note?: string;
     readonly state?: Exclude<PlanItemState, 'claimed'>;
+    /** With `state: 'dropped'` (#1041): the item (`#n`) that replaces this one. */
+    readonly supersededBy?: number;
     /**
      * Replace what the item waits on (#931): item numbers of this project, or `project#n` for an item in another
      * project. The project manager's (and people's); the tool sets it through `PlanPort.after`, not `update`.
@@ -121,6 +123,8 @@ export interface PlanItemView {
     readonly doneWhen: readonly PlanDoneWhen[];
     /** While it needs a person (#1043): who asked, and the question. */
     readonly ask?: { readonly by: string; readonly text?: string };
+    /** A dropped item (#1041): who dropped it, why, and what replaces it. */
+    readonly dropped?: { readonly by: string; readonly note?: string; readonly supersededBy?: number };
 }
 
 const same = (a: PlanActor | undefined, b: PlanActor): boolean => a !== undefined && (a.kind === 'agent' ? b.kind === 'agent' && a.agentId === b.agentId : b.kind === 'user' && a.userId === b.userId);
@@ -169,7 +173,10 @@ export function planItemView(board: PlanBoard, { item, plan, phase }: Located, n
         touches: item.touches,
         refs: item.refs.map(formatRef),
         doneWhen: item.doneWhen,
-        ...(item.ask ? { ask: { by: handleOf(board, item.ask.by), ...(item.ask.text !== undefined ? { text: item.ask.text } : {}) } } : {})
+        ...(item.ask ? { ask: { by: handleOf(board, item.ask.by), ...(item.ask.text !== undefined ? { text: item.ask.text } : {}) } } : {}),
+        ...(item.state === 'dropped' && item.dropped
+            ? { dropped: { by: handleOf(board, item.dropped.by), ...(item.dropped.note !== undefined ? { note: item.dropped.note } : {}), ...(item.dropped.supersededBy !== undefined ? { supersededBy: item.dropped.supersededBy } : {}) } }
+            : {})
     };
 }
 
@@ -196,6 +203,7 @@ export function planTouchWarnings(board: PlanBoard, item: PlanItem, now: number 
 function blockerText(board: PlanBoard, n: number, now: number): string {
     const hit = locate(board).find((l) => l.item.id === n)?.item;
     if (!hit) return `#${n} (not in this project)`;
+    if (hit.state === 'dropped') return `#${n} (dropped: ask the project manager to relink this item)`;
     if (planClaimLive(hit.claim, now)) return `#${n} (claimed by ${hit.claim!.agentId === board.me ? 'you' : handleOf(board, agent(hit.claim!.agentId))})`;
     if (hit.assignee) return `#${n} (in ${same(hit.assignee, agent(board.me)) ? 'your' : `${handleOf(board, hit.assignee)}'s`} queue)`;
     return `#${n} (${hit.state})`;
@@ -220,6 +228,7 @@ export function planNext(board: PlanBoard, planId?: string, now: number = Date.n
 export function planClaimRefusal(board: PlanBoard, n: number, now: number = Date.now()): string | undefined {
     const { item } = find(board, n);
     if (item.state === 'done') return `#${n} is done.`;
+    if (item.state === 'dropped') return `#${n} was dropped. Try plan_next.`;
     if (takenByOther(item, board.me, now)) return `#${n} is claimed by ${handleOf(board, agent(item.claim!.agentId))} until ${new Date(item.claim!.leaseUntil).toISOString()}. Try plan_next.`;
     const mineAlready = planClaimLive(item.claim, now) && item.claim!.agentId === board.me;
     if (mineAlready) return undefined;
@@ -235,7 +244,7 @@ export function planClaimRefusal(board: PlanBoard, n: number, now: number = Date
 }
 
 /** The refusal for a people-only tool (`plan_assign`, `plan_add`) when the caller is not the project manager. */
-export function planManagerRefusal(board: PlanBoard, tool: 'plan_assign' | 'plan_add' | 'plan_update with after'): string | undefined {
+export function planManagerRefusal(board: PlanBoard, tool: 'plan_assign' | 'plan_add' | 'plan_update with after' | 'dropping an item'): string | undefined {
     if (board.manager !== undefined && board.manager === board.me) return undefined;
     const pm = board.manager !== undefined ? handleOf(board, agent(board.manager)) : undefined;
     return `${tool} is for the project manager and people, and you are not this project's manager. ${pm ? `Ask ${pm}` : 'Ask a person'} in the chat instead.`;
@@ -272,7 +281,7 @@ const planId = z.string().min(1).optional().describe('Limit to one plan by id; a
 
 export const planListInput = z.object({
     plan: planId,
-    state: z.enum(['ready', 'claimed', 'needs-you', 'blocked', 'done', 'stuck']).optional().describe('Only items in this state.'),
+    state: z.enum(['ready', 'claimed', 'needs-you', 'blocked', 'done', 'stuck', 'dropped']).optional().describe('Only items in this state.'),
     mine: z.boolean().optional().describe('Only items assigned to or claimed by you.')
 });
 export const planNextInput = z.object({ plan: planId });
@@ -283,7 +292,11 @@ export const planUpdateInput = z.object({
     check: z.array(z.number().int().min(0)).optional().describe('Done-when lines to tick, 0-based.'),
     uncheck: z.array(z.number().int().min(0)).optional().describe('Done-when lines to untick, 0-based.'),
     note: z.string().min(1).optional().describe('A note for the item’s History; refs in the shared syntax (`#9`, `pr:604`, `path/file.ts:38-41`) are linked.'),
-    state: z.enum(['ready', 'needs-you', 'blocked', 'done', 'stuck']).optional().describe('A new state. `done` needs every done-when ticked, and the project letting agents tick; use plan_claim to start an item. `needs-you` asks a person: put the question in `note`.'),
+    state: z
+        .enum(['ready', 'needs-you', 'blocked', 'done', 'stuck', 'dropped'])
+        .optional()
+        .describe('A new state. `done` needs every done-when ticked, and the project letting agents tick; use plan_claim to start an item. `dropped` (project manager only, with a `note` saying why) is for an item that will not be done — superseded or no longer wanted; items after it stay blocked until relinked with `after`. `ready` reopens a dropped item. `needs-you` asks a person: put the question in `note`.'),
+    supersededBy: itemNo.optional().describe('With state `dropped`: the item that replaces this one.'),
     after: z
         .array(z.union([z.number().int().min(1), z.string().min(1).max(300)]))
         .max(50)
@@ -387,6 +400,13 @@ export function planTools(port: PlanPort | undefined) {
                 const board = await p.board(call(ctx));
                 const { item } = find(board, input.item);
                 const patching = !!input.check?.length || !!input.uncheck?.length || input.note !== undefined || input.state !== undefined;
+                if (input.supersededBy !== undefined && input.state !== 'dropped') throw new PlanRefusal('supersededBy goes with state dropped.');
+                if (input.state === 'dropped') {
+                    const refusal = planManagerRefusal(board, 'dropping an item');
+                    if (refusal) throw new PlanRefusal(refusal);
+                    if (input.note === undefined) throw new PlanRefusal(`say why #${item.id} is dropped: pass a note (and supersededBy when another item replaces it).`);
+                    if (input.supersededBy !== undefined) find(board, input.supersededBy);
+                }
                 if (!patching && input.after === undefined) throw new PlanRefusal(`nothing to change on #${item.id}: pass check, uncheck, note, state or after.`);
                 const ticks = planApplyChecks(item, input.check, input.uncheck);
                 if (input.state === 'done' && !planDoneWhenMet(ticks)) throw new PlanRefusal(`#${item.id} has ${ticked(ticks)}; tick them all first, or ask a person to mark it done.`);
@@ -397,12 +417,15 @@ export function planTools(port: PlanPort | undefined) {
                     const linked = await p.after(input.item, input.after, call(ctx));
                     if (!patching) return { item: linked.id, state: linked.state, after: afterText(linked) };
                 }
-                const updated = await p.update({ item: input.item, ...(input.check ? { check: input.check } : {}), ...(input.uncheck ? { uncheck: input.uncheck } : {}), ...(input.note !== undefined ? { note: input.note } : {}), ...(input.state !== undefined ? { state: input.state } : {}) }, call(ctx));
+                const updated = await p.update({ item: input.item, ...(input.check ? { check: input.check } : {}), ...(input.uncheck ? { uncheck: input.uncheck } : {}), ...(input.note !== undefined ? { note: input.note } : {}), ...(input.state !== undefined ? { state: input.state } : {}), ...(input.supersededBy !== undefined ? { supersededBy: input.supersededBy } : {}) }, call(ctx));
+                // Dropping unblocks nothing (#1041): name what waits on it so the manager relinks it.
+                const waiting = updated.state === 'dropped' ? allItems(board).filter((i) => i.after.includes(updated.id) && i.state !== 'done' && i.state !== 'dropped').map((i) => i.id) : [];
                 return {
                     item: updated.id,
                     state: updated.state,
                     doneWhen: ticked(updated.doneWhen),
                     ...(input.after !== undefined ? { after: afterText(updated) } : {}),
+                    ...(waiting.length ? { relink: `${waiting.map((n) => `#${n}`).join(', ')} wait${waiting.length === 1 ? 's' : ''} on #${updated.id} and stay${waiting.length === 1 ? 's' : ''} blocked: set their after with plan_update.` } : {}),
                     // Finishing one item is not the end of the turn (#981): the queue is worked until it is empty.
                     ...(updated.state === 'done' ? { next: PLAN_KEEP_GOING } : {})
                 };

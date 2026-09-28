@@ -51,7 +51,9 @@ export interface Progress {
     readonly pct: number;
 }
 
-function progressOf(items: readonly PlanItem[]): Progress {
+/** Progress counts what is still meant to be done: a dropped item (#1041) is neither done nor left to do. */
+function progressOf(all: readonly PlanItem[]): Progress {
+    const items = all.filter((i) => i.state !== 'dropped');
     const done = items.filter((i) => i.state === 'done').length;
     return { done, total: items.length, pct: items.length ? Math.round((done / items.length) * 100) : 0 };
 }
@@ -66,8 +68,8 @@ export const progressText = (p: Progress): string => `${p.done} of ${p.total} do
 export const actorKey = (a: PlanActor): string => (a.kind === 'agent' ? `agent:${a.agentId}` : `user:${a.userId}`);
 export const sameActor = (a: PlanActor | undefined, b: PlanActor | undefined): boolean => a !== undefined && b !== undefined && actorKey(a) === actorKey(b);
 
-/** Whether an item is still to do (anything but done). */
-export const isOpen = (i: Pick<PlanItem, 'state'>): boolean => i.state !== 'done';
+/** Whether an item is still to do (anything but done or dropped). */
+export const isOpen = (i: Pick<PlanItem, 'state'>): boolean => i.state !== 'done' && i.state !== 'dropped';
 
 /** A path cut to its last two segments, as rows and chips print it: `plugins/model.ts`. */
 export function shortPath(path: string): string {
@@ -101,10 +103,12 @@ export interface MetaPart {
 /**
  * The line under an item's title: `waits on #9`, `after #8 · touches 2 paths · t_93d1`,
  * `touches plugins/model.ts · overlaps #9`, `Atlas asks you · 2 options`. A done item has none. An overlap is named
- * on the later item only, so the earlier one reads as the one the other waits for.
+ * on the later item only, so the earlier one reads as the one the other waits for. A dropped item (#1041) says why:
+ * `dropped · superseded by #18 · replaced by the second cut`.
  */
 export function itemMeta(item: PlanItem, items: readonly PlanItem[], name: (a: PlanActor) => string, run?: PlanItemRun): MetaPart[] {
     if (item.state === 'done') return [];
+    if (item.state === 'dropped') return droppedMeta(item);
     const parts: MetaPart[] = [];
     if (item.state === 'needs-you') {
         parts.push({ text: item.assignedBy ? `${name(item.assignedBy)} asks you` : 'Needs you', tone: 'needs-you' });
@@ -124,6 +128,16 @@ export function itemMeta(item: PlanItem, items: readonly PlanItem[], name: (a: P
     return parts;
 }
 
+/** A dropped item's line: `dropped`, what supersedes it, and the note. */
+export function droppedMeta(item: Pick<PlanItem, 'dropped'>): MetaPart[] {
+    const d = item.dropped;
+    return [
+        { text: 'dropped', tone: 'dim' },
+        ...(d?.supersededBy !== undefined ? [{ text: `superseded by #${d.supersededBy}`, tone: 'dim' as const }] : []),
+        ...(d?.note ? [{ text: d.note, tone: 'dim' as const }] : [])
+    ];
+}
+
 export type OwnerTone = 'working' | 'needs-you' | 'failed' | 'dim';
 export interface OwnerStatus {
     readonly text: string;
@@ -134,6 +148,7 @@ export interface OwnerStatus {
 export function ownerStatus(item: PlanItem): OwnerStatus {
     switch (item.state) {
         case 'done': return { text: 'done', tone: 'dim' };
+        case 'dropped': return { text: 'dropped', tone: 'dim' };
         case 'claimed': return { text: 'working', tone: 'working' };
         case 'stuck': return { text: 'stuck', tone: 'failed' };
         case 'needs-you': return { text: 'your call', tone: 'needs-you' };
@@ -216,8 +231,14 @@ export function defaultItem(plan: Pick<Plan, 'phases'>): PlanItem | undefined {
     return items.find((i) => i.state === 'claimed') ?? items.find(isOpen);
 }
 
-/** Which plan `?plan=` names; the first when it names none of them. */
-export const planOf = (docs: readonly PlanDoc[], id: unknown): PlanDoc | undefined => docs.find((d) => d.plan.id === id) ?? docs[0];
+/**
+ * Which plan `?plan=` names; the first when it names none of them. With no `?plan=`, the one holding item `?item=`
+ * (#1041: Work's Decide links to the item alone).
+ */
+export const planOf = (docs: readonly PlanDoc[], id: unknown, item?: unknown): PlanDoc | undefined =>
+    docs.find((d) => d.plan.id === id)
+    ?? (id === undefined && item !== undefined ? docs.find((d) => planItems(d.plan).some((i) => i.id === Number(item))) : undefined)
+    ?? docs[0];
 
 /** Minutes left on a lease, never below 0. */
 export const leaseMinutesLeft = (leaseUntil: number, now: number): number => Math.max(0, Math.ceil((leaseUntil - now) / 60_000));

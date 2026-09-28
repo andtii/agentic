@@ -125,8 +125,8 @@ export function tallyProjectWork(tasks: readonly TaskIndexRow[], pulls: readonly
     };
 }
 
-/** Plan items still to do: every one that is not done. */
-export const openPlanItemCount = (planItems: readonly PlanItem[]): number => planItems.filter((i) => i.state !== 'done').length;
+/** Plan items still to do: every one that is not done or dropped (#1041). */
+export const openPlanItemCount = (planItems: readonly PlanItem[]): number => planItems.filter((i) => i.state !== 'done' && i.state !== 'dropped').length;
 
 /** A task still in flight: neither completed, failed nor cancelled. */
 export const isOpenTask = (t: Pick<TaskIndexRow, 'status'>): boolean => !isTerminal(t.status);

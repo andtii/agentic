@@ -90,7 +90,7 @@ export const PlanList = component<ProjectPageProps>(({ props }) => {
 
     return () => {
         const docs = store.docs();
-        const doc = planOf(docs, route.query.plan);
+        const doc = planOf(docs, route.query.plan, route.query.item);
         if (!doc) {
             if (store.loading) return <section aria-label="Plan" data-plan-list="" data-loading=""><p data-plan-none="" role="status">Loading the plan…</p></section>;
             return (

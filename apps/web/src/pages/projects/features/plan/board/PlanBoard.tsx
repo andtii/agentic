@@ -80,7 +80,7 @@ const LivePlanBoard = component<ProjectPageProps>(({ props }) => {
     const pick = (n: number | null): void => { st.open = n; };
     const nav = usePlanNav('board', () => props.project.id, store);
     const items = (): readonly PlanItem[] => {
-        const doc = planOf(store.docs(), route.query.plan);
+        const doc = planOf(store.docs(), route.query.plan, route.query.item);
         return doc ? planItems(doc.plan) : [];
     };
     const move = (id: number, slot: BoardSlot, note?: string): void => {
@@ -104,7 +104,7 @@ const LivePlanBoard = component<ProjectPageProps>(({ props }) => {
         void writes.assign(id, to, to === null ? undefined : assignIndex(item, slot, boardColumns(all, props.project.members, now, me ?? '')));
     };
     return () => {
-        const doc = planOf(store.docs(), route.query.plan);
+        const doc = planOf(store.docs(), route.query.plan, route.query.item);
         const note = st.refused || store.note();
         const now = Date.now();
         const open = st.open === undefined ? queriedItem(route.query.item, items()) : st.open;

@@ -213,6 +213,26 @@ export function workActionsOf(item: WorkItem, tasks: readonly WorkTask[]): reado
     return [];
 }
 
+/**
+ * What a plan item's row offers (#1041): a stuck item is reopened (back to ready in the same queue), reassigned to
+ * another member, or dropped; a needs-you item is decided on its plan item, or dropped.
+ */
+export type PlanItemAction = 'decide' | 'reopen' | 'reassign' | 'drop';
+
+/** The plan item a row stands for (`item:<n>`, no task carrying it), or `undefined`. */
+export function planItemOfRow(item: WorkItem, planItems: readonly PlanItem[]): PlanItem | undefined {
+    const m = /^item:(\d+)$/.exec(item.id);
+    return m ? planItems.find((i) => i.id === Number(m[1])) : undefined;
+}
+
+/** The plan actions a row offers: stuck → Reopen, Reassign, Drop; needs-you → Decide, Drop; anything else none. */
+export function planItemActionsOf(item: WorkItem, planItems: readonly PlanItem[]): readonly PlanItemAction[] {
+    const p = planItemOfRow(item, planItems);
+    if (p?.state === 'stuck') return ['reopen', 'reassign', 'drop'];
+    if (p?.state === 'needs-you') return ['decide', 'drop'];
+    return [];
+}
+
 /** The agent a row shows: whoever acts next, else the agent doing the work. */
 export function workAgentOf(item: WorkItem, tasks: readonly WorkTask[], pulls: readonly PullRequest[]): AgentId | undefined {
     if (item.owner.kind === 'agent') return item.owner.agentId;
