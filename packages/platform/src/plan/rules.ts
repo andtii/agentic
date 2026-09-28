@@ -1051,6 +1051,25 @@ export function update(book: PlanBook, call: PlanCall, itemId: number, patch: Pl
 }
 
 /**
+ * Replace the paths an item touches (#1074): relative to the project, at most `TOUCHES_MAX`, a backslash read as `/`. An
+ * empty list is allowed — the item then runs alone (#1047). Project manager and people; a done or dropped item keeps its
+ * touches.
+ */
+export function setTouches(book: PlanBook, call: PlanCall, itemId: number, paths: readonly string[]): Outcome<StoredItem> {
+    const actor = requireManager(call, 'change what an item touches');
+    const item = itemOf(book, itemId);
+    if (item.state === 'done' || item.state === 'dropped') fail('done', `#${item.id} is ${item.state}`);
+    // A replacing write: a missing list is refused, never read as "clear them" (an empty list is how to clear).
+    if (!Array.isArray(paths)) fail('invalid', 'touches must be a list of paths (empty to clear them)');
+    const next = [...new Set(list(paths, 'touches', TOUCHES_MAX, checkPath))];
+    if (next.length === item.touches.length && next.every((p, i) => p === item.touches[i])) return { value: item, changes: [] };
+    item.touches = next;
+    const line = next.length ? `touches ${next.join(', ')}` : 'touches nothing named, so it runs alone';
+    note(item, call.now, actor, line);
+    return { value: item, changes: [{ op: 'updated', actor, planId: item.planId, itemId: item.id, summary: `#${item.id} ${line}: ${item.title}` }] };
+}
+
+/**
  * A person (or the manager) answers the question a `needs-you` item waits on (#1043): the answer is noted, the item is
  * `ready` again, and the agent that asked — else the assigned agent — is told the question and the answer, so it picks
  * the item back up.

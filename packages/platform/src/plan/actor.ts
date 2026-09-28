@@ -76,6 +76,7 @@ import {
     PlanRuleError,
     renewLeases,
     splitItem,
+    setTouches,
     startItems,
     unstart,
     takeNotices,
@@ -648,6 +649,14 @@ export function definePlanActor(options: PlanActorOptions = {}) {
                         return setAfter(b, call, itemId, parsed, projectList);
                     });
                     return viewOf(item);
+                },
+
+                /**
+                 * Replace the paths an item touches (#1074), relative to the project; empty, the item runs alone (#1047).
+                 * Project manager and people.
+                 */
+                async touches(itemId: number, paths: readonly string[]): Promise<PlanItem> {
+                    return viewOf(await write((b, c) => setTouches(b, c, itemId, paths)));
                 },
 
                 /** Put an item in a queue at `index` (or move it within one), or `null` back to the open pool. Project manager and people. */
