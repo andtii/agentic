@@ -8,7 +8,7 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "build": "pnpm --filter \"@agentic/web^...\" build && pnpm --dir ../web exec vite build --app --mode node",
+    "bundle": "pnpm --filter \"@agentic/web^...\" build && pnpm --dir ../web exec vite build --app --mode node",
     "start": "node dist/main.js"
   },
   "dependencies": {

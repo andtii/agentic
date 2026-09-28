@@ -199,7 +199,7 @@ The whole platform in one Node process (Node ≥ 22.13, for `node:sqlite`) — n
 
 ```sh
 pnpm install
-pnpm --filter @agentic/node build   # the packages, then the web app's Vite build (--mode node) into apps/node/dist/main.js
+pnpm --filter @agentic/node bundle  # the packages, then the web app's Vite build (--mode node) into apps/node/dist/main.js
 pnpm --filter @agentic/node start   # node apps/node/dist/main.js
 ```
 
@@ -208,7 +208,8 @@ pnpm --filter @agentic/node start   # node apps/node/dist/main.js
 - **Sign in** with that link, add your Anthropic key at `/plugins/anthropic-api`, and chat as in §4. `BASE_URL=http://localhost:8787 AGENTIC_DEV_LOGIN=<.env value> ANTHROPIC_API_KEY=<key> pnpm --filter @agentic/web smoke:demo1` runs the scripted walk-through against it.
 - **Pair a daemon** from `/pair` exactly as in §4: `agentic-daemon pair <code> --url http://localhost:8787 --name <name>`, then `agentic-daemon run`. The daemon socket is `/_agentic/daemon/{machineId}` on the same port.
 - **Stop** with Ctrl+C (or SIGTERM): the host finishes its turns, flushes state and closes the database. A crash (`kill -9`) loses only the turn that was running: what earlier turns saved is in `agentic.db`, reminders that fell due meanwhile fire on the next start, and detached runs are picked up again.
-- There is no hot reload: after a source change, `pnpm --filter @agentic/node build` and start again.
+- The script is `bundle`, not `build`, on purpose: the root `pnpm build` runs every package's `build`, and this one builds the packages itself — two builds of `@agentic/ui` at once break each other.
+- There is no hot reload: after a source change, `pnpm --filter @agentic/node bundle` and start again.
 
 ## 5. Daemon on a machine (Windows, macOS, Linux)
 

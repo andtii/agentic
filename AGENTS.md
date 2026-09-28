@@ -180,7 +180,7 @@ pnpm test:scripts     # node --test for scripts/
 pnpm --filter @agentic/web test:workers  # Worker + ActorHost DO inside workerd (Node >= 22)
 ```
 
-Run the platform on Node instead (#988, `docs/runbook.md` §4b): `pnpm --filter @agentic/node build`
+Run the platform on Node instead (#988, `docs/runbook.md` §4b): `pnpm --filter @agentic/node bundle`
 (the packages, then the web app's Vite build with `--mode node` into `apps/node/dist/main.js`) and
 `pnpm --filter @agentic/node start` — one process on http://localhost:8787, data in `$AGENTIC_HOME`
 (default `~/.agentic`).

@@ -4,7 +4,7 @@
  * (`<home>/files`), the Worker's HTTP routes, the live actor sockets and the
  * daemon socket, on one port (`PORT`, default 8787).
  *
- * Built by `pnpm --filter @agentic/node build` (the web app's Vite build with
+ * Built by `pnpm --filter @agentic/node bundle` (the web app's Vite build with
  * `--mode node`, so the server functions and the document render bundle in).
  * SIGINT / SIGTERM drain: new responses carry `connection: close`, the host
  * finishes its turns and flushes state, then the listener and the database
