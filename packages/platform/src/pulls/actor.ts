@@ -7,6 +7,11 @@
  * poll that changed nothing, up to `POLL_MAX_MS`, and drops back to the floor on any change. A failing source
  * backs off the same way; a `rate-limited` one waits until its `retryAt`.
  *
+ * Dormant without demand (#985): a poll that finds no demand — no check queued or running, no autopilot turn running
+ * or settling, no task waiting on an open PR, nobody reading the view within `VIEW_DEMAND_MS` — arms nothing and marks
+ * the actor `dormant`. `get`, `watch`, `report`, `merge` and `linkBranch` record the read (`viewedAt`); a `get` that
+ * finds the actor dormant with its last poll older than `POLL_FLOOR_MS` wakes it with a poll at once.
+ *
  * A PR is linked to its task, chat and session by its head branch (`linkBranch`, the branch `gitBranchFor`
  * gave the chat) or by the agent reporting it (`report`). A linked task waits `pull-request {number, state}`
  * while the PR is open, completes when it merges and fails when it is closed without merging. `pull.merged` and
@@ -41,6 +46,7 @@ import { taskKey } from '../task/key.js';
 import { parsePullsKey, PULLS_TYPE } from './key.js';
 import type { PullSource, PullSourcePort } from './ports.js';
 import {
+    AUTOPILOT_SETTLE_MS,
     ASK_ON_MERGE,
     PERSON_MERGE,
     autopilotMergeAnswered,
@@ -110,6 +116,10 @@ export interface PullsState {
     error?: string;
     /** Set when the last poll found no credential for the repo (#840); absent after a good one. */
     readiness?: PullsReadiness;
+    /** When the view was last read (`get`, `watch`, …): a reader within `VIEW_DEMAND_MS` is demand (#985). */
+    viewedAt?: number;
+    /** The last poll found no demand and armed nothing (#985); the next read wakes it. */
+    dormant?: true;
 }
 
 /** Where a PR's autopilot run stands (#858): what the page's Resume and Approve / Decline follow. */
@@ -133,6 +143,8 @@ export interface PullsView {
     readonly error?: string;
     /** `needs-sign-in`: the last poll found no credential for the repo (#840) — the project needs a GitHub connector or token. */
     readonly readiness?: PullsReadiness;
+    /** Nothing is polling (#985): no demand at the last poll. The next read wakes it when the data is stale. */
+    readonly dormant?: true;
 }
 
 /** Why the actor cannot read: only a missing credential, so far (#840). */
@@ -210,8 +222,10 @@ function checkSwitches(pilot: AutopilotSwitches): AutopilotSwitches {
 export const PULLS_POLL = 'poll';
 /** The platform's reminder resolution, and the interval while a check runs. */
 export const POLL_FLOOR_MS = 60_000;
-/** The longest idle interval. */
-export const POLL_MAX_MS = 15 * 60_000;
+/** The longest idle interval, while there is demand but nothing changes. */
+export const POLL_MAX_MS = 60 * 60_000;
+/** A read of the view within this long is demand: an open Home or Pulls page keeps the actor polling (#985). */
+export const VIEW_DEMAND_MS = 30 * 60_000;
 /** Settled (merged or closed) PRs kept on the view, newest first. */
 export const SETTLED_PULLS_KEPT = 50;
 /** Branch links kept; the oldest go first. */
@@ -281,7 +295,8 @@ export function definePullsActor(options: PullsActorOptions) {
         ...(s.polledAt !== undefined ? { polledAt: s.polledAt } : {}),
         ...(s.next !== undefined ? { next: s.next } : {}),
         ...(s.error !== undefined ? { error: s.error } : {}),
-        ...(s.readiness !== undefined ? { readiness: s.readiness } : {})
+        ...(s.readiness !== undefined ? { readiness: s.readiness } : {}),
+        ...(s.dormant ? { dormant: true as const } : {})
     });
 
     /** Fold a fresh read into the tracked PR: the provider's facts, our links and what only we know. Returns whether it changed. */
@@ -411,6 +426,23 @@ export function definePullsActor(options: PullsActorOptions) {
         if (isTerminal(task.status) || (task.status === 'waiting' && task.wait?.kind === 'pull-request')) t.autopilot = autopilotTurnEnded(t.autopilot, now());
     };
 
+    /**
+     * Whether anything needs the next poll (#985): a check queued or running, an autopilot turn running or settling,
+     * a task waiting on an open (or reported) PR, or a reader within `VIEW_DEMAND_MS`.
+     */
+    const hasDemand = (s: PullsState, at: number): boolean => {
+        if (s.viewedAt !== undefined && at - s.viewedAt < VIEW_DEMAND_MS) return true;
+        if (Object.values(s.reported).some((l) => l.taskId !== undefined)) return true;
+        return Object.values(s.pulls).some((t) => {
+            if (t.pr.state !== 'open') return false;
+            if (t.pr.checks.some((c) => c.state === 'queued' || c.state === 'running')) return true;
+            if (turnRuns(t)) return true;
+            const ended = t.autopilot?.turn?.endedAt;
+            if (ended !== undefined && at - ended < AUTOPILOT_SETTLE_MS) return true;
+            return t.pr.taskId !== undefined && t.taskDone !== t.pr.taskId;
+        });
+    };
+
     const portFor = (s: PullsState): PullsAutopilotPort | undefined => options.autopilot?.({ workspaceId: s.workspaceId, projectId: s.projectId });
 
     /**
@@ -482,6 +514,7 @@ export function definePullsActor(options: PullsActorOptions) {
         const before = new Map(Object.values(s.pulls).map((t) => [t.pr.number, shown(t)] as const));
         if (!s.repo) {
             delete s.next;
+            delete s.dormant;
             await ctx.save();
             await ctx.reminders.clear(PULLS_POLL);
             return;
@@ -548,9 +581,18 @@ export function definePullsActor(options: PullsActorOptions) {
         }
         prune(s);
         s.polledAt = at;
-        s.next = at + delay;
-        await ctx.save();
-        await ctx.reminders.set(PULLS_POLL, { due: delay });
+        if (hasDemand(s, at)) {
+            delete s.dormant;
+            s.next = at + delay;
+            await ctx.save();
+            await ctx.reminders.set(PULLS_POLL, { due: delay });
+        } else {
+            // Nobody needs the next read (#985): arm nothing until a reader wakes it.
+            delete s.next;
+            s.dormant = true;
+            await ctx.save();
+            await ctx.reminders.clear(PULLS_POLL);
+        }
         if (s.error === undefined) await notifyMoves(ctx, before, baseline);
     };
 
@@ -588,8 +630,28 @@ export function definePullsActor(options: PullsActorOptions) {
                 if (!t) throw new ServerFnError(404, `[pulls] #${number} is not tracked`);
                 return t;
             };
+            /**
+             * A read of the view (#985): recorded as `viewedAt` (saved at most once a floor), and a dormant actor whose
+             * last poll is older than the floor is woken with a poll at once.
+             */
+            const viewed = async (): Promise<void> => {
+                const s = ctx.state;
+                const at = now();
+                const wake = s.dormant === true && s.repo !== undefined && (s.polledAt === undefined || at - s.polledAt >= POLL_FLOOR_MS);
+                const stale = s.viewedAt === undefined || at - s.viewedAt >= POLL_FLOOR_MS;
+                if (!wake && !stale) return;
+                s.viewedAt = at;
+                if (wake) {
+                    delete s.dormant;
+                    s.intervalMs = POLL_FLOOR_MS;
+                    s.next = at;
+                }
+                await ctx.save();
+                if (wake) await ctx.reminders.set(PULLS_POLL, { due: 0 });
+            };
             /** Save the change; with `pollNow`, read (and drive) at once on the next reminder. */
             const settle = async (pollNow = true): Promise<PullsView> => {
+                if (pollNow && ctx.state.repo) delete ctx.state.dormant;
                 await ctx.save();
                 if (pollNow && ctx.state.repo) await ctx.reminders.set(PULLS_POLL, { due: 0 });
                 return view(ctx.state);
@@ -609,6 +671,7 @@ export function definePullsActor(options: PullsActorOptions) {
                     }
                     s.repo = { provider: ref.provider, repo: ref.repo };
                     s.intervalMs = POLL_FLOOR_MS;
+                    s.viewedAt = now();
                     // A new repo's first read is the baseline: its PRs already red are not a burst of rows.
                     await poll(ctx, fresh);
                     return view(s);
@@ -631,6 +694,11 @@ export function definePullsActor(options: PullsActorOptions) {
                     s.branches[branch] = checkLink(link);
                     const names = Object.keys(s.branches);
                     for (const name of names.slice(0, Math.max(0, names.length - BRANCH_LINKS_KEPT))) delete s.branches[name];
+                    s.viewedAt = now();
+                    if (s.repo) {
+                        delete s.dormant;
+                        s.next = s.viewedAt;
+                    }
                     await ctx.save();
                     if (s.repo) await ctx.reminders.set(PULLS_POLL, { due: 0 });
                     return view(s);
@@ -659,6 +727,7 @@ export function definePullsActor(options: PullsActorOptions) {
                         }
                     }
                     s.intervalMs = POLL_FLOOR_MS;
+                    s.viewedAt = now();
                     await poll(ctx);
                     return view(s);
                 },
@@ -762,6 +831,7 @@ export function definePullsActor(options: PullsActorOptions) {
                     delete t.mergeAsk;
                     t.mergedBy = by;
                     ctx.state.intervalMs = POLL_FLOOR_MS;
+                    ctx.state.viewedAt = now();
                     return settle();
                 },
 
@@ -774,6 +844,7 @@ export function definePullsActor(options: PullsActorOptions) {
 
                 async get(): Promise<PullsView> {
                     requireKey();
+                    await viewed();
                     return view(ctx.state);
                 }
             };
