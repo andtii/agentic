@@ -32,7 +32,8 @@ describe.skipIf(!nodeSqlite)('agentic start', () => {
 
     const tmp = async (): Promise<string> => {
         const dir = await mkdtemp(join(tmpdir(), 'agentic-start-'));
-        cleanup.push(() => rm(dir, { recursive: true, force: true }));
+        // Windows: files the daemon just closed can still be held for a moment (ENOTEMPTY, #1068), so retry.
+        cleanup.push(() => rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
         return dir;
     };
 
