@@ -30,6 +30,11 @@ export interface ItemLinksRead {
     readonly touchesError?: string;
 }
 
+/** The Plan actor's limits (`AFTER_MAX`, `TOUCHES_MAX`, `PATH_MAX` in `@agentic/platform`'s plan rules), checked here so the field says so. */
+export const FORM_AFTER_MAX = 50;
+export const FORM_TOUCHES_MAX = 50;
+export const FORM_PATH_MAX = 500;
+
 const LOCAL = /^#?(\d+)$/;
 const CROSS = /^([A-Za-z0-9][\w.-]*)#(\d+)$/;
 
@@ -48,6 +53,7 @@ export function readAfter(text: string): { readonly values: readonly AfterValue[
         seen.add(key);
         values.push(value);
     }
+    if (values.length > FORM_AFTER_MAX) return { values: [], error: `After holds at most ${FORM_AFTER_MAX} items.` };
     return { values };
 }
 
@@ -57,9 +63,11 @@ export function readTouches(text: string): { readonly paths: readonly string[]; 
     for (const line of text.split(/\r?\n/)) {
         const p = line.trim().replace(/\\/g, '/');
         if (!p) continue;
+        if (p.length > FORM_PATH_MAX) return { paths: [], error: `A path is at most ${FORM_PATH_MAX} characters.` };
         if (p.startsWith('/') || /^[A-Za-z]:/.test(p) || p.split('/').includes('..')) return { paths: [], error: `Paths are relative to the project, not “${p}”.` };
         if (!paths.includes(p)) paths.push(p);
     }
+    if (paths.length > FORM_TOUCHES_MAX) return { paths: [], error: `Touches holds at most ${FORM_TOUCHES_MAX} paths.` };
     return { paths };
 }
 

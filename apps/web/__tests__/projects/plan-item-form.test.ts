@@ -4,7 +4,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import type { PlanItem } from '@agentic/core';
-import { draftOf, linksChanged, newItemInput, readAfter, readItemLinks, readTouches } from '../../src/pages/projects/features/plan/shared/item-form';
+import { FORM_AFTER_MAX, FORM_PATH_MAX, FORM_TOUCHES_MAX, draftOf, linksChanged, newItemInput, readAfter, readItemLinks, readTouches } from '../../src/pages/projects/features/plan/shared/item-form';
 
 const item = (over: Partial<PlanItem> = {}): PlanItem => ({ id: 9, title: 'x', state: 'ready', after: [], touches: [], refs: [], doneWhen: [], activity: [], ...over });
 
@@ -37,6 +37,21 @@ describe('readTouches (#1074)', () => {
     for (const bad of ['/etc/passwd', 'C:/x', 'c:\\x', 'a/../b', '..']) {
         it(`refuses ${JSON.stringify(bad)}`, () => expect(readTouches(bad).error).toMatch(/^Paths are relative to the project/));
     }
+});
+
+describe('the Plan actor’s limits, as field errors (#1074)', () => {
+    it('after: at most FORM_AFTER_MAX items', () => {
+        const many = (n: number) => Array.from({ length: n }, (_, i) => `#${i + 1}`).join(', ');
+        expect(readAfter(many(FORM_AFTER_MAX)).values).toHaveLength(FORM_AFTER_MAX);
+        expect(readAfter(many(FORM_AFTER_MAX + 1)).error).toBe(`After holds at most ${FORM_AFTER_MAX} items.`);
+    });
+    it('touches: at most FORM_TOUCHES_MAX paths, each at most FORM_PATH_MAX characters', () => {
+        const many = (n: number) => Array.from({ length: n }, (_, i) => `p${i}/`).join('\n');
+        expect(readTouches(many(FORM_TOUCHES_MAX)).paths).toHaveLength(FORM_TOUCHES_MAX);
+        expect(readTouches(many(FORM_TOUCHES_MAX + 1)).error).toBe(`Touches holds at most ${FORM_TOUCHES_MAX} paths.`);
+        expect(readTouches('a'.repeat(FORM_PATH_MAX)).paths).toHaveLength(1);
+        expect(readTouches('a'.repeat(FORM_PATH_MAX + 1)).error).toBe(`A path is at most ${FORM_PATH_MAX} characters.`);
+    });
 });
 
 describe('readItemLinks (#1074)', () => {
