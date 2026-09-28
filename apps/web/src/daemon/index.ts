@@ -151,14 +151,18 @@ export function createDaemonSocketRegistry(): DaemonSocketRegistry {
                 }
                 return sent > 0;
             },
-            // Open, and — once the daemon pings (#984) — answered within `DAEMON_PING_STALE_MS`: a half-open path the
-            // runtime never closed stops counting. A socket never pinged (an older daemon, or one just accepted) counts.
+            // Open and answered within `DAEMON_PING_STALE_MS` (#984): a half-open path the runtime never closed stops
+            // counting. A socket never pinged (an older daemon, or one just accepted) cannot be vouched for: `undefined`,
+            // and the Machine falls back to its heartbeat window (#1002) — unless another socket of the key is fresh.
             isConnected: (key) => {
                 const state = states.get(key) as AutoResponseState | undefined;
-                return sockets(key).some((ws) => {
+                let unknown = false;
+                for (const ws of sockets(key)) {
                     const at = state?.getWebSocketAutoResponseTimestamp?.(ws);
-                    return !at || Date.now() - at.getTime() < DAEMON_PING_STALE_MS;
-                });
+                    if (!at) unknown = true;
+                    else if (Date.now() - at.getTime() < DAEMON_PING_STALE_MS) return true;
+                }
+                return unknown ? undefined : false;
             },
             close(key, code, reason) {
                 for (const ws of sockets(key)) {
