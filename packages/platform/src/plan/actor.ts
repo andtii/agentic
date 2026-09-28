@@ -12,7 +12,8 @@
  * nobody calling. Expiry puts the item back at the top of its assignee's queue and leaves the manager a notice.
  * Notices (lease ran out, touches overlap, handoffs) wake their addressee once the turn is saved (#938, `wake.ts`): a
  * chat message addressed to an agent, an Inbox row for a person; one that reaches nobody waits on the actor until its
- * addressee takes it (`takeNotices`, which the plan tools do on each call).
+ * addressee takes it (`takeNotices`, which the plan tools do on each call). After every write an idle agent whose queue
+ * has ready work is told so once (`ready`, #981, `tellReady`), so a queue drains without anyone nudging its agent.
  *
  * The Plan feature's project settings are enforced here (#938, `settings.ts`): `claimLimit` (a member's own limit
  * overriding it), `leaseMinutes`, `agentsMayTick`, and `starter` for a new plan given no phases. A merged pull request
@@ -73,6 +74,7 @@ import {
     renewLeases,
     splitItem,
     takeNotices,
+    tellReady,
     update,
     viewState,
     AFTER_MAX,
@@ -326,6 +328,9 @@ export function definePlanActor(options: PlanActorOptions = {}) {
         if (turn) await wakeAddressees(ctx, turn);
     };
 
+    /** `tellReady` with this project's cross-project waits: an item waiting on another project is not counted ready. */
+    const tellIdle = (s: PlanState, call: PlanCall): void => tellReady(s, call, (item) => crossAfterOf(item).length > 0);
+
     const toServerError = (error: unknown): never => {
         if (error instanceof PlanRuleError) throw new ServerFnError(error.status, error.message, { code: error.code });
         throw error;
@@ -376,9 +381,11 @@ export function definePlanActor(options: PlanActorOptions = {}) {
                 try {
                     const out = rule(s, call);
                     changes.push(...out.changes);
+                    tellIdle(s, call);
                     await commit(ctx, changes, call.now, turn);
                     return out.value;
                 } catch (error) {
+                    tellIdle(s, call);
                     await commit(ctx, changes, call.now, turn);
                     return toServerError(error);
                 }
@@ -398,6 +405,7 @@ export function definePlanActor(options: PlanActorOptions = {}) {
                 } catch (error) {
                     return toServerError(error);
                 } finally {
+                    if (changes.length) tellIdle(s, call);
                     if (changes.length || renewed) await commit(ctx, changes, call.now, turn);
                 }
             };
@@ -678,6 +686,7 @@ export function definePlanActor(options: PlanActorOptions = {}) {
             const call = planCallOf(project, now(), null);
             const turn = turnOf(ctx, null);
             const changes = expireLeases(s, call);
+            tellIdle(s, call);
             // Force a re-arm: the reminder that fired is spent.
             delete s.leaseAlarm;
             await commit(ctx, changes, call.now, turn);

@@ -122,12 +122,15 @@ export interface StoredPlan {
     createdBy: PlanActor;
 }
 
-/** Something an agent or person is told: a lease ran out, touches overlap, an item was handed to them. */
+/**
+ * Something an agent or person is told: a lease ran out, touches overlap, an item was handed to them or moved off them,
+ * or (`ready`, #981) an idle agent's queue has an item it can claim now.
+ */
 export interface PlanNotice {
     readonly seq: number;
     readonly at: number;
     readonly to: PlanActor;
-    readonly kind: 'lease-expired' | 'touches' | 'handoff' | 'reassigned';
+    readonly kind: 'lease-expired' | 'touches' | 'handoff' | 'reassigned' | 'ready';
     readonly itemId: number;
     readonly text: string;
     /** `touches`: the other item and the suggested order (first to last). */
@@ -149,6 +152,11 @@ export interface PlanBook {
     queues: Record<string, number[]>;
     notices: PlanNotice[];
     nextNotice: number;
+    /**
+     * Idle agents already told their queue has ready work (#981, `tellReady`): not told again until they claim an item
+     * or run out of ready work. Absent on books stored before it.
+     */
+    readyTold?: AgentId[];
 }
 
 export function emptyBook(workspaceId: WorkspaceId, projectId: ProjectId): PlanBook {
@@ -951,6 +959,42 @@ export function openItems(book: PlanBook, now: number): OpenPlanItem[] {
         }
     }
     return out;
+}
+
+/** What a `ready` notice asks of the agent it wakes: work the whole queue, not one item. */
+export const READY_WORK_TEXT = 'work your queue: plan_next → plan_claim → do the work → tick its done-when with plan_update; repeat until plan_next returns nothing or an item needs a person, then post one status';
+
+/**
+ * Tell each idle member agent whose queue has ready work (#981): an agent holding no live claim whose queue holds an
+ * item it could claim now (`claimRefusal`, no touches clash, not waiting on another project — `waitsElsewhere`) gets
+ * one `ready` notice naming the first such item. Run after every write, so work that is assigned, unblocked by a done
+ * item (ticked, marked or merged) or released back to a queue reaches its assignee.
+ *
+ * Told once per idle spell (`readyTold`): not again until the agent claims an item or has no ready work left. An
+ * unread notice already about that item (a handoff) counts as the telling.
+ */
+export function tellReady(book: PlanBook, call: PlanCall, waitsElsewhere: (item: StoredItem) => boolean = () => false): void {
+    const told = new Set(book.readyTold ?? []);
+    for (const agentId of new Set(call.members)) {
+        if (claimsOf(book, agentId, call.now).length) {
+            told.delete(agentId);
+            continue;
+        }
+        const head = (book.queues[`agent:${agentId}`] ?? [])
+            .map((n) => book.items[String(n)])
+            .find((item): item is StoredItem => !!item && !waitsElsewhere(item) && !claimRefusal(book, call, agentId, item) && !clashes(book, call, agentId, item).length);
+        if (!head) {
+            told.delete(agentId);
+            continue;
+        }
+        if (told.has(agentId)) continue;
+        told.add(agentId);
+        const to = agentActor(agentId);
+        if (book.notices.some((n) => sameActor(n.to, to) && n.itemId === head.id && (n.kind === 'handoff' || n.kind === 'ready'))) continue;
+        tell(book, { at: call.now, to, kind: 'ready', itemId: head.id, text: `#${head.id} is ready for you: ${head.title}. ${READY_WORK_TEXT[0]!.toUpperCase()}${READY_WORK_TEXT.slice(1)}.` });
+    }
+    if (told.size) book.readyTold = [...told];
+    else delete book.readyTold;
 }
 
 /** Take (remove and return) the notices addressed to `to`, oldest first. */

@@ -16,6 +16,9 @@ import { z } from 'zod';
 import { PLAN_TOOLS, formatRef, parseRef, planClaimLive, planDoneWhenMet, planItemWaitsOn, planItems, planTouchesOverlap, type AgentId, type Plan, type PlanActor, type PlanDoneWhen, type PlanItem, type PlanItemState, type Ref } from '@agentic/core';
 import type { ToolCall } from './ports.js';
 
+/** What `plan_update` answers when an item is done (#981): keep working the queue rather than end the turn. */
+export const PLAN_KEEP_GOING = 'run plan_next and claim what it returns; repeat until it returns nothing or an item needs a person, then post one status.';
+
 /** A member of the project as the plan names them: `@handle`. */
 export interface PlanMember {
     readonly actor: PlanActor;
@@ -337,7 +340,7 @@ export function planTools(port: PlanPort | undefined) {
                 const board = await need(port, NEXT).board(call(ctx));
                 const now = Date.now();
                 const next = planNext(board, input.plan, now);
-                if (!next) return { item: null, note: 'nothing is ready for you: your queue is empty or waiting, and no open item has its after-items done without a path clash.' };
+                if (!next) return { item: null, note: 'nothing is ready for you: your queue is empty or waiting, and no open item has its after-items done without a path clash. Post one status of what you finished and what waits on whom.' };
                 return { item: planItemView(board, next, now), from: next.item.assignee ? 'your queue' : 'open items' };
             }
         }),
@@ -392,7 +395,14 @@ export function planTools(port: PlanPort | undefined) {
                     if (!patching) return { item: linked.id, state: linked.state, after: afterText(linked) };
                 }
                 const updated = await p.update({ item: input.item, ...(input.check ? { check: input.check } : {}), ...(input.uncheck ? { uncheck: input.uncheck } : {}), ...(input.note !== undefined ? { note: input.note } : {}), ...(input.state !== undefined ? { state: input.state } : {}) }, call(ctx));
-                return { item: updated.id, state: updated.state, doneWhen: ticked(updated.doneWhen), ...(input.after !== undefined ? { after: afterText(updated) } : {}) };
+                return {
+                    item: updated.id,
+                    state: updated.state,
+                    doneWhen: ticked(updated.doneWhen),
+                    ...(input.after !== undefined ? { after: afterText(updated) } : {}),
+                    // Finishing one item is not the end of the turn (#981): the queue is worked until it is empty.
+                    ...(updated.state === 'done' ? { next: PLAN_KEEP_GOING } : {})
+                };
             }
         }),
         defineTool({
