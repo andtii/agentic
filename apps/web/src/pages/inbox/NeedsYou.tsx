@@ -17,10 +17,15 @@
  * `pullSurface="notification"` (#951) the same PRs are Inbox rows instead:
  * `PullCard`'s `notification` surface (`agentic#603 needs you` and why), the
  * headline linked to the PR page, no merge button.
+ *
+ * Plan items an agent set to needs-you join it too (#1044), read from every project's Plan: the question, who asked,
+ * and the answer box — answering sends the item back to ready and wakes the agent that asked; the row leaves once the
+ * item no longer needs you, whoever answered it and wherever.
  */
 import { component } from 'sigx';
+import { Link } from '@sigx/router';
 import type { Decision } from '@sigx/ai-agent';
-import type { PullRequest } from '@agentic/core';
+import type { PlanActor, PlanItem, PullRequest } from '@agentic/core';
 import type { OpenRequest } from '@sigx/ai-agent/app';
 import { AgentTile, ApprovalPrompt, Button, EmptyState, EnvironmentLine, ErrorNote, NeedsItem, PullCard, QuestionPrompt, SectionHeading, pullNeedsYou, type ApprovalDecision } from '@agentic/ui';
 import type { SessionRequestView } from '@agentic/platform';
@@ -28,6 +33,7 @@ import { LinkButton } from '../ops/LinkButton';
 import { MachineNotice } from '../machines/MachineNotice';
 import { sortRows, type NeedsRow, type NeedsSource, type PlanApproval, type RequestState } from './source';
 import { chatHref } from '../chat/href';
+import { NeedsYouCard } from '../projects/features/plan/shared/NeedsYouCard';
 
 /** The Session's request as the card takes it. */
 export function openRequestOf(view: SessionRequestView): OpenRequest {
@@ -194,21 +200,90 @@ export const PullNoticeRow = component<{ pull: PullRequest; needs: PullNeeds }>(
     <PullCard pull={props.pull} surface="notification" me={props.needs.me} href={props.needs.href?.(props.pull)} />
 ));
 
+/** A plan item that needs a person, with the project and plan it is in. */
+export interface PlanNeed {
+    readonly projectId: string;
+    readonly projectName?: string;
+    readonly planId: string;
+    readonly item: PlanItem;
+}
+
+/** The plan items Home lists (#1044) and how it answers one; each write rejects when the Plan refuses it. */
+export interface PlanNeeds {
+    /** Called in the list's setup: a reactive getter of the items that need a person. */
+    useItems(): () => readonly PlanNeed[];
+    /** How an actor is named ("You", an agent's name). */
+    name(a: PlanActor): string;
+    now(): number;
+    /** The item on its plan page. */
+    href(need: PlanNeed): string;
+    answer?(need: PlanNeed, text: string): Promise<void>;
+    done?(need: PlanNeed): Promise<void>;
+}
+
+/** When the item started needing you: its question, else its last change. */
+const askedAt = (item: PlanItem): number => item.ask?.at ?? item.activity.at(-1)?.at ?? 0;
+
+/** The items that need a person, oldest question first. */
+export function planNeedsOf(needs: readonly PlanNeed[]): PlanNeed[] {
+    return needs.filter((n) => n.item.state === 'needs-you').sort((a, b) => askedAt(a.item) - askedAt(b.item));
+}
+
+const PlanNeedRowView = component<{ need: PlanNeed; needs: PlanNeeds }>(({ props, signal }) => {
+    const st = signal({ error: '' });
+    const attempt = (what: string, write: () => Promise<void>) => async (): Promise<boolean> => {
+        try {
+            await write();
+            st.error = '';
+            return true;
+        } catch (e) {
+            st.error = `Could not ${what}: ${e instanceof Error ? e.message.replace(/^[plan]s*/, '') : String(e)}`;
+            return false;
+        }
+    };
+    return () => {
+        const { need, needs } = props;
+        const answer = needs.answer;
+        const done = needs.done;
+        return (
+            <>
+                <p data-needs-plan-head>
+                    <Link to={needs.href(need)}>{`#${need.item.id} ${need.item.title}`}</Link>
+                    {need.projectName ? <span data-dim>{need.projectName}</span> : null}
+                </p>
+                <NeedsYouCard
+                    item={need.item}
+                    now={needs.now()}
+                    name={needs.name}
+                    {...(answer ? { onAnswer: (text: string) => attempt('send the answer', () => answer(need, text))() } : {})}
+                    {...(done ? { onDone: attempt(`mark #${need.item.id} done`, () => done(need)) } : {})}
+                    {...(st.error ? { error: st.error } : {})}
+                />
+            </>
+        );
+    };
+});
+
 /** The section: heading with the open count, the rows, or the inbox empty state. */
-export const NeedsYou = component<{ source: NeedsSource; pulls?: PullNeeds; pullSurface?: PullRowSurface }>(({ props }) => {
+export const NeedsYou = component<{ source: NeedsSource; pulls?: PullNeeds; pullSurface?: PullRowSurface; plans?: PlanNeeds }>(({ props }) => {
     const rows = props.source.useRows();
     const pulls = props.pulls?.usePulls();
+    const planItems = props.plans?.useItems();
     return () => {
         const sorted = sortRows(rows());
         const prs = pulls && props.pulls ? pullsNeedingYou(pulls(), props.pulls.me) : [];
         const needs = props.pulls;
+        const plans = props.plans;
+        const asked = planItems && plans ? planNeedsOf(planItems()) : [];
+        const count = sorted.length + prs.length + asked.length;
         return (
             <section data-home-needs aria-label="Needs you">
-                <SectionHeading count={`${sorted.length + prs.length} open`} slots={{ aside: () => 'answer here, in the chat, or on your phone' }}>Needs you</SectionHeading>
-                {sorted.length || prs.length
+                <SectionHeading count={`${count} open`} slots={{ aside: () => 'answer here, in the chat, or on your phone' }}>Needs you</SectionHeading>
+                {count
                     ? (
                         <div data-needs-list>
                             {sorted.map((row) => <div key={row.id} data-needs-row><NeedsRowView row={row} source={props.source} /></div>)}
+                            {plans ? asked.map((need) => <div key={`plan:${need.projectId}#${need.item.id}`} data-needs-row data-needs-plan={String(need.item.id)}><PlanNeedRowView need={need} needs={plans} /></div>) : null}
                             {needs ? prs.map((pr) => <div key={`pr:${pr.repo}#${pr.number}`} data-needs-row data-needs-pull={String(pr.number)}>{props.pullSurface === 'notification' ? <PullNoticeRow pull={pr} needs={needs} /> : <PullRowView pull={pr} needs={needs} />}</div>) : null}
                         </div>
                     )

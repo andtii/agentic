@@ -170,7 +170,7 @@ describe('the Plan list page on mock data (#754)', () => {
         dom.querySelector<HTMLButtonElement>('[data-fact="unblocks"] button')!.click();
         await tick();
         expect(dom.querySelector('[data-plan-detail]')?.getAttribute('data-plan-detail')).toBe('11');
-        const input = dom.querySelector<HTMLInputElement>('[data-plan-comment] input')!;
+        const input = dom.querySelector<HTMLTextAreaElement>('[data-plan-comment] textarea')!;
         input.value = 'see #9 and pr:604 with @lint';
         input.dispatchEvent(new Event('input', { bubbles: true }));
         await tick();
@@ -181,7 +181,11 @@ describe('the Plan list page on mock data (#754)', () => {
         expect(dom.querySelector('[data-plan-list]')?.getAttribute('data-detail')).toBe('closed');
         dom.querySelector<HTMLButtonElement>('[data-plan-item="12"] [data-plan-row]')!.click();
         await tick();
-        expect(text(dom.querySelector('[data-plan-detail] [data-plan-options]'))).toContain('Fold a2a into connector');
+        // A needs-you item opens on its question (#1044): who asked, what, and the options as quick answers.
+        expect(text(dom.querySelector('[data-plan-detail] [data-plan-needs-you-who]'))).toContain('Atlas asks');
+        expect(text(dom.querySelector('[data-plan-detail] [data-plan-needs-you-question]'))).toContain('Keep a2a as its own plugin kind');
+        expect(text(dom.querySelector('[data-plan-detail] [data-plan-needs-you-options]'))).toContain('Fold a2a into connector');
+        expect(dom.querySelector('[data-plan-detail] [data-plan-options]')).toBeNull();
     });
 
     it('opens on ?item= and narrows with search and Mine', async () => {

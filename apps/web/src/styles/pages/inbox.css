@@ -10,3 +10,8 @@
     [data-home-needs] > [data-section-heading] > h2 { white-space: nowrap; }
     [data-home-needs] > [data-section-heading] > [data-section-aside] { display: none; }
 }
+
+/* A plan item that needs you (#1044): its number and title, linked to the item, and its project. */
+[data-needs-plan-head] { display: flex; align-items: baseline; gap: var(--space-sm); margin: 0 0 var(--space-xs); font-size: var(--text-sm); }
+[data-needs-plan-head] a { font-weight: var(--weight-semibold); color: var(--color-base-content); }
+[data-needs-plan-head] [data-dim] { color: var(--ag-text-dim); font-size: var(--text-xs); }

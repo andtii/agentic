@@ -5,7 +5,7 @@
  */
 import { signal, useData } from 'sigx';
 import { actor } from '@sigx/actors';
-import type { Plan, PlanActor, PlanItem, TaskSnapshot } from '@agentic/core';
+import type { AgentId, Plan, PlanActor, PlanItem, TaskSnapshot } from '@agentic/core';
 import type { AgentHue } from '@agentic/ui';
 import { useActorDefs, useViewer, type ActorDefs, type ViewerState } from '../../../../../actors/defs';
 import { planKeyOf, taskKeyOf } from '../../../../../actors/keys';
@@ -32,7 +32,12 @@ export interface PlanWrites {
     /** Release a worked item to the top of `to`'s queue with a note. */
     handoff(itemId: number, to: PlanActor | null, note: string): Promise<PlanItem | undefined>;
     tick(itemId: number, index: number, checked: boolean): Promise<PlanItem | undefined>;
-    comment(itemId: number, text: string): Promise<PlanItem | undefined>;
+    /** A note on the item; the agents it `@`s (`mentions`, #1044) are woken with it. */
+    comment(itemId: number, text: string, mentions?: readonly AgentId[]): Promise<PlanItem | undefined>;
+    /** Answer the question a needs-you item waits on (#1044): it is ready again and the asker is woken with the answer. */
+    answer(itemId: number, text: string): Promise<PlanItem | undefined>;
+    /** Mark the item done (a person's). */
+    done(itemId: number): Promise<PlanItem | undefined>;
 }
 
 /** A project's plans for the Plan views, with the live writes. */
@@ -138,7 +143,9 @@ export function usePlanStore(projectId: string | (() => string)): PlanStore {
         assign: (itemId, to, index) => run(`move #${itemId}`, (c) => c.assign(itemId, to, index)),
         handoff: (itemId, to, note) => run(`hand #${itemId} off`, (c) => c.handoff(itemId, to, note)),
         tick: (itemId, index, checked) => run(`tick #${itemId}`, (c) => c.update(itemId, { tick: [{ index, checked }] })),
-        comment: (itemId, text) => run(`comment on #${itemId}`, (c) => c.update(itemId, { note: text }))
+        comment: (itemId, text, mentions) => run(`comment on #${itemId}`, (c) => c.update(itemId, { note: text, ...(mentions?.length ? { mentions } : {}) })),
+        answer: (itemId, text) => run(`answer #${itemId}`, (c) => c.answer(itemId, text)),
+        done: (itemId) => run(`mark #${itemId} done`, (c) => c.update(itemId, { state: 'done' }))
     };
     return {
         docs: () => read.plans().map((plan) => ({ plan, runs: runsOf(plan, tasks.value ?? {}) })),

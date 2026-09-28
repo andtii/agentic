@@ -93,6 +93,7 @@ const MANIFESTS: Plan = {
                     id: 12, title: 'Decide: keep a2a as its own kind?', state: 'needs-you', assignee: MOCK_PLAN_VIEWER, assignedBy: atlas,
                     refs: [{ kind: 'doc', path: 'docs/decisions.md' }, { kind: 'chat', messageId: 'msg-51' }, { kind: 'url', url: 'https://a2a-protocol.org/latest/specification' }],
                     options: [{ label: 'Keep a2a as its own kind' }, { label: 'Fold a2a into connector' }],
+                    ask: { by: atlas, text: 'Keep a2a as its own plugin kind, or fold it into connector? The registry work in #9 waits on it.', at: minutesAgo(60) },
                     activity: [{ at: minutesAgo(60), actor: atlas, text: 'asked you to decide' }]
                 }),
                 item({

@@ -12,7 +12,8 @@ import { useActorDefs, useViewer } from './actors/defs';
 import { signInOptions } from './api/sign-in.server';
 import { DEV_LOGIN_PATH } from './auth/dev-login';
 import { localLoginHref } from './auth/sign-in';
-import { pullsNeedingYou, useNeedsSource, type PullNeeds } from './pages/inbox';
+import { planNeedsOf, pullsNeedingYou, useNeedsSource, type PlanNeeds, type PullNeeds } from './pages/inbox';
+import { PlansFeed, createWorkspacePlans, livePlanNeeds, mockPlanNeeds, type WorkspacePlans } from './pages/projects/features/plan/home/needs';
 import { mockPullNeeds } from './pages/projects/work/pull/links';
 import { PullsFeed, createWorkspacePulls, livePullNeeds, type WorkspacePulls } from './pages/projects/work/pull/LivePulls';
 import { useDesktopNotifications } from './desktop';
@@ -137,6 +138,18 @@ export function useShellPulls(): { readonly needs: PullNeeds; readonly feed?: Wo
     return { needs: livePullNeeds(feed, defs, () => viewer.workspaceId, () => viewer.login), feed };
 }
 
+/**
+ * The plan items that need you, for the badge (#1044): live every Plan project's items through the `PlansFeed` the shell
+ * mounts; on mock data the plan fixtures, as Home reads them. Only counted here, so nobody is named.
+ */
+export function useShellPlans(): { readonly needs: PlanNeeds; readonly feed?: WorkspacePlans } {
+    if (dataMode() !== 'live') return { needs: mockPlanNeeds() };
+    const defs = useActorDefs();
+    const viewer = useViewer()();
+    const feed = createWorkspacePlans();
+    return { needs: livePlanNeeds(feed, defs, () => viewer.workspaceId, () => ''), feed };
+}
+
 /** Routes that run edge to edge: the chat, and a session's views under their session bar (#564). */
 const FLUSH_ROUTES = new Set(['chat', 'project-chat', 'session', 'session-changes', 'session-files']);
 /** The desktop app's quick-ask window (#849): the page alone, no shell around it. */
@@ -165,11 +178,14 @@ export const App = component(() => {
     const topbar = () => topbarFor(route);
     const trail = () => trailFor(route, topbar());
     // The Home badge is "Needs you" itself (#151): the rows Home lists, read from the same source — and, since
-    // Home lists them (#865), the pull requests whose move is yours (#967), so the badge equals Home's "N open".
+    // Home lists them (#865), the pull requests whose move is yours (#967) and the plan items that need you (#1044), so
+    // the badge equals Home's "N open".
     const needs = useNeedsSource()().useRows();
     const shellPulls = useShellPulls();
     const pulls = shellPulls.needs.usePulls();
-    const badge = (): number => needs().length + pullsNeedingYou(pulls(), shellPulls.needs.me).length;
+    const shellPlans = useShellPlans();
+    const planItems = shellPlans.needs.useItems();
+    const badge = (): number => needs().length + pullsNeedingYou(pulls(), shellPulls.needs.me).length + planNeedsOf(planItems()).length;
     // Inside the desktop app (#845): new Inbox notifications become native ones, and the badge follows Home's.
     // Not from the quick-ask window (#849): the main window's page already does it.
     if (dataMode() === 'live' && route.name !== BARE_ROUTE) useDesktopNotifications(badge);
@@ -218,6 +234,7 @@ export const App = component(() => {
                     }}
                 >
                     {shellPulls.feed ? <PullsFeed feed={shellPulls.feed} /> : null}
+                    {shellPlans.feed ? <PlansFeed feed={shellPlans.feed} /> : null}
                     {clientConnection() === 'reconnecting' ? <OfflineBanner /> : null}
                     <RouterView />
                 </AppShell>

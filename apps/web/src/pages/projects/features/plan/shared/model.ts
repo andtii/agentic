@@ -111,7 +111,9 @@ export function itemMeta(item: PlanItem, items: readonly PlanItem[], name: (a: P
     if (item.state === 'dropped') return droppedMeta(item);
     const parts: MetaPart[] = [];
     if (item.state === 'needs-you') {
-        parts.push({ text: item.assignedBy ? `${name(item.assignedBy)} asks you` : 'Needs you', tone: 'needs-you' });
+        // Who asked (#1044): the recorded question's asker; an item asked before it was recorded, whoever assigned it.
+        const asker = item.ask?.by ?? item.assignedBy;
+        parts.push({ text: asker ? `${name(asker)} asks you` : 'Needs you', tone: 'needs-you' });
         if (item.options?.length) parts.push({ text: `${item.options.length} option${item.options.length === 1 ? '' : 's'}` });
         return parts;
     }
