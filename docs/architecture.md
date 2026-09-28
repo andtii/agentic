@@ -1001,7 +1001,16 @@ _not yet_
 
 #### #1056 web: the Session page deep-links a step and shows its full output
 
-_not yet_
+`/sessions/:id?call=<callId>` opens the Session page at one tool call (`apps/web/src/pages/session/call.tsx`).
+`callHref(sessionId, callId)` builds the link and `refHref(ref)` turns a step's `output.ref`
+(`<sessionId>#<callId>`) into it — the chat's `Full output` (#1058) uses these. The event log's lines carry the
+call (`MockEvent.callId`; the call's first row is `id="call-<callId>"`, all its rows `data-call`, the requested
+ones `data-focus`) and the event's `at` (#580) when it has one. Above the log, a `Step · <callId>` panel shows the
+call in the existing `ToolCall` and then its input and whole output raw, unclipped. Live, the call is folded out
+of `Session.events()` — which already spans the window, the retained pages and what the machine still holds; when
+that read fails on the forgotten range, `events(archivedTo)` reads the retained part alone. A call in neither
+reads "no longer holds call …" (`data-status="missing"`). The mock fixture carries whole calls in
+`MockSessionView.calls`.
 
 #### #1057 ui: team parts — crew strip, handoff line, work card, folded talk, lane, follow panel
 

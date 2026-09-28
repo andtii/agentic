@@ -14,6 +14,8 @@ import { SessionFilesBar, envLineOf } from './session/bar';
 import { useSessionChanges, type SessionFiles } from './session/files';
 import { mockSessionFiles } from './session/files-sources';
 import { sessionTrail } from './session/trail';
+import { callRowId, FocusedCall, type CallFocus } from './session/call';
+import { queryOf } from './session/files';
 import type { AgentIdentity } from './chat/live';
 
 const sessionPill = (s: MockSessionView): string => {
@@ -54,8 +56,10 @@ defineTopbar('session', (route) => {
 export const Session = component(() => {
     const route = useRoute();
     const view = () => loadSession(String(route.params.id));
+    // `?call=<callId>` (#1056): the step a chat's `Full output` links to.
+    const call = (): string | undefined => queryOf(route.query.call);
     return () => {
-        if (dataMode() === 'live') return <LiveSession id={String(route.params.id)} />;
+        if (dataMode() === 'live') return <LiveSession id={String(route.params.id)} {...(call() ? { call: call()! } : {})} />;
         const v = view();
         if (!v) {
             return (
@@ -66,9 +70,16 @@ export const Session = component(() => {
                 </Page>
             );
         }
-        return <SessionView v={v} agent={agentNamed(v.agentId)} files={mockSessionFiles(v)} />;
+        const callId = call();
+        return <SessionView v={v} agent={agentNamed(v.agentId)} files={mockSessionFiles(v)} {...(callId ? { focus: mockCallFocus(v, callId) } : {})} />;
     };
 });
+
+/** The mock session's call `callId`, whole — or missing when the fixture holds none. */
+export function mockCallFocus(v: MockSessionView, callId: string): CallFocus {
+    const part = v.calls?.find((p) => p.callId === callId);
+    return part ? { callId, status: 'found', part } : { callId, status: 'missing' };
+}
 
 export type SessionViewProps =
     & Define.Prop<'v', MockSessionView, true>
@@ -82,7 +93,9 @@ export type SessionViewProps =
     /** Revoke one session grant. Absent — as everywhere today: the platform lists grants, it cannot revoke them — no control is drawn (AC-15). */
     & Define.Prop<'onRevoke', (key: string) => void>
     /** The session's folder (#564): the session bar's Changes and Files tabs. */
-    & Define.Prop<'files', SessionFiles | null>;
+    & Define.Prop<'files', SessionFiles | null>
+    /** `?call=` (#1056): the requested tool call — scrolled to, highlighted in the log, its input and whole output shown. */
+    & Define.Prop<'focus', CallFocus>;
 
 /** The page body over a resolved view — the mock workspace's, or the live session's (#34). */
 export const SessionView = component<SessionViewProps>(({ props }) => {
@@ -113,20 +126,27 @@ export const SessionView = component<SessionViewProps>(({ props }) => {
                         {failure ? <FailureNotice state={failure} {...(props.onResume ? { onResume: props.onResume } : {})} busy={props.recovering ?? false} /> : null}
                         {!failure && v.interruption?.resume === 'resumed' ? <p data-interruption-note role="note">{interruptionLine(v.interruption)}</p> : null}
                         {!failure && v.hostLost ? <p data-session-lost role="note">The machine lost this session; it re-opens with the next message.</p> : null}
+                        {props.focus ? <FocusedCall focus={props.focus} /> : null}
                         {v.current ? <ToolCall part={v.current.part} transcript={v.current.transcript} {...(v.current.meta ? { meta: v.current.meta } : {})} /> : null}
                         {v.request ? <ApprovalPrompt request={v.request.request} {...v.request.context} compact onRespond={(id, d) => props.onRespond?.(id, d)} /> : null}
                         <Panel label="Event log · tail" slots={{ aside: () => (v.state === 'running' || v.state === 'awaiting' ? <StatusPill status="live" /> : null) }}>
                             <ol data-event-log aria-label="Event log">
-                                {v.events.map((e) => (
-                                    <>
-                                        {v.gap && e.seq === v.gap.to ? <EventsLostRow as="li" from={v.gap.from} to={v.gap.to} /> : null}
-                                        <li data-event data-kind={e.kind}>
-                                            <span data-event-seq>{e.seq}</span>
-                                            <span data-event-kind>{e.kind}</span>
-                                            <span data-event-text>{e.text}</span>
-                                        </li>
-                                    </>
-                                ))}
+                                {v.events.map((e, i) => {
+                                    // The call's first row carries its id (#1056): what `?call=` scrolls to.
+                                    const first = e.callId !== undefined && v.events.findIndex((o) => o.callId === e.callId) === i;
+                                    const focused = e.callId !== undefined && e.callId === props.focus?.callId;
+                                    return (
+                                        <>
+                                            {v.gap && e.seq === v.gap.to ? <EventsLostRow as="li" from={v.gap.from} to={v.gap.to} /> : null}
+                                            <li data-event data-kind={e.kind} {...(first ? { id: callRowId(e.callId!) } : {})} {...(e.callId ? { 'data-call': e.callId } : {})} {...(focused ? { 'data-focus': '', 'aria-current': 'true' } : {})}>
+                                                <span data-event-seq>{e.seq}</span>
+                                                <span data-event-kind>{e.kind}</span>
+                                                <span data-event-text>{e.text}</span>
+                                                <span data-event-at>{e.at !== undefined ? <time dateTime={new Date(e.at).toISOString()}>{(props.time ?? formatTime)(e.at)}</time> : null}</span>
+                                            </li>
+                                        </>
+                                    );
+                                })}
                             </ol>
                         </Panel>
                     </section>
