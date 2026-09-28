@@ -112,6 +112,23 @@ describe('createLocalOwnerRoutes', () => {
         expect((await serve(routes, form('/auth/local-login', { passphrase: PASS })))!.status).toBe(429);
     });
 
+    it('holds the guess limit when wrong passphrases arrive in parallel (#1013)', async () => {
+        const { token, routes } = await setup();
+        await serve(routes, form('/auth/claim', { t: token, passphrase: PASS, confirm: PASS }));
+        const burst = await Promise.all(Array.from({ length: 20 }, () => serve(routes, form('/auth/local-login', { passphrase: 'wrong wrong wrong' }))));
+        const statuses = burst.map((r) => r!.status);
+        expect(statuses.filter((s) => s === 401)).toHaveLength(5);
+        expect(statuses.filter((s) => s === 429)).toHaveLength(15);
+    });
+
+    it('a right passphrase resets the guess count (#1013)', async () => {
+        const { token, routes } = await setup();
+        await serve(routes, form('/auth/claim', { t: token, passphrase: PASS, confirm: PASS }));
+        for (let i = 0; i < 4; i++) expect((await serve(routes, form('/auth/local-login', { passphrase: 'wrong wrong wrong' })))!.status).toBe(401);
+        expect((await serve(routes, form('/auth/local-login', { passphrase: PASS })))!.status).toBe(303);
+        for (let i = 0; i < 5; i++) expect((await serve(routes, form('/auth/local-login', { passphrase: 'wrong wrong wrong' })))!.status).toBe(401);
+    });
+
     it('sends the local owner to the passphrase for /auth/elevate, and anyone else on', async () => {
         const { token, routes } = await setup();
         await serve(routes, form('/auth/claim', { t: token, passphrase: PASS, confirm: PASS }));
