@@ -111,7 +111,7 @@ import type { RoutingPorts } from './ports.js';
 import { forgetItemSession, isItemSession, itemSessionKey, itemSessionsOf, recordItemSession } from './bindings.js';
 import { definePlanActor, ITEM_STATES_MAX } from '../plan/actor.js';
 import { planKey } from '../plan/key.js';
-import { initialRoutingState, type Route, type RoutingState } from './state.js';
+import { initialRoutingState, pendingItemReleaseKey, type PendingItemRelease, type Route, type RoutingState } from './state.js';
 
 /** How far back (entries) the router looks for a chat task's triggering message, for its attachments. */
 const TRIGGER_LOOKBACK = 50;
@@ -223,6 +223,12 @@ export const MACHINE_LOST_REMINDER = 'machine-lost';
  */
 export const PARKED_RECHECK_REMINDER = 'parked-recheck';
 
+/**
+ * The reminder that runs the plan item releases held back while a task on the item ran (#1091): the settle that frees
+ * an item asks for them at once; this is the backstop for a route dropped any other way, or an eviction in between.
+ */
+export const ITEM_RELEASE_REMINDER = 'item-release';
+
 /** How often a parked route is re-checked (#605): the reminder floor, `REMINDER_FLOOR_MS`, nothing tighter. */
 export const PARKED_RECHECK_MS = 60_000;
 
@@ -245,6 +251,8 @@ export interface RoutingView {
     readonly routes: readonly Route[];
     /** The latest `task_report` per task still in flight. */
     readonly reports: Readonly<Record<string, TaskReport>>;
+    /** The plan item releases held back while a task on the item runs (#1091); absent when none is. */
+    readonly pendingItemReleases?: readonly PendingItemRelease[];
 }
 
 /** Whoever drives tasks: a user, an agent, or an external client with the `tasks` scope — never a machine. */
@@ -409,15 +417,15 @@ export function defineRoutingActor(ports: RoutingPorts) {
     const definition = defineActor({
         type: ROUTING_TYPE,
         authorize: [sameWorkspace],
-        methodAuthorize: { run: taskDriver, turnEnded: taskDriver, deliverAnswer: taskDriver, questionCancelled: taskDriver, machineOnline: machineOnly, machineOffline: machineOnly, autoResume: taskDriver, expireOffline: taskDriver, recheck: taskDriver, sessionOpened: machineOnly, sessionClosed: machineOnly, slotFreed: machineOnly, promptRefused: machineOnly, report: ownTask, endSession: userOrExternal, planItemReleased: userOnly },
+        methodAuthorize: { run: taskDriver, turnEnded: taskDriver, deliverAnswer: taskDriver, questionCancelled: taskDriver, machineOnline: machineOnly, machineOffline: machineOnly, autoResume: taskDriver, expireOffline: taskDriver, recheck: taskDriver, sessionOpened: machineOnly, sessionClosed: machineOnly, slotFreed: machineOnly, promptRefused: machineOnly, report: ownTask, endSession: userOrExternal, planItemReleased: userOnly, releaseHeldItems: taskDriver },
         state: (): RoutingState => initialRoutingState(),
         /** The machine-lost reminder (#366): `expireOffline` runs as its own turn under the driver, one-way. */
         onReminder: async (ctx, name) => {
-            if (name !== MACHINE_LOST_REMINDER && name !== PARKED_RECHECK_REMINDER) return;
+            if (name !== MACHINE_LOST_REMINDER && name !== PARKED_RECHECK_REMINDER && name !== ITEM_RELEASE_REMINDER) return;
             const ids = parseRoutingKey(ctx.key);
             if (!ids) return;
-            const client = actor(self!, ctx.key).with({ context: asPrincipal(driverOf(ids.workspaceId)), oneWay: true }) as unknown as { expireOffline(): Promise<void>; recheck(): Promise<void> };
-            await (name === MACHINE_LOST_REMINDER ? client.expireOffline() : client.recheck()).catch(() => undefined);
+            const client = actor(self!, ctx.key).with({ context: asPrincipal(driverOf(ids.workspaceId)), oneWay: true }) as unknown as { expireOffline(): Promise<void>; recheck(): Promise<void>; releaseHeldItems(): Promise<void> };
+            await (name === MACHINE_LOST_REMINDER ? client.expireOffline() : name === PARKED_RECHECK_REMINDER ? client.recheck() : client.releaseHeldItems()).catch(() => undefined);
         },
         methods: (ctx) => {
             const ids = parseRoutingKey(ctx.key);
@@ -506,6 +514,91 @@ export function defineRoutingActor(ports: RoutingPorts) {
                 const parked = Object.values(ctx.state.routes).some((r) => r.status === 'waiting-capacity' || r.status === 'waiting-turn');
                 if (!parked) await ctx.reminders.clear(PARKED_RECHECK_REMINDER);
                 else if (!(await ctx.reminders.list()).includes(PARKED_RECHECK_REMINDER)) await ctx.reminders.set(PARKED_RECHECK_REMINDER, { due: Math.max(REMINDER_FLOOR_MS, PARKED_RECHECK_MS) });
+            }
+
+            /** Whether a route still carries plan item `n` of `projectId` (#1091): its release waits for that task to settle. */
+            const carried = (projectId: ProjectId, n: number): boolean => Object.values(ctx.state.routes).some((r) => r.projectId === projectId && r.planItem === n);
+
+            /** The item-release backstop (#1091): armed while any release is held back, cleared when none is. */
+            async function armItemRelease(): Promise<void> {
+                if (!Object.keys(ctx.state.pendingItemReleases ?? {}).length) await ctx.reminders.clear(ITEM_RELEASE_REMINDER);
+                else if (!(await ctx.reminders.list()).includes(ITEM_RELEASE_REMINDER)) await ctx.reminders.set(ITEM_RELEASE_REMINDER, { due: REMINDER_FLOOR_MS });
+            }
+
+            /** The items of `asked` the Plan of `projectId` still reads in the state named (#1081) — none when it cannot be read. */
+            async function stillReleased(projectId: ProjectId, asked: readonly { readonly n: number; readonly reason: ProjectFeatureItemReleaseReason }[]): Promise<{ readonly n: number; readonly reason: ProjectFeatureItemReleaseReason }[]> {
+                if (!asked.length) return [];
+                const states = await as(PlanStore(), planKey(workspaceId, projectId))
+                    .itemStates(asked.map((i) => i.n))
+                    .catch(() => undefined);
+                if (!states) return [];
+                return asked.filter((i) => states[String(i.n)] === i.reason).map((i) => ({ n: i.n, reason: i.reason }));
+            }
+
+            /**
+             * Release plan items of `projectId` the Plan reads done or dropped and no route carries (#1081, #1091): their
+             * sessions (`itemSessionsOf`, #1078) forgotten and closed unless something still needs them, then every enabled
+             * feature plugin's `onPlanItemReleased` once per folder of the project, audited `project.item-released`.
+             */
+            async function releaseItems(projectId: ProjectId, released: readonly { readonly n: number; readonly reason: ProjectFeatureItemReleaseReason }[]): Promise<void> {
+                if (!released.length) return;
+                // The items' sessions first: forget their records, then close what nothing else needs.
+                const records = itemSessionsOf(ctx.state, projectId, released.map((i) => i.n));
+                if (records.length) {
+                    for (const r of records) delete ctx.state.itemSessions![itemSessionKey(r.chatId, r.agentId, r.projectId, r.planItem)];
+                    await ctx.save();
+                    const closing = new Set<SessionId>();
+                    for (const r of records) {
+                        if (closing.has(r.sessionId) || isItemSession(ctx.state, r.sessionId)) continue;
+                        if (Object.values(ctx.state.routes).some((route) => route.sessionId === r.sessionId)) continue;
+                        const bound = await chat(r.chatId)
+                            .get()
+                            .then((summary) => summary.sessions[r.agentId]?.sessionId, () => r.sessionId);
+                        if (bound === r.sessionId) continue;
+                        closing.add(r.sessionId);
+                    }
+                    for (const sessionId of closing) {
+                        await session(sessionId)
+                            .close()
+                            .catch(() => undefined);
+                    }
+                }
+
+                const project = await as(Workspace, workspaceKey(workspaceId))
+                    .projects()
+                    .then((all) => all.find((p) => p.id === projectId), () => undefined);
+                if (!project) return;
+                const at = now();
+                let folders: Awaited<ReturnType<typeof releaseFolders>> | undefined;
+                for (const id of enabledProjectFeatures(project)) {
+                    const plugin = Object.hasOwn(projectFeatures, id) ? projectFeatures[id] : undefined;
+                    if (!plugin?.onPlanItemReleased) continue;
+                    const settings = featureSettings(plugin, project, id);
+                    folders ??= await releaseFolders(project);
+                    for (const { n: planItem, reason } of released) {
+                        for (const { cwd, environmentId, located } of folders) {
+                            let outcome: string | undefined;
+                            let error: string | undefined;
+                            if (!located?.machine.online) error = `environment ${environmentId} is offline or no machine reports it`;
+                            else {
+                                try {
+                                    outcome = await plugin.onPlanItemReleased({ project, settings, planItem, reason, environmentId, cwd, fs: machineFs(machine(located.machine.machineId), environmentId, { now }) });
+                                } catch (e) {
+                                    error = (e instanceof Error ? e.message : String(e)).slice(0, 500);
+                                }
+                                if (outcome === undefined && error === undefined) continue;
+                            }
+                            await audit.record(ctx, workspaceId, {
+                                key: `${ctx.key}:item-released:${projectId}:${planItem}:${id}:${located ? `${located.machine.machineId}/` : ''}${environmentId}:${at}`,
+                                kind: 'project.item-released',
+                                at,
+                                by: ROUTER,
+                                summary: `item #${planItem} of project ${project.name} ${reason === 'done' ? 'done' : 'dropped'}: ${id} on ${environmentId}: ${error ?? outcome}`,
+                                data: { projectId, planItem, pluginId: id, environmentId, reason, ...(outcome !== undefined ? { outcome } : {}), ...(error !== undefined ? { error } : {}) }
+                            }).catch(() => undefined);
+                        }
+                    }
+                }
             }
 
             /** The chat as the route's agent sees it — `fileAccess` and `history` answer for that agent (CHT-04, MEM-11). */
@@ -2091,75 +2184,50 @@ export function defineRoutingActor(ports: RoutingPorts) {
                  * it (an item run without its own worktree shares the chat's session, which lives on), or another item's record;
                  * and every enabled feature plugin with `onPlanItemReleased` hears it once per folder of the project, the walk
                  * `chatReleased` makes — an offline machine audited, not called. Every call is audited `project.item-released`.
+                 * An item a route still carries (`route.planItem`, #1091) is held back in `pendingItemReleases` instead, and
+                 * released by `releaseHeldItems` once the last such task settles — never under a running turn.
                  * Best effort: a throw is audited and never reaches the caller. A user only (the port calls as the workspace user).
                  */
                 async planItemReleased(projectId: ProjectId, items: readonly { readonly n: number; readonly reason: ProjectFeatureItemReleaseReason }[]): Promise<void> {
                     if (!Array.isArray(items) || items.length > ITEM_STATES_MAX) throw new ServerFnError(400, 'routing: planItemReleased takes a list of released items');
                     const asked = items.filter((i) => Number.isSafeInteger(i?.n) && (i.reason === 'done' || i.reason === 'dropped'));
-                    if (!asked.length) return;
-                    const states = await as(PlanStore(), planKey(workspaceId, projectId))
-                        .itemStates(asked.map((i) => i.n))
-                        .catch(() => undefined);
-                    if (!states) return;
-                    const released = asked.filter((i) => states[String(i.n)] === i.reason);
+                    const released = await stillReleased(projectId, asked);
                     if (!released.length) return;
-
-                    // The items' sessions first: forget their records, then close what nothing else needs.
-                    const records = itemSessionsOf(ctx.state, projectId, released.map((i) => i.n));
-                    if (records.length) {
-                        for (const r of records) delete ctx.state.itemSessions![itemSessionKey(r.chatId, r.agentId, r.projectId, r.planItem)];
+                    // An item a task still runs on (#1091) — its agent ticked it done mid-turn, or a merge did — is held back
+                    // until that task settles: its worktree and session stay under the running turn.
+                    const held = released.filter((i) => carried(projectId, i.n));
+                    if (held.length) {
+                        const pending = (ctx.state.pendingItemReleases ??= {});
+                        for (const { n, reason } of held) pending[pendingItemReleaseKey(projectId, n)] = { projectId, n, reason };
                         await ctx.save();
-                        const closing = new Set<SessionId>();
-                        for (const r of records) {
-                            if (closing.has(r.sessionId) || isItemSession(ctx.state, r.sessionId)) continue;
-                            if (Object.values(ctx.state.routes).some((route) => route.sessionId === r.sessionId)) continue;
-                            const bound = await chat(r.chatId)
-                                .get()
-                                .then((summary) => summary.sessions[r.agentId]?.sessionId, () => r.sessionId);
-                            if (bound === r.sessionId) continue;
-                            closing.add(r.sessionId);
-                        }
-                        for (const sessionId of closing) {
-                            await session(sessionId)
-                                .close()
-                                .catch(() => undefined);
-                        }
+                        await armItemRelease();
                     }
+                    await releaseItems(
+                        projectId,
+                        released.filter((i) => !carried(projectId, i.n))
+                    );
+                },
 
-                    const project = await as(Workspace, workspaceKey(workspaceId))
-                        .projects()
-                        .then((all) => all.find((p) => p.id === projectId), () => undefined);
-                    if (!project) return;
-                    const at = now();
-                    let folders: Awaited<ReturnType<typeof releaseFolders>> | undefined;
-                    for (const id of enabledProjectFeatures(project)) {
-                        const plugin = Object.hasOwn(projectFeatures, id) ? projectFeatures[id] : undefined;
-                        if (!plugin?.onPlanItemReleased) continue;
-                        const settings = featureSettings(plugin, project, id);
-                        folders ??= await releaseFolders(project);
-                        for (const { n: planItem, reason } of released) {
-                            for (const { cwd, environmentId, located } of folders) {
-                                let outcome: string | undefined;
-                                let error: string | undefined;
-                                if (!located?.machine.online) error = `environment ${environmentId} is offline or no machine reports it`;
-                                else {
-                                    try {
-                                        outcome = await plugin.onPlanItemReleased({ project, settings, planItem, reason, environmentId, cwd, fs: machineFs(machine(located.machine.machineId), environmentId, { now }) });
-                                    } catch (e) {
-                                        error = (e instanceof Error ? e.message : String(e)).slice(0, 500);
-                                    }
-                                    if (outcome === undefined && error === undefined) continue;
-                                }
-                                await audit.record(ctx, workspaceId, {
-                                    key: `${ctx.key}:item-released:${projectId}:${planItem}:${id}:${located ? `${located.machine.machineId}/` : ''}${environmentId}:${at}`,
-                                    kind: 'project.item-released',
-                                    at,
-                                    by: ROUTER,
-                                    summary: `item #${planItem} of project ${project.name} ${reason === 'done' ? 'done' : 'dropped'}: ${id} on ${environmentId}: ${error ?? outcome}`,
-                                    data: { projectId, planItem, pluginId: id, environmentId, reason, ...(outcome !== undefined ? { outcome } : {}), ...(error !== undefined ? { error } : {}) }
-                                }).catch(() => undefined);
-                            }
-                        }
+                /**
+                 * The plan item releases held back while a task on the item ran (#1091, `pendingItemReleases`): each one no
+                 * route carries any more is taken off the list (saved first — a release runs once) and released now, provided
+                 * the Plan still reads it done or dropped (a reopened item is not). The follower asks for it when a route that
+                 * carried an item settles; the `item-release` reminder is the backstop. The driver only.
+                 */
+                async releaseHeldItems(): Promise<void> {
+                    const pending = ctx.state.pendingItemReleases ?? {};
+                    const free = Object.entries(pending).filter(([, p]) => !carried(p.projectId, p.n));
+                    if (free.length) {
+                        for (const [key] of free) delete pending[key];
+                        if (!Object.keys(pending).length) delete ctx.state.pendingItemReleases;
+                        await ctx.save();
+                    }
+                    await ctx.reminders.clear(ITEM_RELEASE_REMINDER);
+                    await armItemRelease();
+                    const byProject = new Map<ProjectId, PendingItemRelease[]>();
+                    for (const [, p] of free) (byProject.get(p.projectId) ?? byProject.set(p.projectId, []).get(p.projectId)!).push(p);
+                    for (const [projectId, held] of byProject) {
+                        await releaseItems(projectId, await stillReleased(projectId, held)).catch(() => undefined);
                     }
                 },
 
@@ -2223,7 +2291,8 @@ export function defineRoutingActor(ports: RoutingPorts) {
 
                 get(): RoutingView {
                     const snap = ctx.snapshot();
-                    return { key: ctx.key, routes: Object.values(snap.routes), reports: snap.reports };
+                    const pending = Object.values(snap.pendingItemReleases ?? {});
+                    return { key: ctx.key, routes: Object.values(snap.routes), reports: snap.reports, ...(pending.length ? { pendingItemReleases: pending } : {}) };
                 }
             };
         },
@@ -2277,7 +2346,7 @@ export function defineRoutingActor(ports: RoutingPorts) {
                 const sessionClient = actor(ports.sessions(), `${ids.workspaceId}:session:${route.sessionId}`).with({ context }) as unknown as SessionClient;
                 const { turnId, sessionId } = route;
                 /** The router itself, for what a turn's end means to OTHER routes: a method turn, never `ctx.turn` (#395). */
-                const router = () => actor(self!, ctx.key).with({ context }) as unknown as { turnEnded(sessionId: SessionId, turnId: string): Promise<void>; autoResume(taskId: TaskId): Promise<void> };
+                const router = () => actor(self!, ctx.key).with({ context }) as unknown as { turnEnded(sessionId: SessionId, turnId: string): Promise<void>; autoResume(taskId: TaskId): Promise<void>; releaseHeldItems(): Promise<void> };
 
                 /**
                  * Settle the task and forget the route. A chatless session is closed here — it holds an environment slot
@@ -2292,6 +2361,8 @@ export function defineRoutingActor(ports: RoutingPorts) {
                         await c.save();
                     });
                     if (!route.chatId) await sessionClient.close().catch(() => undefined);
+                    // An item done or dropped while this task ran (#1091): released now that nothing runs on it.
+                    if (route.projectId && route.planItem !== undefined && ctx.snapshot().pendingItemReleases?.[pendingItemReleaseKey(route.projectId, route.planItem)]) await router().releaseHeldItems().catch(() => undefined);
                 };
                 const tryTask = async (fn: () => Promise<unknown>): Promise<void> => {
                     try {
