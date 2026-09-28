@@ -195,7 +195,7 @@ GITHUB_CLIENT_SECRET=<its secret>
 
 ## 4b. Run locally on Node (#988)
 
-The whole platform in one Node process (Node ≥ 22.13, for `node:sqlite`) — no wrangler, no Durable Objects: the actors persist in one SQLite file, chat files on disk.
+The whole platform in one Node process (Node ≥ 22.13, for `node:sqlite`) — no wrangler, no Durable Objects: the actors persist in one SQLite file, chat files on disk. To run a node for real — backup, `APP_ORIGIN`, and reaching it from a phone through `tailscale serve` or `cloudflared` — follow [`self-hosting.md`](self-hosting.md).
 
 ```sh
 pnpm install

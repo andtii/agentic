@@ -7,6 +7,7 @@ Built on the [sigx](https://sigx.dev) estate: `@sigx/ai-agent` for the agent con
 - Requirements: [`docs/requirements.md`](docs/requirements.md)
 - Architecture: [`docs/architecture.md`](docs/architecture.md)
 - Decisions: [`docs/decisions.md`](docs/decisions.md)
+- Self-hosting on your own machine, reachable from your phone: [`docs/self-hosting.md`](docs/self-hosting.md)
 - What may move upstream later: [`docs/promotion.md`](docs/promotion.md)
 - How agents work here: [`AGENTS.md`](AGENTS.md)
 
