@@ -605,19 +605,23 @@ export function defineMachineActor(ports: MachinePorts) {
     const envTimeoutMs = ports.envTimeoutMs ?? DEFAULT_ENV_TIMEOUT_MS;
     const historyTimeoutMs = ports.historyTimeoutMs ?? DEFAULT_HISTORY_TIMEOUT_MS;
     const livenessDue = Math.max(REMINDER_FLOOR_MS, Math.min(heartbeatWindowMs, commandTimeoutMs, fsTimeoutMs, envTimeoutMs, historyTimeoutMs));
-    /** The host knows whether the daemon's socket is open (#984): liveness trusts it, and the heartbeat window is not watched. */
-    const connected = ports.socket.isConnected?.bind(ports.socket);
+    /**
+     * Whether the host says the daemon's socket is open (#984): `true` / `false` liveness trusts, and the heartbeat
+     * window is not watched; `undefined` — a port that cannot say, or a socket that never answered a ping (an older
+     * daemon, #1002) — falls back to the heartbeat window.
+     */
+    const connected = (key: string): boolean | undefined => ports.socket.isConnected?.(key);
     /**
      * When the liveness reminder is next due, in ms from now, or `undefined` when nothing needs it (#984). Deadlines
-     * tick on the floor; a connected machine without a socket port that knows it ticks there too, for the heartbeat
-     * window; with one, an idle online machine is woken only every `UPDATE_COMPARE_EVERY_MS` (the release re-read, and
-     * a sweep for a socket the host no longer vouches for) and for the next opening of its update window when an
+     * tick on the floor; an online machine whose socket the host cannot vouch for ticks there too, for the heartbeat
+     * window (#1002); one it vouches for, idle, is woken only every `UPDATE_COMPARE_EVERY_MS` (the release re-read,
+     * and a sweep for a socket the host no longer vouches for) and for the next opening of its update window when an
      * update waits for it.
      */
-    function livenessIn(s: MachineState, at: number): number | undefined {
+    function livenessIn(s: MachineState, at: number, key: string): number | undefined {
         if (hasDeadlines(s)) return livenessDue;
         if (!s.online) return undefined;
-        if (!connected) return livenessDue;
+        if (connected(key) === undefined) return livenessDue;
         let due = UPDATE_COMPARE_EVERY_MS;
         const { policy } = effectiveUpdates(s.update);
         if (ports.releases && policy.kind === 'window' && s.update?.available?.asset && !inWindow(policy, at)) {
@@ -1132,7 +1136,7 @@ export function defineMachineActor(ports: MachinePorts) {
             const pendingKey = (sessionId: SessionId, commandId: string): string => `${sessionId}:${commandId}`;
 
             async function armLiveness(): Promise<void> {
-                const due = livenessIn(ctx.state, now());
+                const due = livenessIn(ctx.state, now(), ctx.key);
                 if (due !== undefined) await ctx.reminders.set(LIVENESS, { due });
                 else await ctx.reminders.clear(LIVENESS);
             }
@@ -2623,8 +2627,10 @@ export function defineMachineActor(ports: MachinePorts) {
             const at = now();
             const ids = parseMachineKey(ctx.key);
             // A silent daemon is offline, and the router hears it (#366) as it does a closed socket. With a socket port that
-            // knows (#984), silent is no socket open; without one, no frame within the heartbeat window.
-            const silent = s.online && (connected ? !connected(ctx.key) : (s.lastSeen ?? 0) + heartbeatWindowMs <= at);
+            // vouches (#984), silent is no socket open; one that cannot (no `isConnected`, or an older daemon that never
+            // pinged, #1002), no frame within the heartbeat window.
+            const open = s.online ? connected(ctx.key) : undefined;
+            const silent = s.online && (open === undefined ? (s.lastSeen ?? 0) + heartbeatWindowMs <= at : !open);
             if (silent) s.online = false;
             const routing = ports.routing?.();
             if (silent && routing && ids) {
@@ -2718,7 +2724,7 @@ export function defineMachineActor(ports: MachinePorts) {
             }
             // Daemon updates (#365): a pending one past its deadline fails, the build is compared again, the policy runs.
             await lifecycle?.tick();
-            const due = livenessIn(s, now());
+            const due = livenessIn(s, now(), ctx.key);
             if (due !== undefined) await ctx.reminders.set(LIVENESS, { due });
             await ctx.save();
         }

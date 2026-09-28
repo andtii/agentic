@@ -1,6 +1,7 @@
 /**
  * Liveness on the socket, not on frames (#984): with a socket port that says whether the daemon is connected, an idle
- * online machine arms no reminder and stays online with no frames at all; the socket closing takes it offline.
+ * online machine arms no reminder and stays online with no frames at all; the socket closing takes it offline. A socket
+ * that never pinged (an older daemon, #1002) is one the port cannot vouch for: the heartbeat window applies again.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MachineId, Principal, WorkspaceId } from '@agentic/core';
@@ -21,6 +22,8 @@ const TICK = 60_000;
 /** The host's view of the daemon socket: open or not, and how often liveness asked. */
 class Sockets implements MachineSocketPort {
     open = false;
+    /** `false`: an older daemon that never pings, so the host cannot vouch for its open socket (#1002). */
+    pings = true;
     asked = 0;
     seat: PlatformSeat | undefined;
     send(_key: string, text: string): boolean {
@@ -32,9 +35,9 @@ class Sockets implements MachineSocketPort {
         this.open = false;
         this.seat?.drop();
     }
-    isConnected(): boolean {
+    isConnected(): boolean | undefined {
         this.asked++;
-        return this.open;
+        return this.open && !this.pings ? undefined : this.open;
     }
 }
 
@@ -105,20 +108,22 @@ describe('Machine liveness on the socket (#984)', () => {
     it('stays online with no frames past the heartbeat window, and arms no reminder while idle', async () => {
         connect();
         await until(async () => (await machine().get()).online, 'online');
+        const armed = sockets.asked; // asked once per arm, to pick the cadence — never by a wake while idle
         await advance(30 * TICK);
         expect((await machine().get()).online).toBe(true);
-        expect(sockets.asked).toBe(0);
+        expect(sockets.asked).toBe(armed);
     });
 
     it('an idle sweep every few hours takes it offline once the host no longer vouches for the socket', async () => {
         connect();
         await until(async () => (await machine().get()).online, 'online');
+        const armed = sockets.asked;
         sockets.open = false; // gone without a close event
         await jump(60 * TICK);
         expect((await machine().get()).online).toBe(true);
         await jump(5 * 60 * TICK);
         expect((await machine().get()).online).toBe(false);
-        expect(sockets.asked).toBe(1);
+        expect(sockets.asked).toBe(armed + 1);
     });
 
     it('goes offline when the socket closes', async () => {
@@ -136,5 +141,41 @@ describe('Machine liveness on the socket (#984)', () => {
         const before = (await machine().get()).lastSeen!;
         expect(await machine(asMachine).socketMessage(JSON.stringify({ v: DAEMON_PROTOCOL_VERSION, t: 'heartbeat', at: Date.now(), active: [] }))).toMatchObject({ ok: true, t: 'heartbeat' });
         expect((await machine().get()).lastSeen).toBeGreaterThan(before);
+    });
+});
+
+describe('Machine liveness for an older daemon that never pings (#1002)', () => {
+    beforeEach(() => {
+        sockets.pings = false;
+    });
+
+    it('goes offline once no heartbeat came within the heartbeat window, its socket still open', async () => {
+        connect();
+        await until(async () => (await machine().get()).online, 'online');
+        await advance(3 * TICK);
+        expect(sockets.open).toBe(true);
+        expect((await machine().get()).online).toBe(false);
+    });
+
+    it('stays online while its legacy heartbeats keep coming', async () => {
+        connect();
+        await until(async () => (await machine().get()).online, 'online');
+        for (let i = 0; i < 10; i++) {
+            await advance(TICK);
+            await machine(asMachine).socketMessage(JSON.stringify({ v: DAEMON_PROTOCOL_VERSION, t: 'heartbeat', at: Date.now(), active: [] }));
+        }
+        expect((await machine().get()).online).toBe(true);
+        await advance(3 * TICK);
+        expect((await machine().get()).online).toBe(false);
+    });
+
+    it('once the socket answers pings (a new daemon), no short reminder is armed and it stays online idle', async () => {
+        sockets.pings = true;
+        connect();
+        await until(async () => (await machine().get()).online, 'online');
+        const armed = sockets.asked;
+        await advance(10 * TICK);
+        expect((await machine().get()).online).toBe(true);
+        expect(sockets.asked).toBe(armed);
     });
 });
