@@ -1,5 +1,7 @@
 #!/usr/bin/env node
-// Fails when an installer the build produced is over the budget (#848: the shell stays slim).
+// Fails when an installer the build produced is over the budget (#848). Since #991 an installer carries
+// the agentic node — a Node binary and the node's files — so the release passes a larger budget than the
+// bare shell's 15 MB default.
 // Installers are what Tauri writes under a `bundle/` directory; the build's own executables are not.
 //
 //   node scripts/check-size.mjs <bundle dir> [max MB = 15]
@@ -29,7 +31,7 @@ export function installers(dir) {
  * Formats that cannot meet the shell's budget by design, with their own ceiling. An AppImage carries
  * WebKitGTK and its libraries itself (~80 MB); the .deb and .rpm use the system's and stay small.
  */
-export const FORMAT_BUDGET_MB = { AppImage: 100 };
+export const FORMAT_BUDGET_MB = { AppImage: 250 };
 
 export function budgetOf(path, maxMb) {
     const ext = /\.([^.]+)$/.exec(path)?.[1] ?? '';

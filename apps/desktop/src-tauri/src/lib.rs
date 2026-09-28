@@ -1,9 +1,11 @@
 //! Agentic desktop shell (docs/architecture.md §13). One window on the
 //! configured Agentic server, a tray, and nothing else: the web app runs
-//! unchanged on its own origin.
+//! unchanged on its own origin. The server is the node the app runs itself
+//! (`node.rs`, #991) unless a remote server is configured.
 
 mod deeplink;
 mod machine;
+mod node;
 mod notify;
 mod quick;
 mod server;
@@ -14,9 +16,7 @@ use server::Navigation;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use tauri::webview::{NewWindowFeatures, NewWindowResponse};
-#[cfg(target_os = "macos")]
-use tauri::RunEvent;
-use tauri::{AppHandle, Manager, State, WebviewUrl, WebviewWindowBuilder, WindowEvent};
+use tauri::{AppHandle, Manager, RunEvent, State, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 use tauri_plugin_opener::OpenerExt;
 use url::Url;
 
@@ -40,21 +40,86 @@ impl Server {
     }
 }
 
+/// The node this build carries, if any (#991).
+struct Bundled(Option<node::Bundle>);
+
+#[derive(serde::Serialize)]
+struct LocalInfo {
+    #[serde(flatten)]
+    status: node::Status,
+    /// The claim link while nobody owns the node, handed over once.
+    claim: Option<String>,
+}
+
 #[derive(serde::Serialize)]
 struct ServerInfo {
     server: Option<String>,
     suggested: Option<String>,
     /// Where to go once connected: a deep link's path, handed over once. `None` is the server's root.
     path: Option<String>,
+    /// The app's own node, while it runs (or failed to): the connect page waits for it instead of `server`.
+    local: Option<LocalInfo>,
+    /// Whether this build carries a node, so the setup form can offer it.
+    bundled: bool,
 }
 
 #[tauri::command]
-fn get_server(state: State<'_, Server>) -> ServerInfo {
+fn get_server(state: State<'_, Server>, local: State<'_, node::LocalNode>, bundled: State<'_, Bundled>) -> ServerInfo {
+    let status = local.status();
+    let local = (status != node::Status::Off).then(|| LocalInfo {
+        claim: matches!(status, node::Status::Ready { .. })
+            .then(|| local.take_claim())
+            .flatten(),
+        status,
+    });
     ServerInfo {
         server: state.get(),
         suggested: server::build_default(),
         path: state.pending.lock().unwrap().take(),
+        local,
+        bundled: bundled.0.is_some(),
     }
+}
+
+/// Switches to the app's own node: starts it now, or restarts the app when another server's capability is granted.
+#[tauri::command]
+fn use_local(app: AppHandle, state: State<'_, Server>, bundled: State<'_, Bundled>) -> Result<(), String> {
+    if bundled.0.is_none() {
+        return Err("This build of the app has no local node.".into());
+    }
+    let dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
+    let mut settings = server::load(&dir);
+    settings.local = true;
+    settings.server = None;
+    server::save(&dir, &settings).map_err(|e| e.to_string())?;
+    if state.granted.lock().unwrap().is_some() && app.state::<node::LocalNode>().status() == node::Status::Off {
+        app.request_restart();
+    } else {
+        start_local(&app);
+    }
+    Ok(())
+}
+
+/// Starts the bundled node; once it listens, its origin is the server and gets the capability.
+fn start_local(app: &AppHandle) {
+    let Some(bundle) = app.state::<Bundled>().0.clone() else {
+        return;
+    };
+    let log = app.path().app_log_dir().ok().and_then(|dir| {
+        std::fs::create_dir_all(&dir).ok()?;
+        Some(dir.join("node.log"))
+    });
+    let ready_app = app.clone();
+    app.state::<node::LocalNode>().start(&bundle, log, move |origin| {
+        let state = ready_app.state::<Server>().inner().clone();
+        *state.origin.lock().unwrap() = Some(origin.to_string());
+        let granted = state.granted.lock().unwrap().clone();
+        if granted.is_none() {
+            if let Err(e) = grant(&ready_app, &state, origin) {
+                eprintln!("[agentic-desktop] could not grant the local node: {e}");
+            }
+        }
+    });
 }
 
 /// Stores a new server and returns its normalized origin; the connect page
@@ -65,8 +130,14 @@ fn set_server(app: AppHandle, state: State<'_, Server>, url: String) -> Result<S
     let dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
     let mut settings = server::load(&dir);
     settings.server = Some(origin.clone());
+    settings.local = false;
     server::save(&dir, &settings).map_err(|e| e.to_string())?;
     *state.origin.lock().unwrap() = Some(origin.clone());
+    // The app's own node stops with a restart, which comes back on the new server.
+    if app.state::<node::LocalNode>().status() != node::Status::Off {
+        app.request_restart();
+        return Ok(origin);
+    }
     let granted = state.granted.lock().unwrap().clone();
     match granted {
         Some(ref g) if *g == origin => {}
@@ -226,9 +297,11 @@ pub fn run() {
         ))
         .plugin(tauri_plugin_opener::init())
         .manage(Server::default())
+        .manage(node::LocalNode::default())
         .invoke_handler(tauri::generate_handler![
             get_server,
             set_server,
+            use_local,
             notify::notify,
             notify::set_badge,
             machine::local_machine,
@@ -238,9 +311,22 @@ pub fn run() {
         .setup(|app| {
             let handle = app.handle().clone();
             let state = app.state::<Server>().inner().clone();
-            let settings = server::load(&app.path().app_config_dir()?);
+            let config_dir = app.path().app_config_dir()?;
+            let mut settings = server::load(&config_dir);
             let quick_ask = settings.quick_ask.clone();
-            if let Some(origin) = settings.server {
+            let exe_dir = std::env::current_exe()?.parent().map(std::path::Path::to_path_buf);
+            let resource_dir = app.path().resource_dir().ok();
+            let bundled = exe_dir.zip(resource_dir).and_then(|(exe, res)| node::find(&exe, &res));
+            // First run of a build with a node: that node is the server (#991).
+            if bundled.is_some() && settings.server.is_none() && !settings.local {
+                settings.local = true;
+                let _ = server::save(&config_dir, &settings);
+            }
+            let local = bundled.is_some() && settings.local;
+            app.manage(Bundled(bundled));
+            if local {
+                start_local(&handle);
+            } else if let Some(origin) = settings.server {
                 *state.origin.lock().unwrap() = Some(origin.clone());
                 grant(&handle, &state, &origin)?;
             }
@@ -285,11 +371,17 @@ pub fn run() {
         })
         .build(context)
         .expect("error while building the Agentic desktop app")
-        .run(|_app, _event| {
+        .run(|app, event| match event {
+            // Quit (or a restart): the node drains before the app goes (#991).
+            RunEvent::Exit => {
+                for window in app.webview_windows().values() {
+                    let _ = window.hide();
+                }
+                app.state::<node::LocalNode>().stop(node::STOP_TIMEOUT);
+            }
             // macOS: clicking the dock icon brings the hidden window back.
             #[cfg(target_os = "macos")]
-            if let RunEvent::Reopen { .. } = _event {
-                show_main(_app);
-            }
+            RunEvent::Reopen { .. } => show_main(app),
+            _ => {}
         });
 }

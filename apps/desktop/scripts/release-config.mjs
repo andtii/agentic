@@ -4,10 +4,15 @@
 // public key and endpoint plus signed updater artifacts. Nothing here is specific to one
 // deployment: the workflow passes what the repo's variables say.
 //
-//   node scripts/release-config.mjs desktop-v1.2.3 > src-tauri/release.conf.json
+//   node scripts/release-config.mjs desktop-v1.2.3 [--node] > src-tauri/release.conf.json
+//
+// `--node` adds src-tauri/node.conf.json: the agentic node the app runs itself (#991), which
+// scripts/sidecar.mjs must have built first.
 //
 // Env: AGENTIC_UPDATER_PUBKEY (the minisign public key, `tauri signer generate`), AGENTIC_UPDATER_URL
 // (where latest.json is served). Without the key the build has no updater and never checks.
+
+import { readFileSync } from 'node:fs';
 
 export function versionOf(tag) {
     const m = /^desktop-v(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)$/.exec(tag ?? '');
@@ -36,6 +41,11 @@ export function msiVersionOf(version) {
     return `${core}.${n}`;
 }
 
+/** The bundle keys of src-tauri/node.conf.json (`externalBin`, `resources`) merged into a release config. */
+export function withNode(config, nodeConf) {
+    return { ...config, bundle: { ...config.bundle, ...nodeConf.bundle } };
+}
+
 export function releaseConfig(tag, env = {}) {
     const version = versionOf(tag);
     const config = { version, bundle: { windows: { wix: { version: msiVersionOf(version) } } } };
@@ -51,7 +61,12 @@ export function releaseConfig(tag, env = {}) {
 
 if (process.argv[1]?.endsWith('release-config.mjs')) {
     try {
-        process.stdout.write(`${JSON.stringify(releaseConfig(process.argv[2], process.env), null, 2)}\n`);
+        let config = releaseConfig(process.argv[2], process.env);
+        if (process.argv.includes('--node')) {
+            const nodeConf = JSON.parse(readFileSync(new URL('../src-tauri/node.conf.json', import.meta.url), 'utf8'));
+            config = withNode(config, nodeConf);
+        }
+        process.stdout.write(`${JSON.stringify(config, null, 2)}\n`);
     } catch (e) {
         console.error(e instanceof Error ? e.message : String(e));
         process.exit(1);

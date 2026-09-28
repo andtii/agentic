@@ -19,6 +19,7 @@
     <section id="offline" hidden>
       <h1>Can't reach your Agentic server</h1>
       <p class="muted"><span data-server></span> isn't answering. This computer may be offline, or the server may be down. Your work is safe on the server.</p>
+      <p class="muted" id="detail"></p>
       <p class="muted" id="retry-in"></p>
       <div class="row">
         <button id="retry" type="button">Try again</button>
@@ -28,12 +29,13 @@
 
     <form id="setup" hidden>
       <h1>Connect to Agentic</h1>
-      <p class="muted">Enter the address of your Agentic server. You sign in on the next screen.</p>
+      <p class="muted">Enter the address of your Agentic server. You sign in on the next screen.<span id="local-hint" hidden> Or run Agentic on this computer, with no server at all.</span></p>
       <label for="url">Server address</label>
       <input id="url" name="url" type="text" inputmode="url" autocomplete="url" spellcheck="false" placeholder="agentic.example.com" required>
       <p id="error" class="error" role="alert"></p>
       <div class="row">
         <button type="submit">Connect</button>
+        <button id="use-local" type="button" class="quiet" hidden>Use this computer</button>
         <button id="cancel" type="button" class="quiet" hidden>Cancel</button>
       </div>
     </form>

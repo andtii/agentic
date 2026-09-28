@@ -101,6 +101,13 @@ pub struct Settings {
     /// The quick-ask hotkey (#849) as an accelerator (`CommandOrControl+Shift+Space`); `None` is off.
     #[serde(default, rename = "quickAsk", skip_serializing_if = "Option::is_none")]
     pub quick_ask: Option<String>,
+    /// Use the node this app runs itself (#991, `node.rs`) instead of `server`.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub local: bool,
+}
+
+fn is_false(b: &bool) -> bool {
+    !*b
 }
 
 pub const SETTINGS_FILE: &str = "settings.json";
@@ -115,6 +122,7 @@ pub fn load(dir: &Path) -> Settings {
     Settings {
         server: settings.server.and_then(|s| normalize_server(&s).ok()),
         quick_ask: settings.quick_ask.filter(|a| !a.trim().is_empty()),
+        local: settings.local,
     }
 }
 
@@ -247,11 +255,26 @@ mod tests {
             &Settings {
                 server: Some("https://a.example".into()),
                 quick_ask: Some("Alt+Space".into()),
+                local: false,
             },
         )
         .unwrap();
         assert_eq!(load(&dir).server.as_deref(), Some("https://a.example"));
         assert_eq!(load(&dir).quick_ask.as_deref(), Some("Alt+Space"));
+        assert!(!load(&dir).local);
+        assert!(!std::fs::read_to_string(dir.join(SETTINGS_FILE))
+            .unwrap()
+            .contains("local"));
+        save(
+            &dir,
+            &Settings {
+                local: true,
+                ..Settings::default()
+            },
+        )
+        .unwrap();
+        assert!(load(&dir).local);
+        assert!(load(&dir).server.is_none());
         std::fs::write(dir.join(SETTINGS_FILE), r#"{"server":"http://evil.example"}"#).unwrap();
         assert!(load(&dir).server.is_none());
         std::fs::write(dir.join(SETTINGS_FILE), "not json").unwrap();
