@@ -7,6 +7,9 @@
     display: grid;
     grid-template-columns: 280px minmax(0, 1fr) 320px;
     block-size: calc(100dvh - var(--ag-topbar-h));
+    /* one row capped at the page's height (#1015): a tall context panel scrolls itself instead of stretching the row, the page and the document */
+    grid-template-rows: minmax(0, 1fr);
+    overflow: hidden;
     align-items: stretch;
 }
 [data-chat-list]:not([data-wide]) { overflow-y: auto; }
@@ -29,7 +32,7 @@
 [data-chat-composer] { flex: none; }
 [data-chat-empty] { flex: 1 1 auto; display: grid; place-items: end center; padding: var(--space-2xl); }
 [data-chat-composer] { padding: var(--space-lg) var(--space-2xl) var(--space-2xl); }
-[data-chat-context] { display: flex; flex-direction: column; gap: var(--space-2xl); padding: var(--space-xl); border-inline-start: var(--border) solid var(--ag-line); min-inline-size: 0; }
+[data-chat-context] { display: flex; flex-direction: column; gap: var(--space-2xl); padding: var(--space-xl); border-inline-start: var(--border) solid var(--ag-line); min-inline-size: 0; min-block-size: 0; overflow-y: auto; }
 [data-context-section] { display: flex; flex-direction: column; gap: var(--space-md); }
 [data-context-head] { display: flex; align-items: center; justify-content: space-between; gap: var(--space-md); }
 [data-context-head] > a { font-size: var(--text-sm); }
