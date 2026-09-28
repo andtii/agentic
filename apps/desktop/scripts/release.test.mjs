@@ -50,7 +50,7 @@ test('installers are measured, .app bundles are not walked', () => {
 });
 
 test('an AppImage has its own budget; everything else keeps the shell budget', () => {
-    assert.equal(budgetOf('/x/bundle/appimage/Agentic_1_amd64.AppImage', 15), 100);
+    assert.equal(budgetOf('/x/bundle/appimage/Agentic_1_amd64.AppImage', 15), 250);
     assert.equal(budgetOf('/x/bundle/deb/Agentic_1_amd64.deb', 15), 15);
     const mb = 1024 * 1024;
     const files = [{ path: '/b/bundle/appimage/A.AppImage', bytes: 78 * mb }, { path: '/b/bundle/deb/A.deb', bytes: 3 * mb }, { path: '/b/bundle/msi/A.msi', bytes: 16 * mb }];

@@ -1,8 +1,8 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "local",
-  "description": "The app's own connect page: read and set the server. The server's pages get their own capability at runtime, scoped to the configured origin (src/lib.rs `grant`).",
+  "description": "The app's own connect page: read and set the server, or switch to the app's own node. The server's pages get their own capability at runtime, scoped to the configured origin (src/lib.rs `grant`).",
   "local": true,
   "windows": ["main"],
-  "permissions": ["allow-get-server", "allow-set-server"]
+  "permissions": ["allow-get-server", "allow-set-server", "allow-use-local"]
 }

@@ -6,9 +6,12 @@ name: Desktop release
 # - a pushed tag `desktop-v<semver>` (or a manual run with the `tag` input)
 #   builds every target with tauri-action and creates the release
 #   `desktop-v<semver>`: NSIS + MSI (Windows x64), a universal DMG (macOS arm64
-#   + x64), AppImage + .deb (Linux x64 and arm64). Every installer must stay
-#   under 15 MB, except an AppImage (100 MB: it carries WebKitGTK itself;
-#   scripts/check-size.mjs);
+#   + x64), AppImage + .deb (Linux x64 and arm64). Each carries the agentic
+#   node (#991): `pnpm --filter @agentic/node bundle`, then
+#   scripts/sidecar.mjs builds the `agentic-node` single-executable for the
+#   target and stages the node's files, and `release-config.mjs --node` adds
+#   them to the bundle. Every installer must stay under 150 MB, an AppImage
+#   under 250 MB (it carries WebKitGTK itself; scripts/check-size.mjs);
 # - with the repo variable AGENTIC_UPDATER_PUBKEY and the secret
 #   TAURI_SIGNING_PRIVATE_KEY set, the build carries the updater
 #   (scripts/release-config.mjs) and the release a signed `latest.json`; unless
@@ -53,6 +56,7 @@ jobs:
           - os: macos-latest
             args: '--target universal-apple-darwin'
             rust-targets: 'aarch64-apple-darwin,x86_64-apple-darwin'
+            sidecar: '--target universal-apple-darwin'
           # 22.04: an AppImage runs on the glibc it was built against and newer.
           - os: ubuntu-22.04
             args: ''
@@ -82,8 +86,15 @@ jobs:
           node-version: '22'
           cache: 'pnpm'
 
-      - name: Install the Tauri CLI
-        run: pnpm install --frozen-lockfile --filter @agentic/desktop
+      # The whole workspace: the node the app carries is built from it (#991).
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build the node
+        run: pnpm --filter @agentic/node bundle
+
+      - name: The node sidecar
+        run: node apps/desktop/scripts/sidecar.mjs ${{ matrix.sidecar }}
 
       - name: Release config
         shell: bash
@@ -97,7 +108,7 @@ jobs:
             echo "::error::AGENTIC_UPDATER_PUBKEY is set but the TAURI_SIGNING_PRIVATE_KEY secret is not (docs/runbook.md §5a.3)"
             exit 1
           fi
-          node apps/desktop/scripts/release-config.mjs "$TAG" > apps/desktop/src-tauri/release.conf.json
+          node apps/desktop/scripts/release-config.mjs "$TAG" --node > apps/desktop/src-tauri/release.conf.json
           cat apps/desktop/src-tauri/release.conf.json
 
       - uses: tauri-apps/tauri-action@v0
@@ -117,9 +128,9 @@ jobs:
           includeUpdaterJson: ${{ vars.AGENTIC_UPDATER_PUBKEY != '' }}
           updaterJsonPreferNsis: true
 
-      - name: Installer size (15 MB)
+      - name: Installer size (150 MB)
         shell: bash
-        run: node apps/desktop/scripts/check-size.mjs apps/desktop/src-tauri/target 15
+        run: node apps/desktop/scripts/check-size.mjs apps/desktop/src-tauri/target 150
 
   # The stable updater channel: installed apps read desktop-stable/latest.json.
   publish-channel:

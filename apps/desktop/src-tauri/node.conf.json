@@ -1,0 +1,6 @@
+{
+  "bundle": {
+    "externalBin": ["binaries/agentic-node"],
+    "resources": ["node/"]
+  }
+}
