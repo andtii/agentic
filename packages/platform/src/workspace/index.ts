@@ -172,6 +172,8 @@ export interface WorkspaceState {
     createdAt: number;
     agents: AgentId[];
     chats: ChatId[];
+    /** Chats deleted (#674, `deleteChat`): out of `chats`, kept so `deleteAll` still purges their records (the store may not list). Absent while none is. */
+    deletedChats?: ChatId[];
     machines: MachineIndexEntry[];
     schedules: ScheduleId[];
     settings: WorkspaceSettings;
@@ -585,6 +587,25 @@ export function defineWorkspace(options: WorkspaceOptions = {}) {
                     await ctx.save();
                 }
                 return { chatId };
+            },
+
+            /**
+             * Delete one chat (#674; CHT-01, PLG-01): 404 when the index does not name it. The Chat goes first
+             * (`Chat.delete`, over a hop as the owner): it marks itself deleted, and its router ends its sessions and
+             * — for a chat in a project — releases it with `reason: 'deleted'`, so the project's feature plugins tidy
+             * up (best effort, audited `project.chat-released`, never blocking this). Then the index forgets the
+             * chat and its attachment bytes go (`ChatFileStore.deleteChat`, #203). The owner only (the Workspace's
+             * own policy): a member agent or anyone else is 403. The thread's record stays as the deleted mark, its id
+             * in `deletedChats`, so the workspace delete still purges it with the rest.
+             */
+            async deleteChat(chatId: ChatId): Promise<void> {
+                if (typeof chatId !== 'string' || !ctx.state.chats.includes(chatId)) throw new ServerFnError(404, `Workspace.deleteChat: no chat ${String(chatId)} in this workspace`);
+                const workspaceId = ownerOfWorkspaceKey(ctx.key) as WorkspaceId;
+                await ctx.actor(Chat, actorKey(workspaceId, 'chat', chatId)).delete();
+                ctx.state.chats = ctx.state.chats.filter((id) => id !== chatId);
+                ctx.state.deletedChats = [...(ctx.state.deletedChats ?? []), chatId];
+                await ctx.save();
+                await options.files?.deleteChat(workspaceId, chatId);
             },
 
             /** The workspace's projects (#332), creation order. Interleaves with writes. */

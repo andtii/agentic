@@ -106,6 +106,12 @@ export interface ChatState {
      */
     archived?: true;
     /**
+     * Set once the chat is deleted (#674, `Chat.delete` through `Workspace.deleteChat`); absent otherwise. The
+     * record outlives the delete only as this mark — the index no longer names it — so a late release or a stray
+     * post can tell a deleted chat from a live one.
+     */
+    deleted?: true;
+    /**
      * Every file ever posted, keyed by file id (#203). Kept in the actor's own state, never in the
      * window, so it outlives archiving. Absent until the first file is posted.
      */

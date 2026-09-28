@@ -450,6 +450,17 @@ describe('cleanup when a chat leaves the project (#623)', () => {
         await expect(release(dirty, { worktreePerChat: true, worktreeCleanup: 'on-chat-leave' })).rejects.toThrow(/git worktree dirty/);
     });
 
+    it("a deleted chat counts as leaving (#674): the same removal under on-chat-leave, nothing under never", async () => {
+        const ops: FsOp[] = [];
+        const fs: ProjectFeatureFs = async (op) => (ops.push(op), op.kind === 'worktree-remove' ? { result: { kind: 'worktree-remove', path: op.path, removed: true, branchDeleted: false } } : { error: { code: 'unsupported', message: op.kind } });
+        const deleted = (settings: Record<string, unknown>) =>
+            gitFeaturePlugin.onChatReleased!({ project, settings: settingsOf(settings), chatId: CHAT, reason: 'deleted', environmentId: 'env_1' as EnvironmentId, cwd: '/work/agentic', fs });
+        expect(await deleted({ worktreePerChat: true, worktreeCleanup: 'never' })).toBeUndefined();
+        expect(ops).toEqual([]);
+        expect(await deleted({ worktreePerChat: true, worktreeCleanup: 'on-chat-leave' })).toBe(`removed ${wt}`);
+        expect(ops).toEqual([{ kind: 'worktree-remove', repo: '/work/agentic', path: wt, branch: `chat/${SHORT}`, deleteBranch: false }]);
+    });
+
     it("the project's own remove command runs only on a clean worktree of the chat's branch", async () => {
         const settings = { worktreePerChat: true, worktreeCleanup: 'on-chat-leave', worktreeRemove: 'pnpm wt rm {branchSlug}' };
         let status = '';

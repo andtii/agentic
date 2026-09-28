@@ -35,6 +35,7 @@ import {
     type MessageId,
     type PostResult,
     type Principal,
+    type ProjectFeatureReleaseReason,
     type ProjectId,
     type PromptPart,
     type SessionEvent,
@@ -142,6 +143,8 @@ export interface ChatSummary {
     readonly machine?: { readonly id: MachineId; readonly name: string };
     /** `true` while the chat is archived (#774, `archive`); absent otherwise. */
     readonly archived?: true;
+    /** `true` once the chat is deleted (#674, `delete`); absent otherwise. */
+    readonly deleted?: true;
 }
 
 /** How long `setProject` waits for the project it leaves to release the chat (#936) before it refuses the move. */
@@ -166,7 +169,7 @@ const principalOf = (ctx: ActorContext<ChatState>): Principal | null => (ctx.pri
 /** The slice of the Routing actor a removal reaches (`defineRoutingActor`, #399), one-way. */
 interface RoutingClient {
     endSession(chatId: ChatId, agentId: AgentId, reason: string, sessionId?: SessionId): Promise<void>;
-    chatReleased(chatId: ChatId, projectId: ProjectId, reason: 'project-changed', options?: { readonly before?: boolean }): Promise<void>;
+    chatReleased(chatId: ChatId, projectId: ProjectId, reason: ProjectFeatureReleaseReason, options?: { readonly before?: boolean }): Promise<void>;
 }
 
 /** Waits for a release (#936): `undefined` when it went through, else why not — its error, or that it timed out. */
@@ -190,6 +193,8 @@ const toParts = (input: string | readonly PromptPart[]): readonly PromptPart[] =
 
 /** Membership and coordination are the user's call (CHT-04, CHT-07). */
 const userOrExternal = (principal: Principal | null): boolean => principal?.kind === 'user' || principal?.kind === 'external';
+/** Deleting a chat is the workspace owner's alone (#674): never an agent, a machine or an external client. */
+const ownerOnly = (principal: Principal | null): boolean => principal?.kind === 'user';
 /** An external client needs the `chats` tool family (§9); every other principal kind passes. */
 const chatsScope = (principal: Principal | null): boolean => principal !== null && hasScope(principal, 'chats');
 /** Machines never speak in a chat. */
@@ -316,8 +321,8 @@ async function archive(ctx: ActorContext<ChatState>): Promise<void> {
  * Machine actor: whether the machine is online is the caller's to read.
  */
 async function summaryOf(ctx: ActorContext<ChatState>): Promise<ChatSummary> {
-    const { seq, members, coordinator, sessions, title, titleAuto, projectId, machineId, archived } = ctx.state;
-    let summary: ChatSummary = ctx.snapshot({ seq, members, coordinator, sessions, ...(title === undefined ? {} : { title }), ...(titleAuto === undefined ? {} : { titleAuto }), ...(projectId === undefined ? {} : { projectId }), ...(machineId === undefined ? {} : { machineId }), ...(archived ? { archived } : {}) });
+    const { seq, members, coordinator, sessions, title, titleAuto, projectId, machineId, archived, deleted } = ctx.state;
+    let summary: ChatSummary = ctx.snapshot({ seq, members, coordinator, sessions, ...(title === undefined ? {} : { title }), ...(titleAuto === undefined ? {} : { titleAuto }), ...(projectId === undefined ? {} : { projectId }), ...(machineId === undefined ? {} : { machineId }), ...(archived ? { archived } : {}), ...(deleted ? { deleted } : {}) });
     if (projectId === undefined && machineId === undefined) return summary;
     const workspace = ctx.actor(Workspace, workspaceKey(workspaceOfKey(ctx.key) as WorkspaceId));
     if (projectId !== undefined) {
@@ -443,6 +448,7 @@ export function defineChatActor(ports: ChatOptions = {}) {
             setProject: [notMachine],
             setMachine: [notMachine],
             archive: [userOrExternal],
+            delete: [ownerOnly],
             registerUpload: [userOrExternal],
             fileAccess: [notMachine]
         },
@@ -458,6 +464,7 @@ export function defineChatActor(ports: ChatOptions = {}) {
             async post(input: string | readonly PromptPart[], mentions: Mentions = [], options: PostOptions = {}): Promise<PostResult> {
                 const principal = principalOf(ctx);
                 if (!principal) throw new Error('Chat.post: no principal');
+                if (ctx.state.deleted) throw new ServerFnError(410, 'Chat.post: this chat was deleted');
                 const parts = toParts(input);
                 const chatId = chatIdOfKey(ctx.key);
                 // Attachments (#203): every file part is checked before anything is stored; the uploads it posts are marked in the store first.
@@ -714,6 +721,46 @@ export function defineChatActor(ports: ChatOptions = {}) {
                     summary: archived ? `chat ${chatId} archived` : `chat ${chatId} restored from the archive`,
                     data: { chatId, archived }
                 });
+                return summaryOf(ctx);
+            },
+
+            /**
+             * Delete the chat (#674; CHT-01, PLG-01) — `Workspace.deleteChat` calls it before it drops the chat from
+             * its index and its files from the store. The workspace owner only (a member agent, a machine or an
+             * external client is 403). Marks the chat `deleted` (so `post` answers 410 and a late release can tell it
+             * is gone), records `chat.deleted`, then tells the router one-way, as the caller: a chat in a project is
+             * released with `reason: 'deleted'` (`Routing.chatReleased`), so the project's feature plugins tidy up
+             * after it (Git removes its clean worktree under `on-chat-leave`) — best effort, audited there, never
+             * blocking the delete — and every session the chat binds is ended (`Routing.endSession`). Idempotent:
+             * a chat already deleted answers as it stands and tells nobody again.
+             */
+            async delete(): Promise<ChatSummary> {
+                const principal = principalOf(ctx);
+                if (!principal) throw new Error('Chat.delete: no principal');
+                if (ctx.state.deleted) return summaryOf(ctx);
+                ctx.state.deleted = true;
+                await ctx.save();
+                const workspaceId = workspaceOfKey(ctx.key) as WorkspaceId;
+                const chatId = chatIdOfKey(ctx.key);
+                const projectId = ctx.state.projectId;
+                const at = Date.now();
+                await recordAudit(ctx, workspaceId, {
+                    key: `${ctx.key}:deleted`,
+                    kind: 'chat.deleted',
+                    at,
+                    by: principalLabel(principal),
+                    summary: `chat ${chatId}${ctx.state.title ? ` (${ctx.state.title})` : ''} deleted`,
+                    data: { chatId, ...(projectId !== undefined ? { projectId } : {}), ...(ctx.state.title !== undefined ? { title: ctx.state.title } : {}) }
+                });
+                const routing = ports.routing?.();
+                if (routing) {
+                    const router = ctx.actor(routing, routingKey(workspaceId)).with({ oneWay: true }) as unknown as RoutingClient;
+                    // Released first, while the sessions' bindings still name the members the plugins may look at.
+                    if (projectId !== undefined) await router.chatReleased(chatId, projectId, 'deleted').catch(() => undefined);
+                    for (const [agentId, row] of Object.entries(ctx.state.sessions)) {
+                        await router.endSession(chatId, agentId as AgentId, `chat ${chatId} was deleted`, row.sessionId).catch(() => undefined);
+                    }
+                }
                 return summaryOf(ctx);
             },
 

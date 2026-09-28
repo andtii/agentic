@@ -18,6 +18,7 @@ export const AUDIT_KINDS = [
     'chat.project-set',
     'chat.machine-set',
     'chat.archived',
+    'chat.deleted',
     'delegation.created',
     'environment.chosen',
     'environment.put',
@@ -401,6 +402,13 @@ export interface ChatArchivedData {
     readonly archived: boolean;
 }
 
+/** `chat.deleted` (#674): the owner deleted the chat (`Workspace.deleteChat`); its project and title as they stood. */
+export interface ChatDeletedData {
+    readonly chatId: ChatId;
+    readonly projectId?: ProjectId;
+    readonly title?: string;
+}
+
 /** `Workspace.upsertProject` / `removeProject` changed the workspace's projects (#332). `by` is the owner. */
 export interface ProjectChangedData {
     readonly projectId: ProjectId;
@@ -506,6 +514,7 @@ export interface AuditDataByKind {
     readonly 'chat.project-set': ChatProjectSetData;
     readonly 'chat.machine-set': ChatMachineSetData;
     readonly 'chat.archived': ChatArchivedData;
+    readonly 'chat.deleted': ChatDeletedData;
     readonly 'delegation.created': DelegationCreatedData;
     readonly 'environment.chosen': EnvironmentChosenData;
     readonly 'environment.put': EnvironmentPutData;
