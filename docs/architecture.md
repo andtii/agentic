@@ -1076,7 +1076,23 @@ _not yet_
 
 #### #1060 web: chat Follow panel over the live session stream
 
-_not yet_
+- **Panel** (`chat/follow/`): `FollowPanel` (`follow: FollowModel` — the agent, its feed, the view model,
+  `onClose`, `onMessage`) draws `@agentic/ui`'s `AiFollow`. It opens when a view calls
+  `ChatViewModel.onFollow` (a crew chip, a work card's Follow) and takes the right column
+  (`data-chat-context data-chat-follow`) in place of the context panel; Close brings the context panel back.
+  It stays open after the agent finishes. Following writes nothing to the thread.
+- **Model** (`follow/model.ts`, pure, read only): the state (needs you while the session awaits, working
+  while it has a live line or is mid-turn, failed on an errored turn, idle after a cancelled one, else done;
+  without a feed, the member's status); the task (the coordinator's `delegate` step to the agent, else the
+  turn's prompt); the last steps (the feed's current or last turn, else the agent's newest thread message);
+  the live output (`liveOutput`: the newest `coding.terminal` buffer when the feed folds coding events, else
+  the turn's running call's output, else its newest call output; last 40 lines); the result once the turn
+  is over. Stop is the live line's (`Session.cancel` through the feed client).
+- **Placement** (`followPlacement`): the column at 1280 px and up; below, an end `Drawer` opened on mount;
+  below 768 px the same drawer restyled inline as a bottom sheet (zero 0.5 has no `placement="bottom"`,
+  signalxjs/zero#291).
+- **Gap**: `chat/feeds.ts` folds with the default reducer, which drops `coding.*` events, so the output
+  falls back to tool output until the feed folds with `codingExtension()` (#1106).
 
 #### #1061 web: chat Lanes view
 
