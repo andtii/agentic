@@ -88,8 +88,14 @@ export const ItemDetail = component<ItemDetailProps>(({ props }) => {
         const named = mentionsIn(text, agentIds().map((agentId) => ({ agentId, status: 'idle', history: { access: 'all' } })), (id) => ({ ...unknownAgent(id), name: agentName(id) }));
         st.sending = true;
         st.draft = '';
-        const sent = await props.onComment(text, named);
-        st.sending = false;
+        let sent = false;
+        try {
+            sent = await props.onComment(text, named);
+        } catch {
+            sent = false;
+        } finally {
+            st.sending = false;
+        }
         // The composer cleared its draft on send: a refused comment goes back into it.
         if (!sent) st.insert = { id: `retry-${++inserts}`, text };
     };
@@ -304,7 +310,7 @@ export const ItemDetail = component<ItemDetailProps>(({ props }) => {
                         : <p data-dim="">Nothing yet.</p>}
                 </section>
 
-                <div data-plan-comment="" onInput={(e: Event) => { st.draft = (e.target as HTMLTextAreaElement).value ?? ''; }}>
+                <div data-plan-comment="" onInput={(e: Event) => { if (e.target instanceof HTMLTextAreaElement) st.draft = e.target.value; }}>
                     <Composer
                         mentions={mentions()}
                         refs={chatRefSources(['#'], items, [])}

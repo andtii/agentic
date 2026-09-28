@@ -34,6 +34,7 @@ import { MachineNotice } from '../machines/MachineNotice';
 import { sortRows, type NeedsRow, type NeedsSource, type PlanApproval, type RequestState } from './source';
 import { chatHref } from '../chat/href';
 import { NeedsYouCard } from '../projects/features/plan/shared/NeedsYouCard';
+import { planFailureNote } from '../projects/features/plan/shared/data';
 
 /** The Session's request as the card takes it. */
 export function openRequestOf(view: SessionRequestView): OpenRequest {
@@ -237,7 +238,7 @@ const PlanNeedRowView = component<{ need: PlanNeed; needs: PlanNeeds }>(({ props
             st.error = '';
             return true;
         } catch (e) {
-            st.error = `Could not ${what}: ${e instanceof Error ? e.message.replace(/^[plan]s*/, '') : String(e)}`;
+            st.error = planFailureNote(what, e);
             return false;
         }
     };

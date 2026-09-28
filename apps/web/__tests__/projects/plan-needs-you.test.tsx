@@ -76,6 +76,20 @@ describe('the item panel (#1044)', () => {
         expect(el.querySelector('[data-plan-needs-you] textarea')!.hasAttribute('disabled')).toBe(true);
     });
 
+    it('a comment whose write throws goes back into the box and leaves it usable', async () => {
+        const onComment = vi.fn(async () => {
+            throw new Error('offline');
+        });
+        const el = await mount({ onComment });
+        setText(el.querySelector<HTMLTextAreaElement>('[data-plan-comment] textarea')!, 'hello');
+        el.querySelector('[data-plan-comment] form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+        await tick();
+        await tick();
+        const box = el.querySelector<HTMLTextAreaElement>('[data-plan-comment] textarea')!;
+        expect(box.value).toContain('hello');
+        expect(box.disabled).toBe(false);
+    });
+
     it('a comment sends the agents it @s by id; a refused one goes back into the box', async () => {
         const onComment = vi.fn(async () => false);
         const el = await mount({ onComment });
