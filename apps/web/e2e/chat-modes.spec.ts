@@ -48,3 +48,19 @@ test('Team on the four-agent chat, and a pin that survives a reload', async ({ p
     await expect(page.locator('[data-chat-control="view"] button[aria-pressed="true"]')).toHaveText('Focus');
     await noHorizontalScroll(page);
 });
+
+test('a pinned Lanes survives a reload and hydrates cleanly; Team again holds one thread (#1113)', async ({ page }) => {
+    test.skip((page.viewportSize()?.width ?? 0) < 1024, 'Lanes needs 1024 px');
+    const hydrate: string[] = [];
+    page.on('console', (m) => { if (m.text().includes('[Hydrate]')) hydrate.push(m.text()); });
+    await page.goto('/projects/p_agentic/chats/cm2');
+    await page.locator('[data-chat-control="view"] button', { hasText: 'Lanes' }).click();
+    await expect(page.locator('[data-chat-lanes]')).toBeVisible();
+    await page.reload();
+    await expect(page.locator('[data-chat-control="view"] button[aria-pressed="true"]')).toHaveText('Lanes');
+    await expect(page.locator('[data-chat-lanes]')).toBeVisible();
+    await page.locator('[data-chat-control="view"] button', { hasText: 'Team' }).click();
+    await expect(page.locator('[data-chat-lanes]')).toHaveCount(0);
+    await expect(page.locator('[data-chat-main] [data-scope="ai-thread"][data-part="root"]')).toHaveCount(1);
+    expect(hydrate).toEqual([]);
+});
