@@ -11,8 +11,14 @@
  *
  * `fetch` serves every HTTP route in the Worker's order (`entry.cloudflare.ts`):
  *
- *     dev login / auth / A2A / files / connectors  ->  actor mount (`/_sigx/actor`)
+ *     local owner / dev login / auth / A2A / files / connectors  ->  actor mount (`/_sigx/actor`)
  *                    ->  `fallback` (server functions, then the document render)
+ *
+ * The local owner's claim link and passphrase login (#989) come first when a
+ * `localOwner` store is given. On a plain-http request (no https, no
+ * `X-Forwarded-Proto: https`) the auth cookies travel as `agentic-*` instead
+ * of `__Host-*` — `fetch` and `openActorSocket` rename them at this edge with
+ * `@agentic/platform`'s cookie-prefix seam, so a LAN address can sign in.
  *
  * Static assets are the server's (`server.ts`), before this. The sockets are
  * transport-free here: `openActorSocket` builds the `@sigx/actors` socket
@@ -22,7 +28,7 @@
 import type { AnyActorDefinition, ActorStorage, Host } from '@sigx/actors';
 import { defineActorApp, type ActorApp, type HostDefaults } from '@sigx/actors/host';
 import { createActorSocketSession, createFetchHandler, type ActorSocketSession } from '@sigx/actors/server';
-import { asPrincipal, machinePrincipal, type MachineActor } from '@agentic/platform';
+import { asPrincipal, isSecureRequest, machinePrincipal, plainCookieRequest, plainCookieResponse, type MachineActor } from '@agentic/platform';
 import { createA2aMount } from '../../web/src/a2a/mount';
 import { observeSlowTurns } from '../../web/src/actors/slow-turns';
 import { devLoginEnabled, devLoginRouteFor } from '../../web/src/auth/dev-login';
@@ -37,6 +43,7 @@ import { conduitConnectorCatalogue } from '../../web/src/plugins/catalogue';
 import { r2ArtifactSink, type R2BucketLike } from '../../web/src/retention';
 import { nodeDaemonSockets, type DaemonSocketLike, type NodeDaemonSockets } from './daemon-sockets';
 import type { NodeHostEnv } from './home';
+import { createLocalOwnerRoutes, type LocalOwnerStore } from './local-owner';
 
 export interface NodeHostOptions {
     /** The actors' durable storage — `sqliteStorage` in production. The purge clears records on it directly. */
@@ -50,6 +57,10 @@ export interface NodeHostOptions {
     readonly defaults?: HostDefaults;
     /** Overrides of the platform's default ports (tests). */
     readonly ports?: Partial<PlatformPorts>;
+    /** The local owner's record (#989): mounts `/auth/claim` and `/auth/local-login`. Absent → neither exists. */
+    readonly localOwner?: LocalOwnerStore;
+    /** PBKDF2 iterations for the owner's passphrase (tests lower it). */
+    readonly passphraseIterations?: number;
     /** The actor registry instead of the platform's (tests). */
     readonly actors?: (platformActors: (ports?: PlatformPorts) => readonly AnyActorDefinition[]) => readonly AnyActorDefinition[];
 }
@@ -131,6 +142,10 @@ export async function createNodeHost(options: NodeHostOptions): Promise<NodeHost
     const filesRoute = createFilesMount({ store: platform.files });
     const a2aRoute = createA2aMount({ actors });
     const connectorsRoute = createConnectorMount({ connectors: conduitConnectorCatalogue });
+    const localOwnerRoute =
+        options.localOwner && env.SESSION_SECRET
+            ? createLocalOwnerRoutes({ store: options.localOwner, secret: env.SESSION_SECRET, ...(options.passphraseIterations ? { iterations: options.passphraseIterations } : {}) })
+            : null;
 
     const asMachine = (who: DaemonIdentity) => host.actor(Machine, who.key).with({ context: asPrincipal(machinePrincipal(who.workspaceId, who.machineId)) });
 
@@ -139,15 +154,26 @@ export async function createNodeHost(options: NodeHostOptions): Promise<NodeHost
         host,
         actors,
         daemonSockets,
-        fetch(request, ctx) {
+        fetch(incoming, ctx) {
+            // Plain http: `agentic-*` cookies in, `agentic-*` cookies out; everything between reads `__Host-*`.
+            const plain = !isSecureRequest(incoming);
+            const request = plain ? plainCookieRequest(incoming) : incoming;
             // One host in the process, but the same scope the Worker enters: an ambient hop inside resolves to it.
             return runWithHost(host, async () => {
                 setSignInOptions({ github: githubEnabled(env, request), devLogin: devLoginEnabled(env) });
-                const route = devLoginRouteFor(request, env) ?? authRoute(request, env) ?? a2aRoute(request, env) ?? filesRoute(request, env, ctx) ?? connectorsRoute(request, env);
-                return route ? route(request) : actorFetch(request);
+                const route =
+                    (await localOwnerRoute?.(request)) ??
+                    devLoginRouteFor(request, env) ??
+                    authRoute(request, env) ??
+                    a2aRoute(request, env) ??
+                    filesRoute(request, env, ctx) ??
+                    connectorsRoute(request, env);
+                const response = await (route ? route(request) : actorFetch(request));
+                return plain ? plainCookieResponse(response) : response;
             });
         },
-        openActorSocket: (request, send, close) => runWithHost(host, () => createActorSocketSession({ host, request, send, close })),
+        openActorSocket: (request, send, close) =>
+            runWithHost(host, () => createActorSocketSession({ host, request: isSecureRequest(request) ? request : plainCookieRequest(request), send, close })),
         daemon: {
             async verify(request) {
                 const who = identifyDaemon(request);

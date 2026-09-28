@@ -16,6 +16,7 @@ import { nodeFallback } from '../../web/src/entry.node';
 import { fsBucket } from './fs-bucket';
 import { openHome } from './home';
 import { createNodeHost } from './host';
+import { claimUrl, fileLocalOwnerStore, LOCAL_LOGIN_PATH, prepareClaim } from './local-owner';
 import { createNodeServer } from './server';
 
 /** How long a shutdown waits for in-flight turns before it closes anyway. */
@@ -24,14 +25,20 @@ const STOP_TIMEOUT_MS = 20_000;
 const home = openHome();
 for (const name of home.generated) console.log(`[node] generated ${name} in ${home.envFile}`);
 
+// The local owner (#989): until someone claims the node, a single-use link to do it.
+const localOwner = fileLocalOwnerStore(home.dir);
+const claimToken = await prepareClaim(localOwner, home.env.SESSION_SECRET!);
+
 const storage = sqliteStorage({ path: home.database });
-const node = await createNodeHost({ storage, bucket: fsBucket(home.files), env: home.env, fallback: nodeFallback });
+const node = await createNodeHost({ storage, bucket: fsBucket(home.files), env: home.env, fallback: nodeFallback, localOwner });
 const clientDir = fileURLToPath(new URL('../../web/dist/client', import.meta.url));
 const { server, draining } = createNodeServer({ host: node, clientDir });
 
 server.listen(home.port, () => {
     const origin = home.env.APP_ORIGIN!;
     console.log(`[node] agentic on ${origin} — data in ${home.dir}`);
+    if (claimToken) console.log(`[node] claim this node (once, within 24 h): ${claimUrl(origin, claimToken)}`);
+    else console.log(`[node] sign in: ${origin}${LOCAL_LOGIN_PATH}`);
     if (home.env.AGENTIC_DEV_LOGIN) console.log(`[node] dev login: ${origin}/auth/dev-login?token=${home.env.AGENTIC_DEV_LOGIN}`);
 });
 
