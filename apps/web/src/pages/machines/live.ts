@@ -34,7 +34,7 @@ export function osLabel(os: MachineOs | undefined): string {
     }
 }
 
-/** `4s ago`, `3m ago`, `3h ago`, `2d ago` — or `never` before the first heartbeat. */
+/** `4s ago`, `3m ago`, `3h ago`, `2d ago` — or `never` before the daemon was first heard. */
 export function seenLabel(lastSeen: number | undefined, now: number): string {
     if (lastSeen === undefined) return 'never';
     const s = Math.max(0, Math.round((now - lastSeen) / 1000));
@@ -91,8 +91,11 @@ export function sessionsOf(view: MachineView, objectives: Readonly<Record<string
     }));
 }
 
-/** A telemetry snapshot older than this is stale: three heartbeats missed, the machine is about to read offline anyway. */
-export const TELEMETRY_STALE_MS = 90_000;
+/**
+ * A telemetry snapshot older than this is stale. The daemon sends one when it is news and otherwise every 15 min
+ * (#984), so a quiet machine's snapshot is up to 15 min old and still current; past this, a refresh was missed.
+ */
+export const TELEMETRY_STALE_MS = 20 * 60_000;
 
 /** The machine's own load as the hero and the Machines list print it (#400). */
 export interface MachineLoad {

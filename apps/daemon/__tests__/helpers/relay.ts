@@ -19,6 +19,11 @@ export interface RelayOptions {
     readonly machineId?: string;
     /** The token `/auth/pair` hands out and the socket requires. */
     readonly token?: string;
+    /**
+     * Answer the daemon's `{"p":1}` keepalive with `{"p":1}` as workerd's auto-response does (#984). Off by default:
+     * the relay is then a platform from before the keepalive. Either way the ping never reaches the seat.
+     */
+    readonly autoResponse?: boolean;
 }
 
 export interface Relay {
@@ -33,23 +38,43 @@ export interface Relay {
     /** Paths the daemon dialled. */
     readonly dialled: string[];
     /** The next connection the daemon makes (queued if it already happened). */
-    nextSeat(timeoutMs?: number): Promise<PlatformSeat>;
+    nextSeat(timeoutMs?: number): Promise<RelaySeat>;
     close(): Promise<void>;
+}
+
+/** A seat, plus the keepalive it saw (#984). */
+export interface RelaySeat extends PlatformSeat {
+    readonly pings: number;
+    answer: boolean;
 }
 
 export const TEST_WORKSPACE = 'ws_test';
 export const TEST_MACHINE = 'machine_test';
 export const TEST_TOKEN = `amt.${TEST_WORKSPACE}.${TEST_MACHINE}.${'s'.repeat(40)}abc`;
 
-class Seat implements PlatformSeat {
+class Seat implements RelaySeat {
     private readonly buffer: string[] = [];
     private waiter: { resolve(v: string): void; reject(e: Error): void } | undefined;
     private closed = false;
 
-    constructor(private readonly ws: WebSocket) {
+    /** Keepalive pings the daemon sent (#984). */
+    pings = 0;
+    /** Answer them (`RelayOptions.autoResponse`); settable mid-test to go quiet. */
+    answer: boolean;
+
+    constructor(
+        private readonly ws: WebSocket,
+        autoResponse = false
+    ) {
+        this.answer = autoResponse;
         ws.on('message', (data) => {
             if (this.closed) return;
             const text = data.toString();
+            if (text === '{"p":1}') {
+                this.pings++;
+                if (this.answer) ws.send('{"p":1}');
+                return;
+            }
             if (this.waiter) {
                 const w = this.waiter;
                 this.waiter = undefined;
@@ -133,7 +158,7 @@ export async function startRelay(options: RelayOptions = {}): Promise<Relay> {
             return;
         }
         wss.handleUpgrade(req, socket, head, (ws) => {
-            const seat = new Seat(ws);
+            const seat = new Seat(ws, options.autoResponse);
             const waiter = waiters.shift();
             if (waiter) waiter(seat);
             else seats.push(seat);

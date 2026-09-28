@@ -18,6 +18,12 @@ export interface MachineSocketPort {
     send(key: string, text: string): boolean;
     /** Close the daemon socket(s) of `key`. */
     close(key: string, code: number, reason: string): void;
+    /**
+     * Whether a daemon socket of `key` is open right now (#984). When the host can say, liveness trusts it: an idle
+     * daemon keeps its socket alive on the hibernation auto-response ping, which never reaches the actor, so no frame
+     * refreshes `lastSeen` and the heartbeat window would read a quiet machine as gone. Absent → the heartbeat window.
+     */
+    isConnected?(key: string): boolean;
 }
 
 export interface ToolCallInput {
@@ -75,7 +81,8 @@ export interface MachinePorts {
     readonly now?: () => number;
     /**
      * A machine with no heartbeat for this long is offline. Default 90 s —
-     * three daemon heartbeats; the check runs on the 60 s reminder floor.
+     * three legacy daemon heartbeats; the check runs on the 60 s reminder floor.
+     * Only used when the socket port has no `isConnected` (#984).
      */
     readonly heartbeatWindowMs?: number;
     /** How long a `sendCommand` waits for its reply before answering the Session with an error. Default 120 s. */
