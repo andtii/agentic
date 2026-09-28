@@ -35,6 +35,14 @@ describe('assignIndex (#926)', () => {
     });
 });
 
+/** Type into the item's comment composer and send it (#1044: the chat's composer). */
+function comment(dom: ParentNode, text: string): void {
+    const ta = dom.querySelector<HTMLTextAreaElement>('[data-plan-comment] textarea')!;
+    ta.value = text;
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+    dom.querySelector('[data-plan-comment] form[data-scope="ai-composer"]')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+}
+
 describe('the Plan views on the live Plan store (#926)', () => {
     let h: LiveHarness;
     const Plan = definePlanActor();
@@ -97,12 +105,7 @@ describe('the Plan views on the live Plan store (#926)', () => {
         box.dispatchEvent(new Event('change', { bubbles: true }));
         await until(async () => (await items()).find((i) => i.id === first.id)!.doneWhen[0]!.checked, 'the ticked line in the store', 10_000);
 
-        const comment = dom.querySelector<HTMLInputElement>('[data-plan-comment] input')!;
-        comment.value = 'Looks right on the phone';
-        comment.dispatchEvent(new Event('input', { bubbles: true }));
-        await tick();
-        expect(dom.querySelector<HTMLButtonElement>('[data-plan-comment] button[type="submit"]')!.disabled).toBe(false);
-        dom.querySelector<HTMLFormElement>('[data-plan-comment]')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+        comment(dom, 'Looks right on the phone');
         await until(async () => (await items()).find((i) => i.id === first.id)!.activity.some((a) => a.text.includes('Looks right on the phone')), 'the comment in the store', 10_000);
     });
 
@@ -132,11 +135,7 @@ describe('the Plan views on the live Plan store (#926)', () => {
         dom.querySelector<HTMLElement>(`[data-plan-card="${first.id}"]`)!.click();
         await tick();
         expect(dom.querySelector('[data-plan-detail-title]')!.textContent).toBe('Collapse the rail');
-        const comment = dom.querySelector<HTMLInputElement>('[data-plan-comment] input')!;
-        comment.value = 'From the board';
-        comment.dispatchEvent(new Event('input', { bubbles: true }));
-        await tick();
-        dom.querySelector<HTMLFormElement>('[data-plan-comment]')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+        comment(dom, 'From the board');
         await until(async () => (await items()).find((i) => i.id === first.id)!.activity.some((a) => a.text.includes('From the board')), 'the comment in the store', 10_000);
     });
 

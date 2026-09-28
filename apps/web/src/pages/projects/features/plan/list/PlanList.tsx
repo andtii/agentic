@@ -19,7 +19,7 @@ import {
     PLAN_FILTERS, crewCounts, crewOf, defaultItem, filterPhases, itemMeta, lastActivityAt, ownerStatus, phaseProgress, planOf,
     type PlanDoc, type PlanFilter
 } from '../shared/model';
-import { ItemDetail } from './ItemDetail';
+import { ItemDetail, detailWrites } from './ItemDetail';
 
 const CrewStrip = (doc: PlanDoc, members: ProjectPageProps['project']['members'], identity: PlanIdentity) => (
     <section data-plan-crew="" aria-label="Crew">
@@ -158,13 +158,8 @@ export const PlanList = component<ProjectPageProps>(({ props }) => {
                             : <p data-plan-none="">No items match.</p>}
                     </div>
                     {picked
-                        ? <ItemDetail key={picked.id} projectId={props.project.id} doc={doc} item={picked} items={all} now={now} identity={identity} {...(pins ? { pins } : {})} onPick={(n) => { st.picked = n; }} onClose={() => { st.picked = null; }}
-                            {...(writes
-                                ? {
-                                    onTick: (index: number, checked: boolean) => void writes.tick(picked.id, index, checked),
-                                    onComment: async (text: string) => (await writes.comment(picked.id, text)) !== undefined
-                                }
-                                : {})}
+                        ? <ItemDetail key={picked.id} projectId={props.project.id} doc={doc} item={picked} items={all} now={now} identity={identity} members={props.project.members} {...(pins ? { pins } : {})} onPick={(n) => { st.picked = n; }} onClose={() => { st.picked = null; }}
+                            {...detailWrites(writes, picked.id)}
                         />
                         : null}
                 </div>

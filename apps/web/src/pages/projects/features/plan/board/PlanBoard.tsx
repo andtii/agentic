@@ -13,7 +13,7 @@ import { mockPlanIdentity, usePlanIdentity, usePlanStore, type PlanIdentity, typ
 import { usePlanNav } from '../shared/parts';
 import { useLivePins, type PinSource } from '../shared/pins';
 import { planOf, type PlanDoc } from '../shared/model';
-import { ItemDetail } from '../list/ItemDetail';
+import { ItemDetail, detailWrites } from '../list/ItemDetail';
 import { assignIndex, boardColumns, columnOf, moveItem, needsHandoff, type BoardSlot } from './model';
 
 const ME = 'me';
@@ -26,18 +26,13 @@ const queriedItem = (query: unknown, items: readonly PlanItem[]): number | null 
 };
 
 /** The List's detail panel for the open card (#1037); ticks and comments go to `writes` when there are any. */
-const Detail = (projectId: string, doc: PlanDoc, id: number | null, now: number, identity: PlanIdentity, pick: (n: number | null) => void, pins?: PinSource, writes?: PlanWrites) => {
+const Detail = (project: ProjectPageProps['project'], doc: PlanDoc, id: number | null, now: number, identity: PlanIdentity, pick: (n: number | null) => void, pins?: PinSource, writes?: PlanWrites) => {
     const all = planItems(doc.plan);
     const item = id === null ? undefined : all.find((i) => i.id === id);
     if (!item) return null;
     return (
-        <ItemDetail key={item.id} projectId={projectId} doc={doc} item={item} items={all} now={now} identity={identity} {...(pins ? { pins } : {})} onPick={(n) => pick(n)} onClose={() => pick(null)}
-            {...(writes
-                ? {
-                    onTick: (index: number, checked: boolean) => void writes.tick(item.id, index, checked),
-                    onComment: async (text: string) => (await writes.comment(item.id, text)) !== undefined
-                }
-                : {})}
+        <ItemDetail key={item.id} projectId={project.id} doc={doc} item={item} items={all} now={now} identity={identity} members={project.members} {...(pins ? { pins } : {})} onPick={(n) => pick(n)} onClose={() => pick(null)}
+            {...detailWrites(writes, item.id)}
         />
     );
 };
@@ -58,7 +53,7 @@ const MockPlanBoard = component<ProjectPageProps>(({ props }) => {
     };
     return () => (
         <BoardView projectId={props.project.id} title={plan?.title ?? 'Plan'} items={st.items} members={props.project.members} lookup={agentNamed} you={USER.name} me={ME} now={now} onMove={move}
-            {...(st.open === null ? {} : { openId: st.open })} onOpen={pick} detail={() => Detail(props.project.id, doc(), st.open, now, mockPlanIdentity, pick)} />
+            {...(st.open === null ? {} : { openId: st.open })} onOpen={pick} detail={() => Detail(props.project, doc(), st.open, now, mockPlanIdentity, pick)} />
     );
 }, { name: 'MockPlanBoard' });
 
@@ -123,7 +118,7 @@ const LivePlanBoard = component<ProjectPageProps>(({ props }) => {
                     onMove={move}
                     {...(open === null ? {} : { openId: open })}
                     onOpen={pick}
-                    detail={() => (doc ? Detail(props.project.id, doc, open, now, identity, pick, pins, store.writes) : null)}
+                    detail={() => (doc ? Detail(props.project, doc, open, now, identity, pick, pins, store.writes) : null)}
                     plans={store.docs().map((d) => d.plan)}
                     {...(doc ? { planId: doc.plan.id } : {})}
                     onSelectPlan={nav.select}

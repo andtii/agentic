@@ -1,15 +1,20 @@
 /**
  * The Plan list's 470px detail panel (#754; board `Plan`): the item's state and title; assigned, claimed, runs as,
  * after, unblocks and touches (with the overlap warning); refs, a file ref opening a hover card with its pinned
- * lines; the done-when checklist; activity; and the comment box, which names the refs it finds as you type.
+ * lines; the done-when checklist; activity; and the comment box, which names the refs it finds as you type. A needs-you
+ * item opens on its question and the answer box (`NeedsYouCard`, #1044). The comment box is the chat's composer: `@`
+ * picks a project agent and `#` an item, and the agents a comment names are woken with it.
  */
 import { component, signal, type Define, type JSXElement } from 'sigx';
 import { Link } from '@sigx/router';
-import { Checkbox, Input } from '@sigx/zero';
-import { formatRef, parseRefs, planClaimLive, type PlanActor, type PlanItem, type Ref } from '@agentic/core';
-import { Icon, Tag, type Tone } from '@agentic/ui';
+import { Checkbox } from '@sigx/zero';
+import { formatRef, parseRefs, planClaimLive, type AgentId, type PlanActor, type PlanItem, type ProjectMembers, type Ref } from '@agentic/core';
+import { Composer, Icon, Tag, type ComposerInsert, type Mention, type Tone } from '@agentic/ui';
 import { formatAge } from '../../../../../mock/workspace';
-import { mockPlanIdentity, type PlanIdentity } from '../shared/data';
+import { mentionsIn, unknownAgent } from '../../../../chat/live';
+import { chatRefSources } from '../../../../chat/project-context';
+import { mockPlanIdentity, type PlanIdentity, type PlanWrites } from '../shared/data';
+import { NeedsYouCard } from '../shared/NeedsYouCard';
 import type { PinSource } from '../shared/pins';
 import { ActorTile, useFollow } from '../shared/parts';
 import { REF_KIND_HINT, leaseMinutesLeft, pinLine, queuePlace, refIcon, refLabel, shortPath, touchOverlaps, unblocksOf, type PlanDoc, type PlanFilePin } from '../shared/model';
@@ -27,12 +32,29 @@ export type ItemDetailProps =
     & Define.Prop<'onClose', () => void, true>
     /** Tick a done-when line (live, #926). Absent, the checklist is read-only. */
     & Define.Prop<'onTick', (index: number, checked: boolean) => void>
-    /** Send a comment (live, #926); resolves whether it went. Absent, Send is disabled. */
-    & Define.Prop<'onComment', (text: string) => Promise<boolean>>
+    /** Send a comment and the agents it names (live, #926, #1044); resolves whether it went. Absent, the box is disabled. */
+    & Define.Prop<'onComment', (text: string, mentions: readonly AgentId[]) => Promise<boolean>>
+    /** Answer a needs-you item (live, #1044); resolves whether it went. Absent, the question is read-only. */
+    & Define.Prop<'onAnswer', (text: string) => Promise<boolean>>
+    /** Mark a needs-you item done instead (live, #1044). */
+    & Define.Prop<'onDone', () => Promise<boolean>>
+    /** The project's agents, whom `@` picks (#1044); none when absent. */
+    & Define.Prop<'members', ProjectMembers>
     /** Who "You" is and how actors are named (#939); the mock workspace's when absent. */
     & Define.Prop<'identity', PlanIdentity>
     /** File refs' pinned lines read live (#939); absent, the doc's `pins` answer. */
     & Define.Prop<'pins', PinSource>;
+
+/** The panel's writes for item `itemId` (#926, #1044); none (read-only) without `writes`. */
+export function detailWrites(writes: PlanWrites | undefined, itemId: number): Pick<ItemDetailProps, 'onTick' | 'onComment' | 'onAnswer' | 'onDone'> {
+    if (!writes) return {};
+    return {
+        onTick: (index: number, checked: boolean) => void writes.tick(itemId, index, checked),
+        onComment: async (text: string, mentions: readonly AgentId[]) => (await writes.comment(itemId, text, mentions)) !== undefined,
+        onAnswer: async (text: string) => (await writes.answer(itemId, text)) !== undefined,
+        onDone: async () => (await writes.done(itemId)) !== undefined
+    };
+}
 
 export const STATE_TAGS: Readonly<Record<PlanItem['state'], { readonly label: string; readonly tone: Tone }>> = {
     ready: { label: 'READY', tone: 'muted' },
@@ -55,15 +77,27 @@ const ItemChip = (n: number, items: readonly PlanItem[], onPick: (n: number) => 
 };
 
 export const ItemDetail = component<ItemDetailProps>(({ props }) => {
-    const st = signal({ pin: '' as string, draft: '', sending: false });
-    const send = async (e: Event): Promise<void> => {
-        e.preventDefault();
-        const text = st.draft.trim();
+    const st = signal({ pin: '' as string, draft: '', sending: false, insert: null as ComposerInsert | null });
+    let inserts = 0;
+    const agentIds = (): readonly string[] => props.members?.agentIds ?? [];
+    const agentName = (id: string): string => (props.identity ?? mockPlanIdentity).name({ kind: 'agent', agentId: id as AgentId });
+    /** `@` offers the project's agents by name — what the picker inserts and `mentionsIn` reads back. */
+    const mentions = (): Mention[] => agentIds().map((id) => ({ id: agentName(id), label: agentName(id), ...(props.members?.coordinator === id ? { description: 'project manager' } : {}) }));
+    const send = async (text: string): Promise<void> => {
         if (!text || st.sending || !props.onComment) return;
+        const named = mentionsIn(text, agentIds().map((agentId) => ({ agentId, status: 'idle', history: { access: 'all' } })), (id) => ({ ...unknownAgent(id), name: agentName(id) }));
         st.sending = true;
-        const sent = await props.onComment(text);
-        st.sending = false;
-        if (sent) st.draft = '';
+        st.draft = '';
+        let sent = false;
+        try {
+            sent = await props.onComment(text, named);
+        } catch {
+            sent = false;
+        } finally {
+            st.sending = false;
+        }
+        // The composer cleared its draft on send: a refused comment goes back into it.
+        if (!sent) st.insert = { id: `retry-${++inserts}`, text };
     };
     const follow = useFollow();
     const NavChip = (href: string, kind: string, body: JSXElement) => <a href={href} onClick={follow(href)} data-plan-chip={kind}>{body}</a>;
@@ -220,7 +254,11 @@ export const ItemDetail = component<ItemDetailProps>(({ props }) => {
                         : null}
                 </dl>
 
-                {item.options?.length
+                {item.state === 'needs-you'
+                    ? <NeedsYouCard item={item} now={props.now} name={name} {...(props.onAnswer ? { onAnswer: props.onAnswer } : {})} {...(props.onDone ? { onDone: props.onDone } : {})} />
+                    : null}
+
+                {item.options?.length && item.state !== 'needs-you'
                     ? (
                         <section data-plan-detail-section="options" aria-label="Options">
                             <h4>Options</h4>
@@ -272,16 +310,19 @@ export const ItemDetail = component<ItemDetailProps>(({ props }) => {
                         : <p data-dim="">Nothing yet.</p>}
                 </section>
 
-                <form data-plan-comment="" onSubmit={(e: Event) => void send(e)}>
-                    <Input.Root model={() => st.draft} name="plan-comment" autocomplete="off">
-                        <Input.Label visuallyHidden>{`Comment on #${item.id}`}</Input.Label>
-                        <Input.Control>
-                            <Input.Input placeholder="Comment. # item, @ agent, / file, pr: PR" />
-                        </Input.Control>
-                    </Input.Root>
-                    {props.onComment
-                        ? <button type="submit" aria-label="Send comment" disabled={st.sending || !st.draft.trim()}><Icon name="send" size={14} /></button>
-                        : <button type="submit" aria-label="Send comment" disabled title="Comments need the Plan store"><Icon name="send" size={14} /></button>}
+                <div data-plan-comment="" onInput={(e: Event) => { if (e.target instanceof HTMLTextAreaElement) st.draft = e.target.value; }}>
+                    <Composer
+                        mentions={mentions()}
+                        refs={chatRefSources(['#'], items, [])}
+                        busy={st.sending}
+                        disabled={!props.onComment}
+                        placeholder={props.onComment ? 'Comment. @ an agent to wake it, # an item, pr: a PR' : 'Comments need the Plan store'}
+                        minRows={1}
+                        maxRows={4}
+                        {...(st.insert ? { insert: st.insert } : {})}
+                        onDraft={(draft: string) => { st.draft = draft; }}
+                        onSend={(text: string) => { void send(text); }}
+                    />
                     {hints.length
                         ? (
                             <ul data-plan-comment-refs="" aria-label="Refs in your comment">
@@ -289,7 +330,7 @@ export const ItemDetail = component<ItemDetailProps>(({ props }) => {
                             </ul>
                         )
                         : null}
-                </form>
+                </div>
             </aside>
         );
     };

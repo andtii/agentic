@@ -14,6 +14,8 @@ import { agentNamed, loadHome, rootOf, type MockTaskRow } from '../mock/workspac
 import { opsLimitAccounts } from '../mock/ops';
 import { SetupChecklist } from './home/SetupChecklist';
 import { NeedsYou, useNeedsSource } from './inbox';
+import { PlansFeed, createWorkspacePlans, livePlanNeeds, mockPlanNeeds } from './projects/features/plan/home/needs';
+import { usePlanIdentity } from './projects/features/plan/shared/data';
 import { mockPullNeeds } from './projects/work/pull/links';
 import { PullsFeed, createWorkspacePulls, livePullNeeds } from './projects/work/pull/LivePulls';
 import { TASK_TABLE_COLS, TASK_TABLE_COLUMNS } from './task/live';
@@ -66,7 +68,8 @@ defineTopbar('home', () => ({ actions: () => <Button intent="primary" icon="plus
  * Schedules page lists it. Above everything, while no runtime is ready, the
  * setup checklist says what to do first (#234). The pull requests whose move is yours join "Needs you" from every
  * Git project's Pulls actor (#865); a review requested of the viewer's provider
- * login (`viewer.login`, #893) is theirs too.
+ * login (`viewer.login`, #893) is theirs too. So do the plan items an agent set to needs-you, from every project's Plan
+ * (#1044), each answerable in place.
  */
 export const LiveHome = component(() => {
     const defs = useActorDefs();
@@ -76,6 +79,8 @@ export const LiveHome = component(() => {
     const spend = useMonthSpend(defs, viewer);
     const feed = createWorkspacePulls();
     const pulls = livePullNeeds(feed, defs, () => viewer.workspaceId, () => viewer.login);
+    const planFeed = createWorkspacePlans();
+    const plans = livePlanNeeds(planFeed, defs, () => viewer.workspaceId, usePlanIdentity().name);
     return (): JSXElement => {
         const w = ws.value;
         if (w && w.agents.length === 0) {
@@ -92,7 +97,8 @@ export const LiveHome = component(() => {
             <Page title="Home" page="home" hideTitle>
                 <SetupChecklist />
                 <PullsFeed feed={feed} />
-                <NeedsYou source={needs} pulls={pulls} />
+                <PlansFeed feed={planFeed} />
+                <NeedsYou source={needs} pulls={pulls} plans={plans} />
 
                 <aside data-home-rail aria-label="Today, spend and limits">
                     <Panel label={`Today · ${w?.settings.timeZone ?? 'UTC'}`} slots={{ aside: () => <Link to="/schedules">All schedules</Link> }}>
@@ -131,6 +137,7 @@ export const Home = component(() => {
     const view = loadHome();
     const needs = useNeedsSource()();
     const pulls = mockPullNeeds();
+    const plans = mockPlanNeeds();
     const st = signal({ stopAll: false });
     const chains = () => [...new Set(view.tasks.map((t) => rootOf(t).objective))];
     return () => {
@@ -144,7 +151,7 @@ export const Home = component(() => {
         const spendPct = Math.min(100, Math.round((view.spend.monthUsd / view.spend.limitUsd) * 100));
         return (
             <Page title="Home" page="home" hideTitle>
-                <NeedsYou source={needs} pulls={pulls} />
+                <NeedsYou source={needs} pulls={pulls} plans={plans} />
 
                 <aside data-home-rail aria-label="Today, spend and limits">
                     <Panel label={`Today · ${view.timeZone}`} slots={{ aside: () => <Link to="/schedules">All schedules</Link> }}>
