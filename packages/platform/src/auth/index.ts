@@ -15,7 +15,55 @@ export type { AuthProvider, AuthorizationRequest, CodeExchange, ExternalIdentity
 export { AuthProviderError } from './provider.js';
 export { githubAuthProvider, GITHUB_PROVIDER_ID, type GitHubAuthProviderConfig } from './providers/github.js';
 
-export { SESSION_COOKIE, SESSION_TTL_MS, sealSession, openSession, sessionCookie, clearSessionCookie, sessionFromRequest, readCookie, serializeCookie, type SessionClaims, type SessionPayload, type SessionOptions, type CookieAttributes } from './cookie.js';
+export {
+    SESSION_COOKIE,
+    SESSION_TTL_MS,
+    sealSession,
+    openSession,
+    sessionCookie,
+    clearSessionCookie,
+    sessionFromRequest,
+    readCookie,
+    serializeCookie,
+    SECURE_COOKIE_PREFIX,
+    PLAIN_COOKIE_PREFIX,
+    isSecureRequest,
+    cookiePrefixFor,
+    plainCookieHeader,
+    plainCookieRequest,
+    plainSetCookie,
+    plainCookieResponse,
+    type CookiePrefix,
+    type SessionClaims,
+    type SessionPayload,
+    type SessionOptions,
+    type CookieAttributes
+} from './cookie.js';
+
+export {
+    LOCAL_OWNER_ID,
+    CLAIM_TTL_MS,
+    PASSPHRASE_MIN_LENGTH,
+    PASSPHRASE_MAX_LENGTH,
+    PASSPHRASE_ITERATIONS,
+    issueClaim,
+    isClaimLive,
+    checkClaim,
+    redeemClaim,
+    passphraseProblem,
+    verifyLocalOwner,
+    hashPassphrase,
+    verifyPassphrase,
+    type PendingClaim,
+    type PassphraseHash,
+    type LocalOwner,
+    type LocalOwnerRecord,
+    type IssuedClaim,
+    type ClaimRefusal,
+    type ClaimVerdict,
+    type PassphraseRefusal,
+    type RedeemResult
+} from './local-owner.js';
 
 export {
     OAUTH_COOKIE,
