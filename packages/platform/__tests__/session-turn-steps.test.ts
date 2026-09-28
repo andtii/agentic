@@ -152,7 +152,7 @@ describe('foldTurnSteps (#1055)', () => {
         expect(foldTurnSteps([ev({ type: 'turn-start', input: [] }), ev({ type: 'turn-end', stopReason: 'end_turn' })], input)).toBeUndefined();
     });
 
-    it('an anthropic-api call takes its target from the activity line; a cancelled call is an error; events without `at` carry no times', () => {
+    it('an anthropic-api call takes its target from the activity line; a cancelled call is skipped (#1097); events without `at` carry no times', () => {
         const steps = foldTurnSteps(
             [
                 ev({ type: 'tool-call', callId: 'm1', name: 'memory_search', category: 'search', input: { query: 'tea' } }),
@@ -163,9 +163,9 @@ describe('foldTurnSteps (#1055)', () => {
         )!;
         expect(steps.steps.map((s) => [s.kind, s.target, s.state])).toEqual([
             ['search', 'Using memory_search', 'pending'],
-            ['other', 'Editing notes.md', 'error']
+            ['other', 'Editing notes.md', 'denied']
         ]);
-        expect(steps.steps[1]!.output).toMatchObject({ excerpt: ['interrupted'], ref: 'session_9#m2' });
+        expect(steps.steps[1]!.output).toBeUndefined();
         expect(steps.steps[0]!.startedAt).toBeUndefined();
         expect(steps.startedAt).toBeUndefined();
     });
