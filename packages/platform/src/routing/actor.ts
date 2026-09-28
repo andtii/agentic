@@ -108,6 +108,7 @@ import { hydrateChatFiles, withChatFileRead } from './files.js';
 import { parseRoutingKey, ROUTING_TYPE } from './key.js';
 import { locateEnvironment, readMachine, type LocatedEnvironment } from './locate.js';
 import type { RoutingPorts } from './ports.js';
+import { forgetItemSession, isItemSession, itemSessionKey, recordItemSession } from './bindings.js';
 import { initialRoutingState, type Route, type RoutingState } from './state.js';
 
 /** How far back (entries) the router looks for a chat task's triggering message, for its attachments. */
@@ -843,7 +844,9 @@ export function defineRoutingActor(ports: RoutingPorts) {
              * chat's binding (`ChatSummary.sessions[agentId]`) when `reusable`, with the chat's `seenSeq` for the prompt;
              * otherwise — and always for a chatless route — a fresh id. A binding refused is ended first — unless another
              * route still runs on it (#1073) — its `session-ended` drops the chat's row, and the new session's
-             * `session-started` replaces it either way.
+             * `session-started` replaces it either way. A plan item task (#1078) binds its item's session instead
+             * (`state.itemSessions`), and a task with no item never takes or ends one — it opens a fresh session when the
+             * chat's binding is an item's.
              * Idempotent: a route already bound (a retry) keeps its id. Called once the placement is final (the folder
              * included), since that is what reuse is judged on.
              */
@@ -864,22 +867,43 @@ export function defineRoutingActor(ports: RoutingPorts) {
             async function bindSession(route: Route): Promise<SessionId> {
                 if (route.sessionId) return route.sessionId;
                 if (route.chatId) {
-                    const row = await chat(route.chatId)
+                    const chatId = route.chatId;
+                    const row = await chat(chatId)
                         .get()
                         .then((summary) => summary.sessions[route.agentId], () => undefined);
-                    if (row) {
+                    // A binding another route still runs on is left open (#1073): plan item tasks of one member run
+                    // in parallel, each in its item's worktree, and one placement must not end another's session.
+                    const release = async (sessionId: SessionId): Promise<void> => {
+                        const serving = Object.values(ctx.state.routes).some((r) => r.taskId !== route.taskId && r.sessionId === sessionId);
+                        if (serving) return;
+                        forgetItemSession(ctx.state, sessionId);
+                        await session(sessionId)
+                            .close()
+                            .catch(() => undefined);
+                    };
+                    if (route.planItem !== undefined) {
+                        // An item task (#1078) takes its item's session, wherever the chat's binding points now; the chat's
+                        // own session (a binding no item holds) is refused and ended as before, another item's left alone.
+                        const own = ctx.state.itemSessions?.[itemSessionKey(chatId, route.agentId, route.projectId, route.planItem)];
+                        if (own && (await reusable(route, own.sessionId))) {
+                            route.sessionId = own.sessionId;
+                            if (row?.sessionId === own.sessionId) route.seenSeq = row.seenSeq;
+                            return own.sessionId;
+                        }
+                        if (own) await release(own.sessionId);
+                        if (row && row.sessionId !== own?.sessionId && !isItemSession(ctx.state, row.sessionId)) await release(row.sessionId);
+                        route.sessionId = newSessionId();
+                        recordItemSession(ctx.state, { sessionId: route.sessionId, chatId, agentId: route.agentId, ...(route.projectId ? { projectId: route.projectId } : {}), planItem: route.planItem });
+                        return route.sessionId;
+                    }
+                    // A task with no item (#1078) never takes or ends an item's session: it lives on for the item's next task.
+                    if (row && !isItemSession(ctx.state, row.sessionId)) {
                         if (await reusable(route, row.sessionId)) {
                             route.sessionId = row.sessionId;
                             route.seenSeq = row.seenSeq;
                             return row.sessionId;
                         }
-                        // A binding another route still runs on is left open (#1073): plan item tasks of one member run
-                        // in parallel, each in its item's worktree, and one placement must not end another's session.
-                        const serving = Object.values(ctx.state.routes).some((r) => r.taskId !== route.taskId && r.sessionId === row.sessionId);
-                        if (!serving)
-                            await session(row.sessionId)
-                                .close()
-                                .catch(() => undefined);
+                        await release(row.sessionId);
                     }
                 }
                 route.sessionId = newSessionId();
@@ -2064,6 +2088,7 @@ export function defineRoutingActor(ports: RoutingPorts) {
                         if (route.sessionId !== bound) continue;
                         await fail(route, { code: SESSION_RESET_CODE, message: why, recoverable: true });
                     }
+                    forgetItemSession(ctx.state, bound);
                     await ctx.save();
                     const acknowledged = await client.close().then((reply) => reply.kind === 'ack', () => false);
                     if (!acknowledged) await tellChatEnded(ctx, workspaceId, chatId, agentId, bound, now);

@@ -144,6 +144,22 @@ export interface RoutingState {
     routes: Record<string, Route>;
     /** The latest `task_report` per task, used for the result when the turn ends `done`. */
     reports: Record<string, TaskReport>;
+    /**
+     * The sessions of plan item tasks in chats (#1078), by `itemSessionKey(chatId, agentId, projectId, planItem)`: an
+     * item task reuses its item's session (it runs in the item's worktree), a task with no item never takes or closes
+     * one. Dropped when the session is ended or replaced, and — once the item is done or dropped — by the router's
+     * release (`itemSessionsOf`, #1081). Absent in state saved before #1078.
+     */
+    itemSessions?: Record<string, ItemSession>;
+}
+
+/** A plan item task's session in a chat (#1078). */
+export interface ItemSession {
+    readonly sessionId: SessionId;
+    readonly chatId: ChatId;
+    readonly agentId: AgentId;
+    readonly projectId?: ProjectId;
+    readonly planItem: number;
 }
 
 export function initialRoutingState(): RoutingState {
