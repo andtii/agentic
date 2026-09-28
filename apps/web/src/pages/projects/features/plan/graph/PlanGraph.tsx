@@ -24,7 +24,8 @@ const STATE_LABEL: Readonly<Record<Plan['phases'][number]['items'][number]['stat
     'needs-you': 'Needs you',
     blocked: 'Blocked',
     done: 'Done',
-    stuck: 'Stuck'
+    stuck: 'Stuck',
+    dropped: 'Dropped'
 };
 
 /** The graph of one plan: lanes, arrows, nodes. */

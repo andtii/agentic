@@ -40,7 +40,8 @@ export const STATE_TAGS: Readonly<Record<PlanItem['state'], { readonly label: st
     'needs-you': { label: 'NEEDS YOU', tone: 'needs-you' },
     blocked: { label: 'BLOCKED', tone: 'dim' },
     done: { label: 'DONE', tone: 'muted' },
-    stuck: { label: 'STUCK', tone: 'failed' }
+    stuck: { label: 'STUCK', tone: 'failed' },
+    dropped: { label: 'DROPPED', tone: 'dim' }
 };
 
 const ItemChip = (n: number, items: readonly PlanItem[], onPick: (n: number) => void) => {

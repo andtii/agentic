@@ -11,8 +11,12 @@ import type { Ref } from './refs.js';
 /** Who assigned, claimed or changed something on a plan: an agent member or a person. */
 export type PlanActor = { readonly kind: 'agent'; readonly agentId: AgentId } | { readonly kind: 'user'; readonly userId: string };
 
-export type PlanItemState = 'ready' | 'claimed' | 'needs-you' | 'blocked' | 'done' | 'stuck';
-export const PLAN_ITEM_STATES: readonly PlanItemState[] = ['ready', 'claimed', 'needs-you', 'blocked', 'done', 'stuck'];
+/**
+ * `dropped` (#1041) is terminal like `done` but is not done: the item will not be carried out (superseded, no longer
+ * wanted). Items `after` a dropped one stay blocked until someone relinks them.
+ */
+export type PlanItemState = 'ready' | 'claimed' | 'needs-you' | 'blocked' | 'done' | 'stuck' | 'dropped';
+export const PLAN_ITEM_STATES: readonly PlanItemState[] = ['ready', 'claimed', 'needs-you', 'blocked', 'done', 'stuck', 'dropped'];
 
 /** A claim's lease runs this long and renews on each `plan_*` call; when it runs out the item returns to the top of its assignee's queue. */
 export const PLAN_LEASE_DEFAULT_MS = 30 * 60 * 1000;
@@ -56,6 +60,17 @@ export interface PlanAsk {
     readonly taskId?: TaskId;
 }
 
+/** Why and by whom a `dropped` item was dropped (#1041). */
+export interface PlanDrop {
+    readonly by: PlanActor;
+    /** ms epoch. */
+    readonly at: number;
+    /** The reason, when one was given. */
+    readonly note?: string;
+    /** The item (`#n`, same project) that replaces this one, if any. */
+    readonly supersededBy?: number;
+}
+
 export interface PlanItem {
     /** The item's number, unique per project across its plans: `#n`. */
     readonly id: number;
@@ -77,6 +92,8 @@ export interface PlanItem {
     readonly options?: readonly PlanOption[];
     /** While the item needs a person: the question it waits on. */
     readonly ask?: PlanAsk;
+    /** Set while the item is `dropped`: who dropped it and why. */
+    readonly dropped?: PlanDrop;
 }
 
 export interface PlanPhase {
@@ -108,7 +125,7 @@ export function planItems(plan: Pick<Plan, 'phases'>): PlanItem[] {
     return plan.phases.flatMap((p) => p.items);
 }
 
-/** The `after` items of `item` that are not done yet (unknown numbers count as not done). */
+/** The `after` items of `item` that are not done yet (unknown and dropped numbers count as not done — a dropped item never unblocks). */
 export function planItemWaitsOn(item: Pick<PlanItem, 'after'>, items: readonly Pick<PlanItem, 'id' | 'state'>[]): number[] {
     const done = new Set(items.filter((i) => i.state === 'done').map((i) => i.id));
     return item.after.filter((n) => !done.has(n));

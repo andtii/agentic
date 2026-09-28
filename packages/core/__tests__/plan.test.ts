@@ -1,5 +1,5 @@
 import type { AgentId, PlanItem } from '../src/index';
-import { PLAN_LEASE_DEFAULT_MS, PLAN_READ_TOOLS, PLAN_TOOLS, planClaimLive, planDoneWhenMet, planItems, planItemWaitsOn, planTouchesOverlap } from '../src/index';
+import { PLAN_ITEM_STATES, PLAN_LEASE_DEFAULT_MS, PLAN_READ_TOOLS, PLAN_TOOLS, planClaimLive, planDoneWhenMet, planItems, planItemWaitsOn, planTouchesOverlap } from '../src/index';
 
 const item = (id: number, state: PlanItem['state'], after: number[] = []): PlanItem => ({
     id,
@@ -28,6 +28,15 @@ describe('plan (#748)', () => {
         const items = [item(8, 'done'), item(9, 'claimed')];
         expect(planItemWaitsOn(item(11, 'blocked', [8, 9, 99]), items)).toEqual([9, 99]);
         expect(planItemWaitsOn(item(10, 'ready', [8]), items)).toEqual([]);
+    });
+
+    it('never unblocks dependents of a dropped item (#1041)', () => {
+        const items = [item(9, 'dropped'), item(8, 'done')];
+        expect(planItemWaitsOn(item(12, 'blocked', [8, 9]), items)).toEqual([9]);
+    });
+
+    it('lists dropped as a terminal state (#1041)', () => {
+        expect(PLAN_ITEM_STATES).toContain('dropped');
     });
 
     it('checks a claim lease against now', () => {

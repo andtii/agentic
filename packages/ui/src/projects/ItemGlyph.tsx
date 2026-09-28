@@ -1,13 +1,13 @@
 /**
  * `ItemGlyph` — a plan item's state as a 16 px square (docs/design/projects/HANDOFF.md, "Plan"): ready is hollow
  * (`text-muted`), claimed / needs you / stuck are filled 20 % in `working` / `needs-you` / `failed`, blocked is dashed
- * (`text-dim`), done is filled `line-strong` with a check. Colour is never the only signal: the glyph is named by its
+ * (`text-dim`), done is filled `line-strong` with a check, dropped (#1041) is a hollow `text-dim` square crossed out. Colour is never the only signal: the glyph is named by its
  * state unless the row already says it in text (`label=""`).
  */
 import { component, type Define } from '@sigx/runtime-core';
 
 /** The plan item states the glyph draws (docs/design/projects/HANDOFF.md, "Plan"). */
-export type ItemGlyphState = 'ready' | 'claimed' | 'needs-you' | 'blocked' | 'done' | 'stuck';
+export type ItemGlyphState = 'ready' | 'claimed' | 'needs-you' | 'blocked' | 'done' | 'stuck' | 'dropped';
 
 export type ItemGlyphProps =
     & Define.Prop<'state', ItemGlyphState, true>
@@ -22,7 +22,8 @@ export const ITEM_GLYPH_TEXT: Readonly<Record<ItemGlyphState, string>> = {
     'needs-you': 'Needs you',
     blocked: 'Blocked',
     done: 'Done',
-    stuck: 'Stuck'
+    stuck: 'Stuck',
+    dropped: 'Dropped'
 };
 
 const base = 'display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; box-sizing: border-box; inline-size: 16px; block-size: 16px; border-radius: 4px';
@@ -34,7 +35,8 @@ const STYLE: Readonly<Record<ItemGlyphState, string>> = {
     'needs-you': filled('var(--color-warning)'),
     blocked: `${base}; border-width: 1.5px; border-style: dashed; border-color: var(--ag-text-dim)`,
     done: `${base}; background-color: var(--ag-line-strong); color: var(--color-base-content)`,
-    stuck: filled('var(--color-error)')
+    stuck: filled('var(--color-error)'),
+    dropped: `${base}; border-width: 1.5px; border-style: solid; border-color: var(--ag-text-dim); color: var(--ag-text-dim)`
 };
 
 const check = () => (
@@ -43,9 +45,15 @@ const check = () => (
     </svg>
 );
 
+const cross = () => (
+    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true">
+        <path d="M6 6l12 12M18 6 6 18" />
+    </svg>
+);
+
 export const ItemGlyph = component<ItemGlyphProps>(({ props }) => () => {
     const label = props.label ?? ITEM_GLYPH_TEXT[props.state];
-    const mark = props.state === 'done' ? check() : null;
+    const mark = props.state === 'done' ? check() : props.state === 'dropped' ? cross() : null;
     return label
         ? <span data-ag-project="item-glyph" data-state={props.state} class={props.class} style={STYLE[props.state]} role="img" aria-label={label}>{mark}</span>
         : <span data-ag-project="item-glyph" data-state={props.state} class={props.class} style={STYLE[props.state]} aria-hidden="true">{mark}</span>;

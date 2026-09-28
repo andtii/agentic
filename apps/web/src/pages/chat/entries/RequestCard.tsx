@@ -30,7 +30,7 @@ import { usePlanItems } from '../../projects/work/live';
 /** An agent's display name by id, when the caller can resolve it. */
 export type AgentNameOf = (agentId: AgentId) => string | undefined;
 
-const STATE_WORD: Readonly<Record<PlanItemState, string>> = { ready: 'ready', claimed: 'working', 'needs-you': 'needs you', blocked: 'blocked', done: 'done', stuck: 'stuck' };
+const STATE_WORD: Readonly<Record<PlanItemState, string>> = { ready: 'ready', claimed: 'working', 'needs-you': 'needs you', blocked: 'blocked', done: 'done', stuck: 'stuck', dropped: 'dropped' };
 
 /**
  * A linked item's live line (#931): who has it and its state, then its latest PR in the project's ref form —
