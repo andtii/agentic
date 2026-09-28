@@ -15,6 +15,8 @@ export interface PlanMcpUpdate {
     readonly uncheck?: readonly number[];
     readonly note?: string;
     readonly state?: Exclude<PlanItemState, 'claimed'>;
+    /** With `state: 'dropped'` (#1041): the item (`#n`, this project) that replaces this one. */
+    readonly supersededBy?: number;
 }
 
 export interface PlanMcpAdd {
@@ -105,31 +107,47 @@ export function planMcpTools(port: PlanMcpPort | undefined, tool: ScopedTool): A
         tool({
             name: UPDATE,
             scope: PLAN_SCOPE,
-            description: 'Tick or untick done-when lines (0-based), add a History note, change an item’s state (a person may mark it done), or replace what it waits on with `after` — `project#n` names another project’s item.',
+            description: 'Tick or untick done-when lines (0-based), add a History note, change an item’s state (a person may mark it done, or drop it with a `note` saying why), or replace what it waits on with `after` — `project#n` names another project’s item.',
             input: z.object({
                 projectId,
                 item: itemNo,
                 check: z.array(z.number().int().min(0)).optional(),
                 uncheck: z.array(z.number().int().min(0)).optional(),
                 note: z.string().min(1).optional(),
-                state: z.enum(['ready', 'needs-you', 'blocked', 'done', 'stuck']).optional(),
+                state: z
+                    .enum(['ready', 'needs-you', 'blocked', 'done', 'stuck', 'dropped'])
+                    .optional()
+                    .describe('A new state. `dropped` (with a `note` saying why) is for an item that will not be done — superseded or no longer wanted; items after it stay blocked until relinked with `after`. `ready` reopens a dropped item.'),
+                supersededBy: itemNo.optional().describe('With state `dropped`: the item that replaces this one.'),
                 after: z.array(afterEntry).max(50).optional().describe('Replace what the item waits on; `[]` clears it. List what it already waits on to keep it.')
             }),
             annotations: WRITE,
             run: async (input) => {
                 const patching = !!input.check?.length || !!input.uncheck?.length || input.note !== undefined || input.state !== undefined;
+                if (input.supersededBy !== undefined && input.state !== 'dropped') throw new Error(`${UPDATE}: supersededBy goes with state dropped`);
+                if (input.state === 'dropped' && input.note === undefined) throw new Error(`${UPDATE}: say why #${input.item} is dropped: pass a note (and supersededBy when another item replaces it)`);
                 if (!patching && input.after === undefined) throw new Error(`${UPDATE}: nothing to change on #${input.item}: pass check, uncheck, note, state or after`);
                 if (input.after !== undefined) {
                     if (!port.after) throw new Error(`${UPDATE}: changing what an item waits on is not available on this host`);
                     const linked = await port.after(input.projectId as ProjectId, input.item, input.after);
                     if (!patching) return linked;
                 }
-                return port.update(input.projectId as ProjectId, input.item, {
+                const updated = await port.update(input.projectId as ProjectId, input.item, {
                     ...(input.check ? { check: input.check } : {}),
                     ...(input.uncheck ? { uncheck: input.uncheck } : {}),
                     ...(input.note !== undefined ? { note: input.note } : {}),
-                    ...(input.state !== undefined ? { state: input.state } : {})
+                    ...(input.state !== undefined ? { state: input.state } : {}),
+                    ...(input.supersededBy !== undefined ? { supersededBy: input.supersededBy } : {})
                 });
+                if (updated.state !== 'dropped' || input.state !== 'dropped') return updated;
+                // Dropping unblocks nothing (#1041): name what waits on it so the client relinks it.
+                const waiting = (await port.list(input.projectId as ProjectId))
+                    .flatMap((p) => p.phases.flatMap((ph) => ph.items))
+                    .filter((i) => i.after.includes(updated.id) && i.state !== 'done' && i.state !== 'dropped')
+                    .map((i) => i.id);
+                if (!waiting.length) return updated;
+                const one = waiting.length === 1;
+                return { ...updated, relink: `${waiting.map((n) => `#${n}`).join(', ')} wait${one ? 's' : ''} on #${updated.id} and stay${one ? 's' : ''} blocked: set their after with plan_update.` };
             }
         }),
         tool({
