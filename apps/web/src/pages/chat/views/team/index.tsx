@@ -123,7 +123,7 @@ export const TeamView = component<TeamViewProps>(({ props, signal }) => {
         return (
             <>
                 <div data-chat-team-crew style="flex: none; padding: var(--space-lg) var(--space-2xl) var(--space-md); min-inline-size: 0;">
-                    <CrewStrip members={rows.crew} {...(v.followed ? { selected: v.followed } : {})} now={now} onFollow={(id: string) => v.onFollow(id)} />
+                    <CrewStrip members={rows.crew} {...(v.followed ? { selected: v.followed } : {})} now={now} onFollow={(id: string) => v.onFollow(v.followed === id ? null : id)} />
                 </div>
                 <Thread
                     {...v.thread}
