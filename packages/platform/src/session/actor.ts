@@ -24,7 +24,7 @@
  * approval card all read the same log.
  */
 
-import { actorKey, type AgentId, type ChatId, type Correction, hasScope, type LearningPlugin, type MessageId, type Principal, type Proposal, SESSION_EVENTS_TOPIC, type SessionClosedCode, type SessionEvent, type SessionId, type SessionOptions, type TaskError, type TaskId, type TaskResult, type UsageRow, type WorkspaceId } from '@agentic/core';
+import { actorKey, type AgentId, type ChatId, type Correction, hasScope, type LearningPlugin, type MessageId, type Principal, type Proposal, SESSION_EVENTS_TOPIC, type SessionClosedCode, type SessionEvent, type SessionId, type SessionOptions, type TaskError, type TaskId, type TaskResult, type TurnSteps, type UsageRow, type WorkspaceId } from '@agentic/core';
 import { defineActor, topic, type ActorContext, type ActorPolicy } from '@sigx/actors';
 import { ServerFnError } from '@sigx/server';
 import { createTranscript, reduceAgentEvent, toPromptParts, type AgentEvent, type AgentTranscript, type Decision, type EventCursor, type PromptInput, type PromptPart, type RequestOption, type SessionRef, type UnstampedEvent } from '@sigx/ai-agent';
@@ -42,6 +42,7 @@ import type { AnswerFollowUp, OpenedSession, SessionOpenSpec, SessionPorts } fro
 import { applySessionEntry, eventTime, optionsOf, stampEvent, specOptions, bytesOf, type DetachedAnswer, currentTaskId, cursorAfter, EMPTY_TURN_EVENTS, jsonBytes, eventsAfter, findEvent, initialSessionState, isWholeEvent, knownEvents, PAGE_BYTES, parseSessionKey, platformCursor, requestById, RETAINED_PAGES, WINDOW_BYTES, type CorrectionRecord, type LearningRecord, type SessionEntry, type SessionPatch, type SessionState } from './state.js';
 import { SessionPage, sessionPageKey } from './page.js';
 import { shouldNoteActivity, toolActivity, type ActivityMark } from './activity.js';
+import { foldTurnSteps } from './steps.js';
 import { TaskActor } from '../task/actor.js';
 import { taskKey } from '../task/key.js';
 import { appendEntry, boundTranscript, createTranscriptStore } from './store.js';
@@ -875,6 +876,26 @@ export function defineSessionActor(ports: SessionPorts) {
     }
 
     /**
+     * The turn's tool calls as steps (#1055), for its final chat message: the events from the turn's start on — the
+     * window, else the pages too — folded by `foldTurnSteps` under the runtime's normalisers. Best effort: a turn whose
+     * events cannot be read (a page gone, the machine offline) carries no steps, and the message still goes.
+     */
+    async function turnSteps(c: ActorContext<SessionState>, turnId: string): Promise<TurnSteps | undefined> {
+        const s = c.state;
+        const spec = s.spec;
+        const parsed = parseSessionKey(c.key);
+        if (!spec || !parsed) return undefined;
+        try {
+            const start = findEvent(s, (e) => e.type === 'turn-start' && e.turnId === turnId);
+            // From just before the start, so the `turn-start` itself (its time) is read too.
+            const events = start ? await eventsSince(c, s, { epoch: start.epoch, seq: start.seq - 1 }) : s.events;
+            return foldTurnSteps(c.snapshot(events), { turnId, agentId: spec.agentId, sessionId: parsed.sessionId, runtime: spec.runtime });
+        } catch {
+            return undefined;
+        }
+    }
+
+    /**
      * Turn end, both paths: snapshot the transcript, refresh the ref, tell the chat, compact. `taskId` is the
      * turn's task as `running` carried it (#390) — the caller reads it before the `turn-end` folds, since the
      * fold drops `running`; the chat message, the learning and any usage still buffered are attributed to it.
@@ -887,7 +908,10 @@ export function defineSessionActor(ports: SessionPorts) {
         s.transcript = boundTranscript(transcript);
         if (live) s.ref = structuredClone(live.session.ref);
         const text = finalText(transcript, turnId);
-        if (text) await publishChat(c, { kind: 'message', parts: [{ type: 'text', text }], ...(taskId ? { taskId } : {}) });
+        if (text) {
+            const steps = await turnSteps(c, turnId);
+            await publishChat(c, { kind: 'message', parts: [{ type: 'text', text }], ...(taskId ? { taskId } : {}), ...(steps ? { steps } : {}) });
+        }
         await learnFromTurn(c, turnId, text, taskId, transcript);
         await c.save();
         // Answers that came while this turn ran (#285): the turn is over and a live session does not close (#393), so start their askers now.
