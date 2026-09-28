@@ -79,6 +79,8 @@
 import {
     DAEMON_PROTOCOL_VERSION,
     environmentVerdict,
+    telemetryWarningKey,
+    telemetryWarnings,
     toEnvironmentDescriptor,
     type CapabilityReport,
     type Cursor,
@@ -112,7 +114,7 @@ import { decodePlatformFrame, drainingReply, encodeFrame, LIMITS, platformKey, t
 import { sessionPolicyOf } from '@agentic/runtimes';
 import { capabilities as agentCapabilities, type AgentCapabilities, type AgentSession, type Policy, type SessionRef } from '@sigx/ai-agent';
 import { cursorBefore, serveSession, WIRE_PROTOCOL_VERSION, type ServedSession, type WireFrame } from '@sigx/ai-agent/wire';
-import { reconnectingConnection, type BackoffOptions, type Connection, type Socket } from './connection.js';
+import { KEEPALIVE, reconnectingConnection, type BackoffOptions, type Connection, type KeepaliveOptions, type Socket } from './connection.js';
 import type { SecureWriteOptions } from './credentials.js';
 import { answerEnvRequest } from './env-manage.js';
 import type { NdjsonEventLog, RetentionPolicy } from './event-log.js';
@@ -136,6 +138,8 @@ const W = WIRE_PROTOCOL_VERSION;
 export const DEFAULT_LOG_MAX_BYTES = 64 * 1024 * 1024;
 /** About how much event JSON one `history.response` carries — half the frame limit, so the envelope and the frames' own stamps always fit. */
 export const HISTORY_RESPONSE_BYTES = Math.floor(LIMITS.frameBytes / 2);
+/** A `telemetry` frame that is not news is sent at most this often (#984). */
+export const TELEMETRY_REFRESH_MS = 15 * 60_000;
 /** How long an environment's model list is trusted before a reconnect asks its account again (#453). */
 export const MODELS_REFRESH_MS = 6 * 60 * 60_000;
 
@@ -150,8 +154,14 @@ export interface DaemonOptions {
     /** The version control behind a session folder's `tree` / `read` / `changes` (#561), asked in turn. Default: git from PATH. */
     readonly vcs?: readonly VcsProvider[];
     readonly logger?: Logger;
-    /** Default 30 s. */
+    /**
+     * The local tick (default 30 s): telemetry is sampled on it, and — against a platform that does not answer the
+     * `{"p":1}` keepalive (#984) — a `heartbeat` goes out on it. Against one that does, `heartbeat` is sent only on
+     * `welcome` and when the set of active sessions changes.
+     */
     readonly heartbeatMs?: number;
+    /** The socket keepalive (#984): ping cadence and the silence that redials. `false` turns it off. */
+    readonly keepalive?: KeepaliveOptions | false;
     /** How long after a turn that brought no new title the runtime is asked once more (#460). Default `TITLE_RECHECK_MS`. */
     readonly titleRecheckMs?: number;
     readonly backoff?: BackoffOptions;
@@ -202,10 +212,12 @@ export interface DaemonOptions {
      */
     readonly quota?: { readonly sources?: readonly QuotaSource[]; readonly probe?: boolean; readonly pollMs?: number; readonly turnEndDebounceMs?: number; readonly refreshMs?: number };
     /**
-     * What the sessions cost the machine (#400): sampled on the heartbeat cadence and sent as `telemetry`. `enabled`
-     * false (`--telemetry off`) sends a `not-reported` snapshot instead; `exec` reads the process table (a fake in tests).
+     * What the sessions cost the machine (#400): sampled on the heartbeat cadence, sent as `telemetry` only when it is
+     * news (#984) — a `telemetryWarnings` limit crossed or cleared, a session opened or closed since the last one sent —
+     * or `refreshMs` (default 15 min) after the last. `enabled` false (`--telemetry off`) sends a `not-reported` snapshot
+     * instead; `exec` reads the process table (a fake in tests).
      */
-    readonly telemetry?: { readonly enabled?: boolean; readonly exec?: Exec };
+    readonly telemetry?: { readonly enabled?: boolean; readonly exec?: Exec; readonly refreshMs?: number };
     /**
      * How much of a session's history the machine keeps (#397): the newest whole turns under `maxBytes` of NDJSON, trimmed
      * after every turn end. Default `DEFAULT_LOG_MAX_BYTES`; `0` keeps everything. What is trimmed becomes a named `gap`
@@ -465,6 +477,10 @@ export function createDaemon(options: DaemonOptions): Daemon {
     let socket: Socket | undefined;
     let welcomed = false;
     let heartbeat: ReturnType<typeof setInterval> | undefined;
+    /** The platform answers the `{"p":1}` keepalive on this socket (#984): liveness rides it, no timed `heartbeat`. */
+    let keepaliveAnswered = false;
+    /** The active-session set the last `heartbeat` carried (sorted, joined), so a change is sent once. */
+    let announcedActive: string | undefined;
     let reinspectTimer: ReturnType<typeof setInterval> | undefined;
     // `setEnvironments` and the periodic re-inspect both replace the inspection maps: one at a time, in order.
     let inspecting: Promise<unknown> = Promise.resolve();
@@ -494,21 +510,33 @@ export function createDaemon(options: DaemonOptions): Daemon {
     });
     const telemetry = options.telemetry?.enabled === false ? undefined : createTelemetrySampler({ platform, logger, ...(options.telemetry?.exec ? { exec: options.telemetry.exec } : {}) });
     let sampling = false;
-    /** One `telemetry` frame per heartbeat (#400): the sample runs off the heartbeat's tick, never two at once. */
+    const telemetryRefreshMs = options.telemetry?.refreshMs ?? TELEMETRY_REFRESH_MS;
+    /** What the last `telemetry` frame sent said (#984): when, which sessions, which limits crossed. Reset on every `welcome`. */
+    let telemetrySent: { readonly at: number; readonly sessions: string; readonly warnings: string } | undefined;
+    /**
+     * The sample runs off the heartbeat's tick, never two at once (#400); a `telemetry` frame goes out only when it is
+     * news (#984): the first after `welcome`, a limit crossed or cleared, a session opened or closed, or the refresh due.
+     */
     async function tickTelemetry(): Promise<void> {
         if (!welcomed || sampling) return;
-        if (!telemetry) {
-            send({ v: V, t: 'telemetry', snapshot: telemetryOff(Date.now()) });
-            return;
-        }
         sampling = true;
         try {
-            const snapshot = await telemetry.sample({
-                daemonPid: process.pid,
-                sessions: [...sessions.values()].map((s) => ({ id: s.id, environmentId: s.environmentId, pid: s.pid?.(), attributable: s.pid !== undefined })),
-                environments: environments.map((env) => ({ id: env.id, pids: drivers.get(env.runtime)?.pids?.(env.id) ?? [] }))
-            });
-            if (welcomed) send({ v: V, t: 'telemetry', snapshot });
+            const snapshot = telemetry
+                ? await telemetry.sample({
+                      daemonPid: process.pid,
+                      sessions: [...sessions.values()].map((s) => ({ id: s.id, environmentId: s.environmentId, pid: s.pid?.(), attributable: s.pid !== undefined })),
+                      environments: environments.map((env) => ({ id: env.id, pids: drivers.get(env.runtime)?.pids?.(env.id) ?? [] }))
+                  })
+                : telemetryOff(Date.now());
+            const at = Date.now();
+            const said = {
+                at,
+                sessions: Object.keys(snapshot.sessions).sort().join('\n'),
+                warnings: telemetryWarnings(snapshot).map(telemetryWarningKey).sort().join('\n')
+            };
+            const last = telemetrySent;
+            const news = !last || last.sessions !== said.sessions || last.warnings !== said.warnings || at - last.at >= telemetryRefreshMs;
+            if (news && welcomed && send({ v: V, t: 'telemetry', snapshot })) telemetrySent = said;
         } catch (e) {
             logger.warn('telemetry: sample failed', { error: e instanceof Error ? e.message : String(e) });
         } finally {
@@ -657,6 +685,7 @@ export function createDaemon(options: DaemonOptions): Daemon {
     function onOpen(next: Socket): void {
         socket = next;
         welcomed = false;
+        keepaliveAnswered = false;
         const resume: Record<string, Cursor> = {};
         // The later of the served head and what was last sent: the served head (and the log behind it) advances
         // only as appends reach disk, so it can trail frames already on the wire.
@@ -688,7 +717,21 @@ export function createDaemon(options: DaemonOptions): Daemon {
         heartbeat = undefined;
     }
 
+    /** `heartbeat` with the active sessions when they changed since the last one (#984), or always with `force`. */
+    function announceActive(force = false): void {
+        if (!welcomed) return;
+        const active = [...sessions.keys()];
+        const key = [...active].sort().join('\n');
+        if (!force && key === announcedActive) return;
+        if (send({ v: V, t: 'heartbeat', at: Date.now(), active })) announcedActive = key;
+    }
+
     function onMessage(text: string): void {
+        // The keepalive's answer (#984): the runtime's, never a platform frame.
+        if (text === KEEPALIVE) {
+            keepaliveAnswered = true;
+            return;
+        }
         const result = decodePlatformFrame(text);
         if (!result.ok) {
             rejected++;
@@ -771,9 +814,12 @@ export function createDaemon(options: DaemonOptions): Daemon {
         for (const s of sessions.values()) startPump(s, wanted[s.id] ?? s.lastSent);
         for (const [id, cursor] of Object.entries(wanted)) if (!sessions.has(id as SessionId)) void replayArchived(id as SessionId, cursor);
         for (const pending of pendingTools.values()) send(pending.frame);
+        // Once per connect, then only on change (#984); a platform that does not answer the keepalive gets it on every tick.
+        announceActive(true);
+        telemetrySent = undefined;
         if (heartbeat === undefined) {
             heartbeat = setInterval(() => {
-                send({ v: V, t: 'heartbeat', at: Date.now(), active: [...sessions.keys()] });
+                if (!keepaliveAnswered) announceActive(true);
                 void tickTelemetry();
             }, heartbeatMs);
         }
@@ -924,6 +970,7 @@ export function createDaemon(options: DaemonOptions): Daemon {
             watchTurns(live);
             logger.info('session: opened', { session: sessionId, environment: env.id, runtime: env.runtime, ...(spec.resume !== undefined ? { resumedAt: base } : {}) });
             send({ v: V, t: 'session.opened', sessionId, ref, capabilities: opened.capabilities, head: headOf(live) });
+            announceActive();
             if (welcomed) startPump(live, served.head);
             // A re-opened conversation may be titled already (#460); a fresh one has nothing to read before its first turn.
             if (spec.resume !== undefined) void probeTitle(live, false);
@@ -1272,6 +1319,7 @@ export function createDaemon(options: DaemonOptions): Daemon {
         const s = sessions.get(sessionId);
         if (!s) return;
         sessions.delete(sessionId);
+        announceActive();
         stopPump(s);
         s.turns.abort();
         clearTimeout(s.titleRecheck);
@@ -1490,6 +1538,7 @@ export function createDaemon(options: DaemonOptions): Daemon {
                 token: options.credentials.token,
                 logger,
                 ...(options.backoff ? { backoff: options.backoff } : {}),
+                ...(options.keepalive !== undefined ? { keepalive: options.keepalive } : {}),
                 handlers: {
                     onOpen,
                     onMessage,

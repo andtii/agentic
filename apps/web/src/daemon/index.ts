@@ -17,7 +17,11 @@
  *   marks the machine offline at once through `Machine.socketClosed`.
  * - `createDaemonSocketRegistry` is the `MachineSocketPort` the actor sends
  *   through: actor key → the object's `state.getWebSockets(tag)`, bound by
- *   the object when it is constructed (its id names the actor).
+ *   the object when it is constructed (its id names the actor). Its
+ *   `isConnected` is what the Machine's liveness trusts (#984).
+ * - Keepalive (#984): the daemon pings `{"p":1}` and the runtime answers
+ *   `{"p":1}` itself (`setWebSocketAutoResponse`) without waking the object,
+ *   so an idle paired machine costs no Durable Object duration.
  *
  * `cloudflare:workers` is not imported (the same reason as in
  * `@sigx/actors-cloudflare`): `WebSocketPair` is read off `globalThis`, so
@@ -31,6 +35,28 @@ import { durableObjectName, durableObjectStubResolver, type DurableObjectNamespa
 export const DAEMON_SOCKET_PREFIX = '/_agentic/daemon/';
 /** The hibernation tag daemon sockets are accepted under — never `sigx:socket`, the actor host's own. */
 export const DAEMON_SOCKET_TAG = 'agentic:daemon';
+/**
+ * The keepalive the runtime answers without waking the object (#984). An object holds ONE auto-response pair, so it
+ * must be byte for byte the pair `@sigx/actors-cloudflare` sets for the live sockets of the same object.
+ */
+export const DAEMON_PING = '{"p":1}';
+
+/** A daemon socket whose last auto-answered ping is older than this is not connected (#984): the daemon pings every 30 s. */
+export const DAEMON_PING_STALE_MS = 3 * 60_000;
+
+/** `getWebSocketAutoResponseTimestamp` is workerd's; `DurableObjectStateLike` does not name it. */
+type AutoResponseState = DurableObjectStateLike & { getWebSocketAutoResponseTimestamp?(ws: DurableWebSocketLike): Date | null };
+
+interface WebSocketRequestResponsePairLike {
+    new (request: string, response: string): unknown;
+}
+
+/** Set the keepalive pair on `state` when the runtime has the hibernation auto-response (workerd); a no-op elsewhere. */
+export function setDaemonAutoResponse(state: DurableObjectStateLike): void {
+    const Pair = (globalThis as { WebSocketRequestResponsePair?: WebSocketRequestResponsePairLike }).WebSocketRequestResponsePair;
+    if (typeof Pair !== 'function' || typeof state.setWebSocketAutoResponse !== 'function') return;
+    state.setWebSocketAutoResponse(new Pair(DAEMON_PING, DAEMON_PING));
+}
 
 /** What survives an eviction on the socket (≤ 2 KiB): enough to name the actor and mint the principal. */
 interface DaemonAttachment {
@@ -125,6 +151,15 @@ export function createDaemonSocketRegistry(): DaemonSocketRegistry {
                 }
                 return sent > 0;
             },
+            // Open, and — once the daemon pings (#984) — answered within `DAEMON_PING_STALE_MS`: a half-open path the
+            // runtime never closed stops counting. A socket never pinged (an older daemon, or one just accepted) counts.
+            isConnected: (key) => {
+                const state = states.get(key) as AutoResponseState | undefined;
+                return sockets(key).some((ws) => {
+                    const at = state?.getWebSocketAutoResponseTimestamp?.(ws);
+                    return !at || Date.now() - at.getTime() < DAEMON_PING_STALE_MS;
+                });
+            },
             close(key, code, reason) {
                 for (const ws of sockets(key)) {
                     try {
@@ -209,6 +244,7 @@ export function createDaemonSocketHost(options: DaemonSocketHostOptions): Daemon
                 const client = pair[0];
                 const server = pair[1];
                 state.acceptWebSocket(server, [DAEMON_SOCKET_TAG]);
+                setDaemonAutoResponse(state);
                 server.serializeAttachment({ v: 1, kind: 'daemon', key: who.key, workspaceId: who.workspaceId, machineId: who.machineId } satisfies DaemonAttachment);
                 return new Response(null, { status: 101, webSocket: client } as ResponseInit);
             })();

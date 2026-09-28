@@ -241,7 +241,7 @@ describe('daemon telemetry frames (#400)', () => {
         }
     }
 
-    it('follows each heartbeat with a telemetry frame charging the session its driver names a pid for', async () => {
+    it('sends telemetry when a session opens and on the refresh, charging the session its driver names a pid for', async () => {
         const env: LocalEnvironment = { id: E1, name: 'work', runtime: 'mock', cwdRoots: [dir], concurrency: 1 };
         const base = agentDriver('mock', mockAgent({ respond: () => [{ text: 'ok' }] }));
         let pid: number | undefined;
@@ -256,7 +256,7 @@ describe('daemon telemetry frames (#400)', () => {
             heartbeatMs: 200,
             platform: 'linux',
             quota: { sources: [], pollMs: 0 },
-            telemetry: { exec }
+            telemetry: { exec, refreshMs: 300 }
         });
         await daemon.start();
         const seat = await relay.nextSeat();
@@ -265,15 +265,17 @@ describe('daemon telemetry frames (#400)', () => {
 
         seat.send({ v: V, t: 'session.open', sessionId: S1, environmentId: E1, spec: { agentId: 'agent_1', cwd: dir, system: 's', tools: [] } });
         for (let frame = await next(seat); frame.t !== 'session.opened'; frame = await next(seat));
-        const unknown = await nextTelemetry(seat);
+        // The session's opening is news (#984); a sample taken before it may still be in flight.
+        let unknown = await nextTelemetry(seat);
+        while (!(S1 in unknown.snapshot.sessions)) unknown = await nextTelemetry(seat);
         expect(unknown.snapshot.sessions).toEqual({ s1: null });
         expect(unknown.snapshot.availability).toBe('partial');
         expect(unknown.snapshot.daemon.processes).toBe(1);
 
         pid = 4242;
+        // Nothing new is news only on the refresh (`refreshMs`).
         let known = await nextTelemetry(seat);
-        // The frame in flight may predate the pid; the next one after it does not.
-        if (known.snapshot.sessions[S1] === null) known = await nextTelemetry(seat);
+        while (known.snapshot.sessions[S1] === null) known = await nextTelemetry(seat);
         expect(known.snapshot.sessions[S1]).toMatchObject({ rss: 215_040 * KiB, processes: 2 });
         expect(known.snapshot.environments).toEqual({ env_1: { sample: known.snapshot.sessions[S1], attribution: 'session' } });
         expect(known.snapshot.availability).toBe('reported');

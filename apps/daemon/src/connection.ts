@@ -7,6 +7,14 @@
  *
  * Built on `ws`: Node 20 has no global WebSocket, and a browser-style
  * WebSocket cannot send headers.
+ *
+ * Keepalive (#984): `{"p":1}` goes out once the socket opens and every
+ * `pingMs` after; the platform's runtime answers `{"p":1}` itself (the
+ * hibernation auto-response) without waking the Machine object. Once a
+ * socket has answered, silence for `idleMs` means the path is dead and the
+ * socket is dropped and redialled. A server that never answers the first
+ * ping predates the keepalive: pinging stops on that socket (the daemon
+ * falls back to its timed `heartbeat`) and no idle deadline applies.
  */
 
 import WebSocket from 'ws';
@@ -35,6 +43,16 @@ export function backoffDelay(attempt: number, options: BackoffOptions = {}): num
     return Math.max(0, Math.round(base - spread + random() * 2 * spread));
 }
 
+/** The keepalive text, both ways; must equal the pair the platform sets (`apps/web/src/daemon`). */
+export const KEEPALIVE = '{"p":1}';
+
+export interface KeepaliveOptions {
+    /** How often to ping. Default 30 s. */
+    readonly pingMs?: number;
+    /** Nothing received for this long on a socket that answers pings → redial. Default 75 s. */
+    readonly idleMs?: number;
+}
+
 export interface Socket {
     send(text: string): void;
     close(): void;
@@ -54,6 +72,8 @@ export interface ConnectionOptions {
     readonly logger: Logger;
     /** Largest incoming message; default 1 MiB + slack (the protocol refuses more anyway). */
     readonly maxPayload?: number;
+    /** The `{"p":1}` keepalive (#984); `false` turns it off. */
+    readonly keepalive?: KeepaliveOptions | false;
 }
 
 export interface Connection {
@@ -70,6 +90,38 @@ export function reconnectingConnection(options: ConnectionOptions): Connection {
     let stopped = true;
     let open = false;
     let refused = false;
+    const pingMs = options.keepalive === false ? 0 : (options.keepalive?.pingMs ?? 30_000);
+    const idleMs = options.keepalive === false ? 0 : (options.keepalive?.idleMs ?? 75_000);
+    let keepalive: ReturnType<typeof setInterval> | undefined;
+
+    const stopKeepalive = (): void => {
+        if (keepalive !== undefined) clearInterval(keepalive);
+        keepalive = undefined;
+    };
+
+    /** Ping `socket` now and every `pingMs`; drop it when it answered once and has since gone quiet for `idleMs`. */
+    function startKeepalive(socket: WebSocket, seen: { at: number; answered: boolean }): void {
+        stopKeepalive();
+        if (pingMs <= 0) return;
+        const ping = (): void => {
+            if (socket.readyState === WebSocket.OPEN) socket.send(KEEPALIVE);
+        };
+        ping();
+        keepalive = setInterval(() => {
+            if (ws !== socket) return stopKeepalive();
+            if (!seen.answered) {
+                logger.debug('platform: no keepalive answer; the server predates it — heartbeats carry liveness');
+                return stopKeepalive();
+            }
+            if (Date.now() - seen.at >= idleMs) {
+                logger.warn('platform: nothing heard; redialling', { idleMs });
+                stopKeepalive();
+                socket.terminate();
+                return;
+            }
+            ping();
+        }, pingMs);
+    }
 
     const schedule = (): void => {
         if (stopped) return;
@@ -88,6 +140,7 @@ export function reconnectingConnection(options: ConnectionOptions): Connection {
             handshakeTimeout: 15_000
         });
         ws = socket;
+        const seen = { at: Date.now(), answered: false };
         socket.on('open', () => {
             if (ws !== socket) return;
             attempt = 0;
@@ -99,11 +152,15 @@ export function reconnectingConnection(options: ConnectionOptions): Connection {
                 },
                 close: () => socket.close()
             });
+            seen.at = Date.now();
+            startKeepalive(socket, seen);
         });
         socket.on('message', (data, isBinary) => {
             if (ws !== socket) return;
             const text = Array.isArray(data) ? Buffer.concat(data).toString('utf8') : Buffer.from(data as ArrayBuffer).toString('utf8');
             if (isBinary) logger.debug('platform: binary message decoded as text');
+            seen.at = Date.now();
+            if (text === KEEPALIVE) seen.answered = true;
             handlers.onMessage(text);
         });
         socket.on('unexpected-response', (_request, response) => {
@@ -116,6 +173,7 @@ export function reconnectingConnection(options: ConnectionOptions): Connection {
         socket.on('close', (code, reason) => {
             if (ws !== socket) return;
             ws = undefined;
+            stopKeepalive();
             const wasOpen = open;
             open = false;
             if (wasOpen) {
@@ -134,6 +192,7 @@ export function reconnectingConnection(options: ConnectionOptions): Connection {
         },
         async stop() {
             stopped = true;
+            stopKeepalive();
             if (timer !== undefined) clearTimeout(timer);
             timer = undefined;
             const socket = ws;

@@ -256,7 +256,7 @@ export const MachineView = component<MachineViewProps>(({ props, emit, slots }) 
                     <span data-machine-glyph data-size="52" aria-hidden="true"><Icon name="machines" size={24} /></span>
                     <div data-machine-title>
                         <span data-machine-name data-size="lg">{m.name}</span>
-                        <span data-machine-caption>{m.osLabel} · {buildLabel(m.build, m.daemonVersion)} · paired {m.pairedOn} · {m.online ? `heartbeat ${m.seen}` : `last seen ${m.seen}`}{load ? <> · <span data-machine-load data-tone={loadTone(load)} title={load.reason ?? (load.stale ? 'Last reported before the daemon went quiet' : undefined)}>{loadText(load)}</span></> : null}</span>
+                        <span data-machine-caption>{m.osLabel} · {buildLabel(m.build, m.daemonVersion)} · paired {m.pairedOn} · {m.online ? 'connected' : `last seen ${m.seen}`}{load ? <> · <span data-machine-load data-tone={loadTone(load)} title={load.reason ?? (load.stale ? 'Last reported before the daemon went quiet' : undefined)}>{loadText(load)}</span></> : null}</span>
                     </div>
                     <StatusPill status={m.online ? 'online' : 'offline'} label={revoked ? 'REVOKED' : undefined} />
                 </header>
@@ -493,7 +493,7 @@ defineTopbar('machine', (route) => {
     const m = dataMode() === 'live' ? (machineHead.value?.id === id ? machineHead.value : undefined) : opsMachine(id);
     return {
         crumb: m?.name,
-        subtitle: m ? () => <span>{m.online ? `${m.osLabel} · heartbeat ${m.seen}` : `${m.osLabel} · last seen ${m.seen}`}</span> : undefined
+        subtitle: m ? () => <span>{m.online ? `${m.osLabel} · connected` : `${m.osLabel} · last seen ${m.seen}`}</span> : undefined
     };
 });
 

@@ -75,7 +75,7 @@ describe('/machines on the live pages', () => {
             ['work', 'ready'],
             ['home', 'auth-missing']
         ]);
-        expect(groupOf(dom, laptop.machineId)!.querySelector('[data-machine-caption]')!.textContent).toContain('Windows · daemon 0.1.0-test · heartbeat');
+        expect(groupOf(dom, laptop.machineId)!.querySelector('[data-machine-caption]')!.textContent).toContain('Windows · daemon 0.1.0-test · connected');
         // The platform row stays, with no machine of its own.
         expect(dom.querySelector('[data-machine-group][data-platform] [data-machine-name]')!.textContent).toBe('platform');
         expect(dom.querySelector('[data-scope="empty-state"][data-part="root"]')).toBeNull();
@@ -366,7 +366,7 @@ describe('the machine view model', () => {
         expect(load.warnings.map((w) => w.kind)).toEqual(['machine-memory', 'session-memory']);
         expect(loadText(load)).toBe('CPU 34\u00a0% · 32 GB of 34 GB in use');
         expect(loadTone(load)).toBe('warning');
-        expect(loadTone(machineLoadOf({ ...telemetry, observedAt: now - 120_000, machine: { ...telemetry.machine, memoryUsed: 8 * GiB }, sessions: {} }, now)!)).toBe('dim');
+        expect(loadTone(machineLoadOf({ ...telemetry, observedAt: now - 21 * 60_000, machine: { ...telemetry.machine, memoryUsed: 8 * GiB }, sessions: {} }, now)!)).toBe('dim');
         expect(loadText(machineLoadOf({ ...telemetry, machine: { cpu: null, memoryUsed: null, memoryTotal: 32 * GiB }, sessions: {} }, now)!)).toBe('CPU — · 34 GB memory');
         expect(loadText(machineLoadOf({ ...telemetry, availability: 'not-reported', reason: 'off' }, now)!)).toBe('load not reported');
         const rows = sessionsOf({ ...base, telemetry, activeSessions: [base.activeSessions[0]!, { ...base.activeSessions[0]!, sessionId: 's2' as never }] }, {}, now);

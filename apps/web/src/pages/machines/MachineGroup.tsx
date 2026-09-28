@@ -57,12 +57,12 @@ export type MachineGroupProps = Define.Prop<'machine', OpsMachine, true> & Defin
     & Define.Prop<'update', UpdateBadge | null>
     /** How many of its runtimes have a newer harness waiting (#370): a second pill beside the daemon's. */
     & Define.Prop<'harnessUpdates', number>
-    /** The machine's own CPU and memory (#400), after the heartbeat in the caption. */
+    /** The machine's own CPU and memory (#400), after the connection in the caption. */
     & Define.Prop<'machineLoad', MachineLoad>
     /** The computer the desktop app runs on (#846): a "This computer" tag after the name. */
     & Define.Prop<'here', boolean>;
 
-/** One machine on `/machines`, a zero `Card`: glyph, name, OS and heartbeat, status, Details in the header, then its environments. */
+/** One machine on `/machines`, a zero `Card`: glyph, name, OS and connection, status, Details in the header, then its environments. */
 export const MachineGroup = component<MachineGroupProps>(({ props }) => () => {
     const m = props.machine;
     const queued = queuedLine(m, props.environments.reduce((n, e) => n + (props.queued[e.id] ?? 0), 0));
@@ -75,7 +75,7 @@ export const MachineGroup = component<MachineGroupProps>(({ props }) => () => {
                 <span data-machine-glyph aria-hidden="true"><Icon name="machines" size={20} /></span>
                 <div data-machine-title>
                     <span data-machine-name>{m.name}{props.here ? <span data-this-computer><Tag tone="live">This computer</Tag></span> : null}</span>
-                    <span data-machine-caption>{m.osLabel} · {buildLabel(m.build, m.daemonVersion)} · {m.online ? `heartbeat ${m.seen}` : `last seen ${m.seen}`}{props.machineLoad ? <> · <span data-machine-load data-tone={loadTone(props.machineLoad)}>{loadText(props.machineLoad)}</span></> : null}</span>
+                    <span data-machine-caption>{m.osLabel} · {buildLabel(m.build, m.daemonVersion)} · {m.online ? 'connected' : `last seen ${m.seen}`}{props.machineLoad ? <> · <span data-machine-load data-tone={loadTone(props.machineLoad)}>{loadText(props.machineLoad)}</span></> : null}</span>
                 </div>
                 {props.update ? <StatusPill status={props.update} label={BADGE_TEXT[props.update].label} tone={BADGE_TEXT[props.update].tone} class="ag-update-badge" /> : null}
                 {props.harnessUpdates ? <StatusPill status="available" label={props.harnessUpdates === 1 ? '1 RUNTIME UPDATE' : `${props.harnessUpdates} RUNTIME UPDATES`} tone="needs-you" class="ag-harness-badge" /> : null}
