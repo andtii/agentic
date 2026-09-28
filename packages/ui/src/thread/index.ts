@@ -12,8 +12,8 @@ export { Thread, Thread as AiThread, threadMessages, looseRequests, midTurn } fr
 export type { ThreadProps, DescribeFn, ThreadInsert } from './Thread.js';
 export { placeInserts, isoTime } from './interleave.js';
 export type { Timed, Placement } from './interleave.js';
-export { Message, Message as AiMessage, authorOf } from './Message.js';
-export type { MessageProps, MessageAuthor } from './Message.js';
+export { Message, Message as AiMessage, authorOf, messageSteps, thoughtLabel } from './Message.js';
+export type { MessageProps, MessageAuthor, DetailLevel, StepsMessage } from './Message.js';
 export { ToolCall, ToolCall as AiToolCall, toolIcon, OUTPUT_FOLD, OUTPUT_LOG } from './ToolCall.js';
 export type { ToolCallProps, ThreadContextProps, ToolMetaFn, ToolLink, ToolLinksFn, PullLinksFn, ApprovalContext, RequestContext, DescribeRequestFn } from './ToolCall.js';
 export { Reasoning, Reasoning as AiReasoning, reasoningSummary } from './Reasoning.js';

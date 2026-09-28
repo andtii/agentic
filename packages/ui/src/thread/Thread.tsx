@@ -37,6 +37,11 @@
  * first message later than it (`./interleave`, reading the message times
  * `describe` gives). One shows while the row it precedes is in the window;
  * the ones after every message show while the window reaches the tail.
+ *
+ * `detail` is the chat's detail level (#1054): `raw` (the default) renders every tool card as
+ * above; `steps` folds each message's tool calls into a steps box, whose open state the page may
+ * hold per message (`stepsOpen` / `onStepsToggle`) to remember it for the chat; `messages` drops
+ * them. Approvals and questions stay at every level (`Message`).
  */
 import { component, onMounted, onUnmounted, type Define, type JSXElement } from '@sigx/runtime-core';
 import { spawnedAgent } from '@sigx/ai-agent';
@@ -44,7 +49,8 @@ import type { AgentMessage, AgentTranscript, OpenRequest } from '@sigx/ai-agent/
 import { aiThreadAnatomy } from './anatomy.js';
 import { ApprovalPrompt, type RespondFn } from './ApprovalPrompt.js';
 import { QuestionPrompt } from './QuestionPrompt.js';
-import { Message, type MessageAuthor } from './Message.js';
+import { Message, type DetailLevel, type MessageAuthor } from './Message.js';
+import type { StepHrefFn } from '../transcript/Steps.js';
 import { approvalContext, type DescribeRequestFn, type PullLinksFn, type ToolLinksFn, type ToolMetaFn } from './ToolCall.js';
 import { isoTime, placeInserts } from './interleave.js';
 import { DEFAULT_WINDOW, followRange, frozenRange, unitCount, windowRows } from './window.js';
@@ -89,7 +95,15 @@ export type ThreadProps =
     /** Host rows placed among the messages by time — see `ThreadInsert`. */
     & Define.Prop<'inserts', readonly ThreadInsert[], false>
     /** Accessible name of the log. Default "Transcript". */
-    & Define.Prop<'label', string, false>;
+    & Define.Prop<'label', string, false>
+    /** How much of the agents' work shows: `messages`, `steps` or `raw` (the default, every tool card). */
+    & Define.Prop<'detail', DetailLevel, false>
+    /** A message's steps box open state as the page remembers it; `undefined` leaves the box its own. */
+    & Define.Prop<'stepsOpen', (message: AgentMessage) => boolean | undefined, false>
+    /** The reader toggled a message's steps box. */
+    & Define.Prop<'onStepsToggle', (message: AgentMessage, open: boolean) => void, false>
+    /** Where a step's full output lives (`Full output`, the step in Session). */
+    & Define.Prop<'stepHref', StepHrefFn, false>;
 
 /**
  * The thread's own messages: one produced inside a sub-agent renders on that
@@ -291,6 +305,10 @@ export const Thread = component<ThreadProps>(({ props, signal, onUpdated }) => {
                                 onRespond={props.onRespond}
                                 describeRequest={props.describeRequest}
                                 onCancelAgent={props.onCancelAgent}
+                                detail={props.detail}
+                                stepsOpen={props.stepsOpen?.(row.message)}
+                                onStepsToggle={props.onStepsToggle ? (open: boolean) => props.onStepsToggle!(row.message, open) : undefined}
+                                stepHref={props.stepHref}
                             />
                         </li>
                     ])}

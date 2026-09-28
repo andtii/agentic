@@ -993,7 +993,9 @@ _not yet_
 
 #### #1054 ui: steps box, step line, failure excerpt, live line and a detail level on Thread
 
-_not yet_
+`packages/ui/src/transcript/` adds two scopes to the fragment: `ai-steps` (`root`, the 32 px `summary` button with its `label` and `total`, the `list`, one 28 px `step` per `TranscriptStep` on the `16px 46px minmax(0,1fr) auto 44px` grid with `icon`, `tool`, `target`, `result`, `duration`, and inside a failed step its `excerpt`, `excerpt-meta` and `full` link) and `ai-live-line` (`spinner`, `agent`, `step`, `elapsed`, `stop`). A step's `data-state` is the governed lifecycle subset `STEP_STATES` (`complete`, `running`, `error`, `loading` for a step waiting on an approval, `denied`); the recipes ink them from tokens only. `<Steps steps open? onToggle fullHref now?>` prints `formatStepSummary`, starts shut and follows `turnOpensItself` until the reader toggles; given `open` it is controlled. `<LiveLine agent hue? step? startedAt onStop?>` ticks its elapsed time once a second. `stepsFromToolParts(message, transcript?)` reads a turn in flight off its tool parts (a pending call with an open request is `pending`, a cancelled one `denied`, a failed one gets `pickExcerpt` of its error or output).
+
+`Thread` and `Message` take `detail?: 'messages' | 'steps' | 'raw'` (`DetailLevel`); `raw`, the default, is the old rendering unchanged. `steps` renders one steps box after the message's prose, from `msg.steps` (`StepsMessage`, the chat entry's `TurnSteps`) or else `stepsFromToolParts`; `messages` drops the tool calls. Both folded levels keep a call's open approval or question in the thread and put the reasoning behind a `thought 6s` chip (`ai-message` parts `thought` and `thinking`; the time is `MessageAuthor.thoughtSeconds`) that opens it inline in `text-mute`. `Thread` passes a per-message open state through `stepsOpen(message)` / `onStepsToggle(message, open)` and the `Full output` link through `stepHref(step)`, so the page (#1058) remembers each box for the chat.
 
 #### #1055 platform/runtimes: a turn step summary on the final chat msg, normalised per runtime
 

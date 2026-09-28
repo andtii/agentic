@@ -179,6 +179,28 @@ const message: RecipeInput = {
         // Phones: the meta line drops the environment.
         environment: { base: { display: 'inline-flex', minInlineSize: '0', color: textDim }, at: { 'below-md': { base: { display: 'none' } } } },
         time: { base: { fontFamily: mono, fontSize: 'var(--text-xs)', color: textDim } },
+        // The reasoning chip (#1054): mono 11 `text-dim`, pushed to the end of the meta line; what it opens takes a line of its own.
+        thought: {
+            base: {
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 'var(--space-xs)',
+                marginInlineStart: 'auto',
+                appearance: 'none',
+                border: 'none',
+                background: 'transparent',
+                padding: '0',
+                fontFamily: mono,
+                fontSize: 'var(--text-xs)',
+                color: textDim,
+                cursor: 'pointer'
+            },
+            selectors: {
+                '&:hover': { color: textMuted },
+                '&:focus-visible': { outline: '2px solid var(--color-primary)', outlineOffset: '2px' }
+            }
+        },
+        thinking: { base: { flexBasis: '100%', display: 'flex', flexDirection: 'column', gap: 'var(--space-sm)', minInlineSize: '0', color: textMuted, fontSize: 'var(--text-lg)', lineHeight: '1.6' } },
         body: {
             base: {
                 gridArea: 'body',
@@ -699,6 +721,172 @@ const composer: RecipeInput = {
 };
 
 /**
+ * The steps box (#1054; `docs/design/chat-modes/HANDOFF.md` → "The turn", "Parts and rules"): a
+ * base-200 box on the quiet line, the 32 px summary button in mono 12 `text-mute`, the total in mono
+ * 11 `text-dim`; open, the list under a `line` divider, one 28 px line per step on the
+ * `16px 46px minmax(0,1fr) auto 44px` grid. A step's state inks its icon (`--ai-step-mark`), its
+ * tool (`--ai-step-ink`) and its target (`--ai-step-target`): done recedes (`text-mute` /
+ * `text-dim`), running is `working` with a turning ring, failed `failed`, waiting on an approval
+ * `needs-you`, denied or skipped all `text-dim`. A failed step's excerpt is a base-100 well with a
+ * 2 px `failed` start border.
+ */
+const steps: RecipeInput = {
+    component: 'ai-steps',
+    keyframes: { 'ai-steps-spin': 'to { transform: rotate(360deg); }' },
+    parts: {
+        root: {
+            base: {
+                border: `var(--border) solid ${line}`,
+                borderRadius: 'var(--radius-box)',
+                background: 'var(--color-base-200)',
+                overflow: 'hidden',
+                minInlineSize: '0'
+            }
+        },
+        summary: {
+            base: {
+                display: 'flex',
+                alignItems: 'center',
+                gap: 'var(--space-md)',
+                inlineSize: '100%',
+                blockSize: '2rem',
+                paddingInline: 'var(--space-lg)',
+                appearance: 'none',
+                border: 'none',
+                background: 'transparent',
+                color: textMuted,
+                textAlign: 'start',
+                cursor: 'pointer'
+            },
+            selectors: {
+                '& > svg': { flexShrink: '0', color: textDim },
+                '&:hover': { color: 'var(--color-base-content)' },
+                '&:focus-visible': { outline: '2px solid var(--color-primary)', outlineOffset: '-2px' }
+            }
+        },
+        label: { base: { fontFamily: mono, fontSize: 'var(--text-sm)', fontWeight: 'var(--weight-medium, 500)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', minInlineSize: '0' } },
+        total: { base: { marginInlineStart: 'auto', flexShrink: '0', fontFamily: mono, fontSize: 'var(--text-xs)', color: textDim } },
+        list: {
+            base: {
+                listStyle: 'none',
+                margin: '0',
+                paddingInline: '0',
+                paddingBlock: 'var(--space-xs)',
+                borderBlockStart: `var(--border) solid ${line}`,
+                background: 'var(--color-base-200)'
+            }
+        },
+        step: {
+            base: {
+                display: 'grid',
+                gridTemplateColumns: '16px 46px minmax(0, 1fr) auto 44px',
+                gridAutoRows: 'minmax(1.75rem, auto)',
+                columnGap: 'var(--space-md)',
+                alignItems: 'center',
+                paddingInline: 'var(--space-lg)',
+                color: textMuted,
+                '--ai-step-mark': textMuted,
+                '--ai-step-ink': textDim,
+                '--ai-step-target': textMuted
+            },
+            states: {
+                complete: { color: textMuted },
+                running: { color: 'var(--color-base-content)', '--ai-step-mark': 'var(--color-info)', '--ai-step-ink': 'var(--color-info)', '--ai-step-target': 'var(--color-base-content)' },
+                error: { color: 'var(--color-base-content)', '--ai-step-mark': 'var(--color-error)', '--ai-step-ink': 'var(--color-error)', '--ai-step-target': 'var(--color-base-content)' },
+                loading: { color: 'var(--color-base-content)', '--ai-step-mark': 'var(--color-warning)', '--ai-step-ink': 'var(--color-warning)', '--ai-step-target': 'var(--color-base-content)' },
+                denied: { color: textDim, '--ai-step-mark': textDim, '--ai-step-ink': textDim, '--ai-step-target': textDim }
+            }
+        },
+        icon: {
+            base: { display: 'inline-flex', color: 'var(--ai-step-mark)' },
+            // The running ring: a `working` arc on a `line-strong` circle, 13 px, turning.
+            selectors: {
+                '& > i': {
+                    display: 'inline-block',
+                    inlineSize: '13px',
+                    blockSize: '13px',
+                    boxSizing: 'border-box',
+                    border: `2px solid ${lineStrong}`,
+                    borderBlockStartColor: 'var(--color-info)',
+                    borderRadius: '50%',
+                    animation: 'ai-steps-spin 800ms linear infinite'
+                }
+            },
+            at: { 'reduced-motion': { selectors: { '& > i': { animation: 'none' } } } }
+        },
+        tool: { base: { fontFamily: mono, fontSize: 'var(--text-xs)', fontWeight: 'var(--weight-semibold, 600)', color: 'var(--ai-step-ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } },
+        target: { base: { fontFamily: mono, fontSize: 'var(--text-sm)', color: 'var(--ai-step-target)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', minInlineSize: '0' } },
+        result: { base: { fontFamily: mono, fontSize: 'var(--text-xs)', fontWeight: 'var(--weight-medium, 500)', color: textMuted, whiteSpace: 'nowrap' } },
+        duration: { base: { fontFamily: mono, fontSize: 'var(--text-xs)', color: textDim, textAlign: 'end', whiteSpace: 'nowrap' } },
+        excerpt: {
+            base: {
+                gridColumn: '2 / -1',
+                marginBlock: 'var(--space-2xs) var(--space-md)',
+                paddingInline: 'var(--space-lg)',
+                paddingBlock: 'var(--space-md)',
+                background: 'var(--color-base-100)',
+                border: `var(--border) solid ${line}`,
+                borderInlineStart: '2px solid var(--color-error)',
+                borderRadius: 'var(--radius-field)',
+                fontFamily: mono,
+                fontSize: 'var(--text-xs)',
+                lineHeight: '1.6',
+                color: 'var(--color-error)',
+                minInlineSize: '0'
+            },
+            selectors: { '& > div:not([data-part])': { whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } }
+        },
+        'excerpt-meta': {
+            base: { display: 'flex', alignItems: 'center', gap: 'var(--space-sm)', marginBlockStart: 'var(--space-xs)', color: textDim }
+        },
+        full: {
+            base: { marginInlineStart: 'auto', color: 'var(--color-primary)', textDecoration: 'underline' },
+            selectors: { '&:hover': { color: linkHover } }
+        }
+    }
+};
+
+/** The live line: 44 px, a `working` tint at 5 % on a 33 % `working` border, spinner, 20 px tile, mono step, elapsed in `working`, Stop. */
+const liveLine: RecipeInput = {
+    component: 'ai-live-line',
+    keyframes: { 'ai-live-spin': 'to { transform: rotate(360deg); }' },
+    parts: {
+        root: {
+            base: {
+                display: 'flex',
+                alignItems: 'center',
+                gap: 'var(--space-lg)',
+                minBlockSize: controlTouch,
+                paddingInline: 'var(--space-lg)',
+                border: 'var(--border) solid color-mix(in oklab, var(--color-info) 33%, transparent)',
+                borderRadius: 'var(--radius-box)',
+                background: 'color-mix(in oklab, var(--color-info) 5%, transparent)',
+                color: 'var(--color-base-content)',
+                minInlineSize: '0'
+            }
+        },
+        spinner: {
+            base: {
+                display: 'inline-block',
+                flexShrink: '0',
+                inlineSize: '13px',
+                blockSize: '13px',
+                boxSizing: 'border-box',
+                border: `2px solid ${lineStrong}`,
+                borderBlockStartColor: 'var(--color-info)',
+                borderRadius: '50%',
+                animation: 'ai-live-spin 800ms linear infinite'
+            },
+            at: { 'reduced-motion': { base: { animation: 'none' } } }
+        },
+        agent: { base: { display: 'inline-flex', alignItems: 'center', gap: 'var(--space-sm)', flexShrink: '0', fontSize: 'var(--text-sm)', fontWeight: 'var(--weight-semibold, 600)' } },
+        step: { base: { flex: '1 1 auto', minInlineSize: '0', fontFamily: mono, fontSize: 'var(--text-sm)', color: textMuted, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } },
+        elapsed: { base: { flexShrink: '0', fontFamily: mono, fontSize: 'var(--text-xs)', fontWeight: 'var(--weight-medium, 500)', color: 'var(--color-info)' } },
+        stop: { base: { display: 'inline-flex', flexShrink: '0' } }
+    }
+};
+
+/**
  * Raw CSS the design system appends verbatim. Nothing is left: the running
  * dot is Badge.Dot's own `running` pulse, the attachment spinner's turn is
  * the composer recipe's `keyframes`, and the phone regime (the docked
@@ -759,4 +947,4 @@ const shell: RecipeInput = {
     }
 };
 
-export const recipes: readonly RecipeInput[] = [thread, message, toolCall, reasoning, approval, question, composer, form, shell];
+export const recipes: readonly RecipeInput[] = [thread, message, toolCall, reasoning, approval, question, composer, form, shell, steps, liveLine];
