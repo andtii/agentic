@@ -82,6 +82,8 @@ export async function writeResponse(res: ServerResponse, response: Response, hea
             res.destroy();
             done();
         });
+        // 'finish' when the body is written (a keep-alive socket stays open); 'close' when the client left first.
+        res.once('finish', () => done());
         res.once('close', () => done());
         body.pipe(res);
     });

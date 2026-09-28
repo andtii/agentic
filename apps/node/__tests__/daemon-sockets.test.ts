@@ -26,6 +26,9 @@ describe('nodeDaemonSockets', () => {
         sockets.add('k', old);
         sockets.add('k', fresh);
         expect(old.closed).toEqual(['replaced by a new daemon connection']);
+        expect(sockets.port.send('k', 'frame')).toBe(true);
+        expect(old.sent).toEqual([]);
+        expect(fresh.sent).toEqual(['frame']);
         expect(sockets.remove('k', old)).toBe(false);
         expect(sockets.port.isConnected?.('k')).toBe(true);
         expect(sockets.remove('k', fresh)).toBe(true);

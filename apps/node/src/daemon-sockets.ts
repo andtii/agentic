@@ -40,7 +40,8 @@ export function nodeDaemonSockets(now: () => number = Date.now): NodeDaemonSocke
     return {
         add(key, ws) {
             const old = socketsOf(key);
-            byKey.set(key, new Map([...(byKey.get(key) ?? []), [ws, undefined]]));
+            // The replaced sockets leave the map at once, so nothing is sent to them while they close.
+            byKey.set(key, new Map([[ws, undefined]]));
             for (const socket of old) {
                 try {
                     socket.close(1000, 'replaced by a new daemon connection');
@@ -51,8 +52,10 @@ export function nodeDaemonSockets(now: () => number = Date.now): NodeDaemonSocke
         },
         remove(key, ws) {
             const sockets = byKey.get(key);
-            sockets?.delete(ws);
-            if (sockets && sockets.size > 0) return false;
+            // A socket a redial replaced is already gone from the map: its close takes nothing offline.
+            if (!sockets?.has(ws)) return false;
+            sockets.delete(ws);
+            if (sockets.size > 0) return false;
             byKey.delete(key);
             return true;
         },
