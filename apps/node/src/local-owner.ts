@@ -297,8 +297,10 @@ export function createLocalOwnerRoutes(options: LocalOwnerRoutesOptions): (reque
         const at = now();
         failures = failures.filter((t) => t > at - LOGIN_WINDOW_MS);
         if (failures.length >= maxFailures) return loginForm({ returnTo, elevate, error: 'Too many attempts. Wait a minute.' }, 429);
+        // Counted before the hash (#1013): parallel guesses each take a slot here, so a burst cannot all pass the
+        // check while the first hashes are still running, and the ones over the limit never pay for a hash.
+        failures.push(at);
         if (!form || !(await verifyLocalOwner(store.load(), field(form, 'passphrase')))) {
-            failures.push(at);
             return loginForm({ returnTo, elevate, error: 'Wrong passphrase.' }, 401);
         }
         failures = [];
