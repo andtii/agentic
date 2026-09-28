@@ -8,6 +8,7 @@ export const PACKAGE = '@agentic/core';
 export * from './ids.js';
 export * from './agent.js';
 export * from './chat.js';
+export * from './transcript.js';
 export * from './task.js';
 export * from './environment.js';
 export * from './plugin.js';
