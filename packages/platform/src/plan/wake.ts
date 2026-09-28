@@ -1,7 +1,7 @@
 /**
- * Waking a plan notice's addressee (#938): a notice (lease ran out, touches overlap, handoff, moved) used to wait on
- * the Plan actor until its addressee made its own next plan call, so nobody was woken. Now the actor hands each new
- * notice not addressed to the caller to a `PlanWakePort` once its turn is saved:
+ * Waking a plan notice's addressee (#938): a notice (lease ran out, touches overlap, handoff, moved, ready work #981)
+ * used to wait on the Plan actor until its addressee made its own next plan call, so nobody was woken. Now the actor
+ * hands each new notice not addressed to the caller to a `PlanWakePort` once its turn is saved:
  *
  * - **An agent** gets a chat message addressed to it, as the PR autopilot does (`chatAutopilotPort.startTurn`):
  *   posted in the first chat of the candidates it is a member of — the chats of the tasks working the items, then
@@ -72,7 +72,7 @@ export function planWakeRow(notices: readonly PlanNotice[], chatId?: ChatId): No
     const first = notices[0]!;
     return {
         kind: 'input',
-        title: notices.length === 1 ? `Plan #${first.itemId}: ${first.kind === 'handoff' ? 'handed off' : first.kind === 'lease-expired' ? 'lease ran out' : first.kind === 'touches' ? 'touches overlap' : 'moved'}` : `${notices.length} plan notices`,
+        title: notices.length === 1 ? `Plan #${first.itemId}: ${first.kind === 'handoff' ? 'handed off' : first.kind === 'lease-expired' ? 'lease ran out' : first.kind === 'touches' ? 'touches overlap' : first.kind === 'ready' ? 'ready for you' : 'moved'}` : `${notices.length} plan notices`,
         body: notices.map((n) => n.text).join('\n'),
         ...(chatId !== undefined ? { ref: { kind: 'chat', chatId } } : {})
     };
