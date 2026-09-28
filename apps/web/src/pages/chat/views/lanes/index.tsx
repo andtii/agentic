@@ -38,10 +38,12 @@ export function decisionOf(ask: LaneAsk, choice: string): Decision | undefined {
 export const LanesView = component<LanesViewProps>(({ props, signal }) => {
     // The lanes do not tick on their own (#1057): the view passes `now`, once a second.
     const st = signal({ now: Date.now(), answered: [] as string[], typing: [] as string[] });
+    // onUnmounted registers during setup only: one called inside onMounted is dropped.
+    let timer: ReturnType<typeof setInterval> | undefined;
     onMounted(() => {
-        const timer = setInterval(() => { st.now = Date.now(); }, 1000);
-        onUnmounted(() => clearInterval(timer));
+        timer = setInterval(() => { st.now = Date.now(); }, 1000);
     });
+    onUnmounted(() => clearInterval(timer));
 
     const settle = (requestId: string, out: unknown): void => {
         st.answered = [...st.answered, requestId];

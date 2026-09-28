@@ -4,7 +4,7 @@
  * Forge (working), Lint (done with #22) and Scout (asking you); the coordinator and idle members get none;
  * the question in Scout's footer is answered from the lane; below 1024 px the pin shows Team.
  */
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { all, mountRoute, texts, tick } from './mount';
 import { clearViewPrefs } from './chat-view-prefs';
 
@@ -28,6 +28,28 @@ const lane = (dom: ParentNode, id: string): HTMLElement => {
 const part = (el: ParentNode, name: string): HTMLElement | null => el.querySelector<HTMLElement>(`[data-scope="ai-lane"][data-part="${name}"]`);
 
 describe('Lanes (mock)', () => {
+    it('stops its clock when the view goes: leaving Lanes clears every timer it started', async () => {
+        const started = new Set<unknown>();
+        const set = vi.spyOn(globalThis, 'setInterval');
+        const clear = vi.spyOn(globalThis, 'clearInterval');
+        try {
+            const dom = await mountRoute(CHAT);
+            const before = set.mock.results.length;
+            await press(dom, 'view', 'Lanes');
+            expect(dom.querySelector('[data-chat-lanes]')).not.toBeNull();
+            for (const r of set.mock.results.slice(before)) started.add(r.value);
+            expect(started.size).toBeGreaterThan(0);
+            await press(dom, 'view', 'Team');
+            expect(dom.querySelector('[data-chat-lanes]')).toBeNull();
+            const cleared = new Set<unknown>(clear.mock.calls.map((c) => c[0]));
+            expect([...started].filter((id) => !cleared.has(id))).toEqual([]);
+        } finally {
+            set.mockRestore();
+            clear.mockRestore();
+        }
+    });
+
+
     it('is reached by pinning it: the coordinator on top, a lane per agent at work, at Steps', async () => {
         const dom = await mountRoute(CHAT);
         expect(pressed(dom, 'view')).toBe('Team');
