@@ -4,6 +4,7 @@
  */
 import { component, signal, type Define } from 'sigx';
 import { Link, useRouter } from '@sigx/router';
+import { Input } from '@sigx/zero';
 import type { Plan, PlanActor } from '@agentic/core';
 import { AgentTile, Button, Icon, ItemGlyph } from '@agentic/ui';
 import type { ProjectPageProps } from '../../../layout/types';
@@ -129,13 +130,12 @@ export const PlanHeader = component<PlanHeaderProps>(({ props }) => {
                 {props.onAdd && st.adding
                     ? (
                         <form data-plan-add-form="" onSubmit={(e: Event) => void submit(e)}>
-                            <input
-                                type="text"
-                                aria-label="New item title"
-                                placeholder="What needs doing"
-                                value={st.title}
-                                onInput={(e: Event) => { st.title = (e.target as HTMLInputElement).value; }}
-                            />
+                            <Input.Root model={() => st.title} name="plan-item-title" autocomplete="off">
+                                <Input.Label visuallyHidden>New item title</Input.Label>
+                                <Input.Control>
+                                    <Input.Input placeholder="What needs doing" />
+                                </Input.Control>
+                            </Input.Root>
                             <Button type="submit" intent="primary" disabled={st.busy || !st.title.trim()}>Add</Button>
                             <Button onClick={() => { st.adding = false; }}>Cancel</Button>
                         </form>

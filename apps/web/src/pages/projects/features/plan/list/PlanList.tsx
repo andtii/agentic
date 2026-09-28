@@ -8,7 +8,7 @@
 import { component, signal } from 'sigx';
 import { useRoute } from '@sigx/router';
 import { planItems, type PlanItem, type PlanPhase } from '@agentic/core';
-import { Button, EmptyState, Icon, ItemGlyph, SearchField, Segmented } from '@agentic/ui';
+import { Button, EmptyState, ErrorNote, Icon, ItemGlyph, SearchField, Segmented } from '@agentic/ui';
 import { formatAge } from '../../../../../mock/workspace';
 import type { ProjectPageProps } from '../../../layout/types';
 import { dataMode } from '../../../../../data-mode';
@@ -85,7 +85,7 @@ export const PlanList = component<ProjectPageProps>(({ props }) => {
         );
     };
 
-    const Note = () => (store.note() ? <p data-plan-note="" role="alert">{store.note()}</p> : null);
+    const Note = () => (store.note() ? <ErrorNote data-plan-note="">{store.note()}</ErrorNote> : null);
     const newPlan = (): void => nav.create?.();
 
     return () => {

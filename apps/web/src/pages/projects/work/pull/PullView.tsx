@@ -11,7 +11,7 @@
 import { component, signal, type Define } from 'sigx';
 import { Link } from '@sigx/router';
 import type { Autopilot, PullRequest } from '@agentic/core';
-import { AgentTile, Button, ChecksBar, EnvironmentLine, Icon, Switch, type AgentHue } from '@agentic/ui';
+import { AgentTile, Button, ChecksBar, EnvironmentLine, ErrorNote, Icon, Switch, type AgentHue } from '@agentic/ui';
 import { formatTime } from '../../../../mock/workspace';
 import {
     APPROVAL_NOTE, REVIEW_LABEL, THREAD_LABEL, asksToMerge, autopilotOff, autopilotRows, blockerSentence, canMerge, diffText, durationText, openedAgo, originText, pullNow, pullSteps,
@@ -120,7 +120,7 @@ export const PullView = component<PullViewProps>(({ props }) => {
             }
         });
     };
-    const mergeError = () => (st.mergeError ? <p data-pull-merge-error="" role="alert">{st.mergeError}</p> : null);
+    const mergeError = () => (st.mergeError ? <ErrorNote data-pull-merge-error="">{st.mergeError}</ErrorNote> : null);
 
     const person = (id: string): PullAgent => (id === 'you' ? { name: 'You' } : (props.agentOf(id) ?? { name: id }));
     const tile = (id: string, size: 18 | 20 = 20) => {
@@ -158,7 +158,7 @@ export const PullView = component<PullViewProps>(({ props }) => {
         </ol>
     );
 
-    const errorLine = () => (st.error ? <p data-pull-error="" role="alert">{st.error}</p> : null);
+    const errorLine = () => (st.error ? <ErrorNote data-pull-error="">{st.error}</ErrorNote> : null);
 
     const Now = (pr: PullRequest) => {
         const stopped = paused();

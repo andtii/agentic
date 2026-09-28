@@ -86,10 +86,10 @@ describe('/projects/:id/settings/features (mock)', () => {
 
     it('search and category chips narrow the tiles', async () => {
         const dom = await mountRoute('/projects/p_agentic/settings/features');
-        setText(dom.querySelector<HTMLInputElement>('input[name="feature-search"]')!, 'hours');
+        setText(dom.querySelector<HTMLInputElement>('[data-features-add-head] [data-search-field] input')!, 'hours');
         await settle();
         expect(tiles(dom)).toEqual(['mock.feature.timesheets']);
-        setText(dom.querySelector<HTMLInputElement>('input[name="feature-search"]')!, '');
+        setText(dom.querySelector<HTMLInputElement>('[data-features-add-head] [data-search-field] input')!, '');
         await settle();
         [...dom.querySelectorAll<HTMLButtonElement>('[data-filter-chips] button')].find((b) => b.textContent?.trim() === 'Planning')!.click();
         await settle();

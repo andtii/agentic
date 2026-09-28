@@ -5,6 +5,8 @@
  */
 import { component, signal, type Define, type JSXElement } from 'sigx';
 import { Link } from '@sigx/router';
+import { Input } from '@sigx/zero';
+import { Checkbox } from '@sigx/zero-daisyui/components';
 import { formatRef, parseRefs, planClaimLive, type PlanActor, type PlanItem, type Ref } from '@agentic/core';
 import { Icon, Tag, type Tone } from '@agentic/ui';
 import { formatAge } from '../../../../../mock/workspace';
@@ -227,18 +229,17 @@ export const ItemDetail = component<ItemDetailProps>(({ props }) => {
                         <section data-plan-detail-section="done-when" aria-label="Done when">
                             <h4>Done when</h4>
                             <ul data-plan-done-when="">
-                                {item.doneWhen.map((d, index) => (
-                                    <li data-checked={d.checked ? 'true' : 'false'}>
-                                        <input
-                                            type="checkbox"
-                                            checked={d.checked}
-                                            disabled={!props.onTick}
-                                            aria-label={d.text}
-                                            onChange={(e: Event) => props.onTick?.(index, (e.target as HTMLInputElement).checked)}
-                                        />
-                                        <span>{d.text}</span>
-                                    </li>
-                                ))}
+                                {item.doneWhen.map((d, index) => {
+                                    // The item owns the tick: zero writes into this throwaway binding, `onTick` tells the page.
+                                    const bind = signal({ checked: d.checked });
+                                    return (
+                                        <li data-checked={d.checked ? 'true' : 'false'}>
+                                            <Checkbox.Root model={() => bind.checked} name={`done-when-${index}`} disabled={!props.onTick} onCheckedChange={(on: boolean) => props.onTick?.(index, on)}>
+                                                {d.text}
+                                            </Checkbox.Root>
+                                        </li>
+                                    );
+                                })}
                             </ul>
                         </section>
                     )
@@ -262,13 +263,12 @@ export const ItemDetail = component<ItemDetailProps>(({ props }) => {
                 </section>
 
                 <form data-plan-comment="" onSubmit={(e: Event) => void send(e)}>
-                    <input
-                        type="text"
-                        aria-label={`Comment on #${item.id}`}
-                        placeholder="Comment. # item, @ agent, / file, pr: PR"
-                        value={st.draft}
-                        onInput={(e: Event) => { st.draft = (e.target as HTMLInputElement).value; }}
-                    />
+                    <Input.Root model={() => st.draft} name="plan-comment" autocomplete="off">
+                        <Input.Label visuallyHidden>{`Comment on #${item.id}`}</Input.Label>
+                        <Input.Control>
+                            <Input.Input placeholder="Comment. # item, @ agent, / file, pr: PR" />
+                        </Input.Control>
+                    </Input.Root>
                     {props.onComment
                         ? <button type="submit" aria-label="Send comment" disabled={st.sending || !st.draft.trim()}><Icon name="send" size={14} /></button>
                         : <button type="submit" aria-label="Send comment" disabled title="Comments need the Plan store"><Icon name="send" size={14} /></button>}

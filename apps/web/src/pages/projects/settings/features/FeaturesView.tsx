@@ -6,8 +6,10 @@
  * Every change is one `ProjectPatch` through `save` — `Workspace.upsertProject` live, a local merge on mock data.
  */
 import { component, signal, watch, type Define } from 'sigx';
+import { Select } from '@sigx/zero';
+import { Field } from '@sigx/zero-daisyui/components';
 import { applyProjectFeaturePreset, type ProjectPatch, type ProjectRecord } from '@agentic/core';
-import { Button, ErrorNote, FilterChips, Icon, SchemaForm, SlotMarks, Switch, type IconName, type ProjectFeatureSlot, type SchemaFormApi } from '@agentic/ui';
+import { Button, ErrorNote, FilterChips, Icon, SchemaForm, SearchField, SlotMarks, Switch, type IconName, type ProjectFeatureSlot, type SchemaFormApi } from '@agentic/ui';
 import { featureIcon } from '../../features/registry';
 import { SLOT_LEGEND, catalogueTiles, categoryChips, enabledEntries, featurePatch, hasSettings, needLabel, removePatch, slotLines, unmetNeeds, type FeatureEntry, type SlotLine } from './model';
 
@@ -174,13 +176,19 @@ export const FeaturesView = component<FeaturesViewProps>(({ props }) => {
                     <div data-feature-settings="">
                         <h4 data-feature-kicker="">Settings</h4>
                         {entry.presets.length ? (
-                            <label data-feature-preset="">
-                                <span>Start from</span>
-                                <select name={`feature-${entry.id}-preset`} disabled={st.busy} value={st.preset} onChange={(e: Event) => pickPreset(entry, (e.target as HTMLSelectElement).value)}>
-                                    <option value="">Choose a preset…</option>
-                                    {entry.presets.map((p) => <option value={p.id} selected={st.preset === p.id}>{p.label}</option>)}
-                                </select>
-                            </label>
+                            <div data-feature-preset="">
+                                <Field.Root disabled={st.busy}>
+                                    <Field.Label>Start from</Field.Label>
+                                    <Select.Root
+                                        model={() => st.preset}
+                                        items={entry.presets.map((p) => p.id)}
+                                        itemLabel={(id: string) => entry.presets.find((p) => p.id === id)?.label ?? id}
+                                        name={`feature-${entry.id}-preset`}
+                                        placeholder="Choose a preset…"
+                                        onValueChange={(id: string | null) => pickPreset(entry, id ?? '')}
+                                    />
+                                </Field.Root>
+                            </div>
                         ) : null}
                         {hasSettings(entry.projectSettings) ? (
                             <>
@@ -241,10 +249,7 @@ export const FeaturesView = component<FeaturesViewProps>(({ props }) => {
 
                         <div data-features-add-head="">
                             <h3>Add a feature</h3>
-                            <label data-features-search="">
-                                <Icon name="search" size={14} />
-                                <input type="search" name="feature-search" placeholder="Search features" aria-label="Search features" value={st.query} onInput={(e: Event) => { st.query = (e.target as HTMLInputElement).value; }} />
-                            </label>
+                            <SearchField model={() => st.query} label="Search features" placeholder="Search features" />
                         </div>
                         <FilterChips model={[st, 'category']} label="Feature categories" options={categoryChips()} />
                         {props.loading && !props.entries.length
