@@ -10,6 +10,6 @@ export function deleteChatText(project: Pick<ProjectRecord, 'name' | 'features'>
     const gone = 'The thread, its members’ sessions and its attachments are deleted. This cannot be undone.';
     const git = project?.features[GIT_FEATURE_ID];
     if (!project || !git || git['worktreePerChat'] !== true) return gone;
-    if (git['worktreeCleanup'] === 'on-chat-leave') return `${gone} Its worktree in ${project.name} is removed on every machine that is online — unless it has uncommitted changes, then it is kept.`;
+    if (git['worktreeCleanup'] === 'on-chat-leave' || git['worktreeCleanup'] === 'on-merge') return `${gone} Its worktree in ${project.name} is removed on every machine that is online — unless it has uncommitted changes, then it is kept.`;
     return `${gone} Its worktree in ${project.name} stays: the project keeps chat worktrees until you remove them.`;
 }

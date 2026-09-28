@@ -7,7 +7,7 @@
  * daemon's message; a chosen worktree kept as it is.
  */
 import { describe, expect, it } from 'vitest';
-import { PROJECT_FEATURE_KIND, applyProjectFeaturePreset, configDefaults, isProjectFeatureManifest, projectFolderKey, suggestWorktreePath, validateConfig, type ChatId, type EnvironmentId, type FsError, type FsGitInfo, type FsOp, type FsResult, type MachineId, type ProjectFeatureFs, type ProjectFeatureSessionInput, type ProjectId, type ProjectRecord, type TaskId } from '@agentic/core';
+import { PROJECT_FEATURE_KIND, applyProjectFeaturePreset, configDefaults, isProjectFeatureManifest, projectFolderKey, suggestWorktreePath, validateConfig, type ChatId, type EnvironmentId, type FsError, type FsGitInfo, type FsOp, type FsResult, type MachineId, type ProjectFeatureFs, type ProjectFeatureReleaseReason, type ProjectFeatureSessionInput, type ProjectId, type ProjectRecord, type TaskId } from '@agentic/core';
 
 import { chatWorktreeFor, splitCommand, DEFAULT_BRANCH_PREFIX, DEFAULT_WORKTREE_NOTICE, GIT_FEATURE_ID, GITHUB_TOKEN_SECRET, gitBranchFor, gitSettingsErrors, gitFeatureManifest, gitFeaturePlugin, hostOsOfPath, identityOf, isValidBranchName } from '../src/index';
 
@@ -448,6 +448,21 @@ describe('cleanup when a chat leaves the project (#623)', () => {
         expect(ops).toEqual([{ kind: 'worktree-remove', repo: '/work/agentic', path: wt, branch: `chat/${SHORT}`, deleteBranch: true }]);
         const dirty: ProjectFeatureFs = async () => ({ error: { code: 'dirty', message: `${wt} has uncommitted changes; it was left as it is` } });
         await expect(release(dirty, { worktreePerChat: true, worktreeCleanup: 'on-chat-leave' })).rejects.toThrow(/git worktree dirty/);
+    });
+
+    it("on-merge (#675): a merged PR removes the worktree, and so do leaving and deleting; on-chat-leave ignores a merge", async () => {
+        const ops: FsOp[] = [];
+        const fs: ProjectFeatureFs = async (op) => (ops.push(op), op.kind === 'worktree-remove' ? { result: { kind: 'worktree-remove', path: op.path, removed: true, branchDeleted: false } } : { error: { code: 'unsupported', message: op.kind } });
+        const released = (reason: ProjectFeatureReleaseReason, worktreeCleanup: string) =>
+            gitFeaturePlugin.onChatReleased!({ project, settings: settingsOf({ worktreePerChat: true, worktreeCleanup }), chatId: CHAT, reason, environmentId: 'env_1' as EnvironmentId, cwd: '/work/agentic', fs });
+        expect(await released('merged', 'on-chat-leave')).toBeUndefined();
+        expect(await released('merged', 'never')).toBeUndefined();
+        expect(ops).toEqual([]);
+        expect(await released('merged', 'on-merge')).toBe(`removed ${wt}`);
+        expect(await released('project-changed', 'on-merge')).toBe(`removed ${wt}`);
+        expect(await released('deleted', 'on-merge')).toBe(`removed ${wt}`);
+        expect(ops).toHaveLength(3);
+        expect(gitFeatureManifest.projectSettings.properties?.['worktreeCleanup']).toMatchObject({ enum: ['never', 'on-chat-leave', 'on-merge'] });
     });
 
     it("a deleted chat counts as leaving (#674): the same removal under on-chat-leave, nothing under never", async () => {
