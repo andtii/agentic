@@ -199,14 +199,15 @@ The whole platform in one Node process (Node ≥ 22.13, for `node:sqlite`) — n
 
 ```sh
 pnpm install
-pnpm --filter @agentic/node bundle  # the packages, then the web app's Vite build (--mode node) into apps/node/dist/main.js
-pnpm --filter @agentic/node start   # node apps/node/dist/main.js
+pnpm --filter @agentic/node bundle  # the daemon, the packages, then the web app's Vite build (--mode node) into apps/node/dist/main.js
+pnpm --filter @agentic/node start   # agentic start (apps/node/bin/agentic.mjs): the hub + this machine's daemon, then opens the browser
 ```
 
 - **Data** lives in `$AGENTIC_HOME` (default `~/.agentic`): `agentic.db` (with its `-wal` / `-shm` sidecars), `files/` (attachments and exports), `logs/`, and `.env`. The first run generates `SESSION_SECRET` and `WORKSPACE_KEK` into `.env` (mode 0600) and says so; they are never replaced — a new `WORKSPACE_KEK` would orphan every secret sealed under the old one. Back the directory up whole.
 - **Settings**, from the process env first, then `.env`: `PORT` (default 8787), `APP_ORIGIN` (default `http://localhost:PORT`), `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET`, and `AGENTIC_DEV_LOGIN` (≥ 16 characters) for the dev login — add it to `.env` and the start-up log prints the one-click link, as in §4.
 - **Sign in** with that link, add your Anthropic key at `/plugins/anthropic-api`, and chat as in §4. `BASE_URL=http://localhost:8787 AGENTIC_DEV_LOGIN=<.env value> ANTHROPIC_API_KEY=<key> pnpm --filter @agentic/web smoke:demo1` runs the scripted walk-through against it.
-- **Pair a daemon** from `/pair` exactly as in §4: `agentic-daemon pair <code> --url http://localhost:8787 --name <name>`, then `agentic-daemon run`. The daemon socket is `/_agentic/daemon/{machineId}` on the same port.
+- **This machine is already paired** (#990): `agentic start` runs its daemon in the same process (config under `<home>/daemon`), paired to the local owner without a code, with the web allowed to add environments under your home folder — add a Claude Code environment on the machine's page. `--no-daemon` runs the hub only; `--no-open` only prints the link; `agentic status` says whether the node is claimed, running and paired.
+- **Pair another daemon** from `/pair` exactly as in §4: `agentic-daemon pair <code> --url http://localhost:8787 --name <name>`, then `agentic-daemon run`. The daemon socket is `/_agentic/daemon/{machineId}` on the same port.
 - **Stop** with Ctrl+C (or SIGTERM): the host finishes its turns, flushes state and closes the database. A crash (`kill -9`) loses only the turn that was running: what earlier turns saved is in `agentic.db`, reminders that fell due meanwhile fire on the next start, and detached runs are picked up again.
 - The script is `bundle`, not `build`, on purpose: the root `pnpm build` runs every package's `build`, and this one builds the packages itself — two builds of `@agentic/ui` at once break each other.
 - There is no hot reload: after a source change, `pnpm --filter @agentic/node bundle` and start again.

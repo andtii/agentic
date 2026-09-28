@@ -185,7 +185,8 @@ pnpm --filter @agentic/web test:node     # the same suite against the Node host 
 
 Run the platform on Node instead (#988, `docs/runbook.md` §4b): `pnpm --filter @agentic/node bundle`
 (the packages, then the web app's Vite build with `--mode node` into `apps/node/dist/main.js`) and
-`pnpm --filter @agentic/node start` — one process on http://localhost:8787, data in `$AGENTIC_HOME`
+`pnpm --filter @agentic/node start` (`agentic start`: the hub plus this machine's daemon, auto-paired;
+`--no-daemon` for the hub only) — one process on http://localhost:8787, data in `$AGENTIC_HOME`
 (default `~/.agentic`).
 
 Run the web app: `pnpm dev` (the real Worker on `wrangler dev`, http://localhost:8787,

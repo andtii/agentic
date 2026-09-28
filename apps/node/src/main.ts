@@ -1,67 +1,56 @@
 /**
- * `node apps/node/dist/main.js` — the whole platform on one machine (#988):
- * the actors on `sqliteStorage` (`<home>/agentic.db`), chat files on disk
- * (`<home>/files`), the Worker's HTTP routes, the live actor sockets and the
- * daemon socket, on one port (`PORT`, default 8787).
+ * `agentic` (`bin/agentic.mjs`, #990) / `node apps/node/dist/main.js` — the
+ * whole platform on one machine (#988): the actors on `sqliteStorage`
+ * (`<home>/agentic.db`), chat files on disk (`<home>/files`), the Worker's
+ * HTTP routes, the live actor sockets and the daemon socket, on one port
+ * (`--port`, `PORT`, default 8787) — and this machine's daemon in the same
+ * process, paired to the local owner (`start.ts`; `--no-daemon` opts out).
  *
  * Built by `pnpm --filter @agentic/node bundle` (the web app's Vite build with
- * `--mode node`, so the server functions and the document render bundle in).
- * SIGINT / SIGTERM drain: new responses carry `connection: close`, the host
- * finishes its turns and flushes state, then the listener and the database
- * close.
+ * `--mode node`, so the server functions and the document render bundle in;
+ * the daemon is built beside it and loaded at run time). SIGINT / SIGTERM
+ * stop the daemon, then drain: new responses carry `connection: close`, the
+ * host finishes its turns and flushes state, then the listener and the
+ * database close.
  *
- * `main.js export …` / `main.js import …` move a Cloudflare deployment's
- * state to this node instead of serving (`./import/cli.ts`, #994).
+ * `agentic status` reports; `agentic export …` / `agentic import …` move a
+ * Cloudflare deployment's state to this node instead of serving (`./import/cli.ts`, #994).
  */
-import { fileURLToPath } from 'node:url';
-import { sqliteStorage } from '@sigx/actors-sqlite';
 import { nodeFallback } from '../../web/src/entry.node';
-import { fsBucket } from './fs-bucket';
+import { openHomeFor, parseCli, statusLines, USAGE } from './cli';
 import { openHome } from './home';
-import { createNodeHost } from './host';
-import { claimUrl, fileLocalOwnerStore, LOCAL_LOGIN_PATH, prepareClaim } from './local-owner';
-import { IMPORT_COMMANDS, runImportCli } from './import/cli';
-import { createNodeServer } from './server';
+import { runImportCli } from './import/cli';
+import { startNode } from './start';
 
-/** How long a shutdown waits for in-flight turns before it closes anyway. */
-const STOP_TIMEOUT_MS = 20_000;
-
-const home = openHome();
-if ((IMPORT_COMMANDS as readonly string[]).includes(process.argv[2] ?? '')) process.exit(await runImportCli(process.argv.slice(2), home));
-for (const name of home.generated) console.log(`[node] generated ${name} in ${home.envFile}`);
-
-// The local owner (#989): until someone claims the node, a single-use link to do it.
-const localOwner = fileLocalOwnerStore(home.dir);
-const claimToken = await prepareClaim(localOwner, home.env.SESSION_SECRET!);
-
-const storage = sqliteStorage({ path: home.database });
-const node = await createNodeHost({ storage, bucket: fsBucket(home.files), env: home.env, fallback: nodeFallback, localOwner });
-const clientDir = fileURLToPath(new URL('../../web/dist/client', import.meta.url));
-const { server, draining } = createNodeServer({ host: node, clientDir });
-
-server.listen(home.port, () => {
-    const origin = home.env.APP_ORIGIN!;
-    console.log(`[node] agentic on ${origin} — data in ${home.dir}`);
-    if (claimToken) console.log(`[node] claim this node (once, within 24 h): ${claimUrl(origin, claimToken)}`);
-    else console.log(`[node] sign in: ${origin}${LOCAL_LOGIN_PATH}`);
-    if (home.env.AGENTIC_DEV_LOGIN) console.log(`[node] dev login: ${origin}/auth/dev-login?token=${home.env.AGENTIC_DEV_LOGIN}`);
-});
-
-let stopping = false;
-const shutdown = async (signal: string): Promise<void> => {
-    if (stopping) return;
-    stopping = true;
-    console.log(`[node] ${signal}: draining`);
-    draining();
-    try {
-        await node.stop({ timeoutMs: STOP_TIMEOUT_MS });
-    } catch (e) {
-        console.error('[node] the host did not stop cleanly:', e);
+const command = parseCli(process.argv.slice(2));
+switch (command.kind) {
+    case 'help':
+        console.log(USAGE);
+        process.exit(0);
+        break;
+    case 'error':
+        console.error(`agentic: ${command.message}\n\n${USAGE}`);
+        process.exit(2);
+        break;
+    case 'import':
+        process.exit(await runImportCli(command.argv, openHome()));
+        break;
+    case 'status':
+        for (const line of await statusLines({ home: openHomeFor(command) })) console.log(line);
+        process.exit(0);
+        break;
+    case 'start': {
+        const running = await startNode({ home: openHomeFor(command), daemon: command.daemon, open: command.open, fallback: nodeFallback });
+        let stopping = false;
+        const shutdown = async (signal: string): Promise<void> => {
+            if (stopping) return;
+            stopping = true;
+            console.log(`[node] ${signal}: stopping`);
+            await running.stop();
+            process.exit(0);
+        };
+        process.once('SIGINT', () => void shutdown('SIGINT'));
+        process.once('SIGTERM', () => void shutdown('SIGTERM'));
+        break;
     }
-    server.close();
-    server.closeAllConnections();
-    storage.close();
-    process.exit(0);
-};
-process.once('SIGINT', () => void shutdown('SIGINT'));
-process.once('SIGTERM', () => void shutdown('SIGTERM'));
+}
