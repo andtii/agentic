@@ -990,7 +990,7 @@ export function tellReady(book: PlanBook, call: PlanCall, waitsElsewhere: (item:
         if (told.has(agentId)) continue;
         told.add(agentId);
         const to = agentActor(agentId);
-        if (book.notices.some((n) => sameActor(n.to, to) && n.itemId === head.id)) continue;
+        if (book.notices.some((n) => sameActor(n.to, to) && n.itemId === head.id && (n.kind === 'handoff' || n.kind === 'ready'))) continue;
         tell(book, { at: call.now, to, kind: 'ready', itemId: head.id, text: `#${head.id} is ready for you: ${head.title}. ${READY_WORK_TEXT[0]!.toUpperCase()}${READY_WORK_TEXT.slice(1)}.` });
     }
     if (told.size) book.readyTold = [...told];

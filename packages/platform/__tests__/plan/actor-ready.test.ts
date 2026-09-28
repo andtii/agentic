@@ -10,6 +10,7 @@ import { capturingAuditPort } from '../../src/audit/port';
 import { Chat } from '../../src/chat/index';
 import { Inbox } from '../../src/notify/index';
 import { definePlanActor, planKey } from '../../src/plan/index';
+import { assign, claim, createPlan, emptyBook, takeNotices, tellReady, type PlanCall } from '../../src/plan/rules';
 import { chatPlanWake, type PlanWake, type PlanWakePort } from '../../src/plan/wake';
 import { TaskActor, taskKey } from '../../src/task/index';
 import { testActorApp, type TestActorApp } from '../../src/testing/index';
@@ -153,5 +154,19 @@ describe('ready work, the rules (a fake wake port)', () => {
         await plan().assign(2, { kind: 'agent', agentId: LINT });
         await plan().assign(3, { kind: 'agent', agentId: LINT });
         expect(readyWakes()).toEqual([]);
+    });
+});
+
+describe('ready work, tellReady on a book', () => {
+    const call = (actor: PlanCall['actor']): PlanCall => ({ now: 1_000, actor, manager: PM, members: [PM, FORGE, LINT], limitOf: () => 1 });
+    it('an unread notice of another kind about the same item does not stand in for the telling', () => {
+        const b = emptyBook(ws, project);
+        createPlan(b, call({ kind: 'user', userId: 'u1' }), { title: 'P', phases: [{ title: 'One', items: [{ title: 'a' }] }] });
+        claim(b, call({ kind: 'agent', agentId: FORGE }), 1);
+        // Moved off Forge (an unread `reassigned` about #1), then back into its queue.
+        assign(b, call({ kind: 'user', userId: 'u1' }), 1, { kind: 'agent', agentId: LINT });
+        assign(b, call({ kind: 'user', userId: 'u1' }), 1, { kind: 'agent', agentId: FORGE });
+        tellReady(b, call(null));
+        expect(takeNotices(b, { kind: 'agent', agentId: FORGE }).map((n) => n.kind)).toEqual(['reassigned', 'ready']);
     });
 });
