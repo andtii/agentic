@@ -141,10 +141,11 @@ export interface ProjectFeatureSessionInput extends ProjectFeatureContext {
 }
 
 /**
- * Why a chat no longer works in a project (#623): it was moved to another project or out of any (`project-changed`),
- * or deleted (`deleted`, once chats can be).
+ * Why a chat's work in a project is released (#623): it was moved to another project or out of any
+ * (`project-changed`), deleted (`deleted`, #674), or the pull request of its branch merged while it stays in the
+ * project (`merged`, #675 — the forge says so through the project's Pulls actor, squash merges included).
  */
-export type ProjectFeatureReleaseReason = 'project-changed' | 'deleted';
+export type ProjectFeatureReleaseReason = 'project-changed' | 'deleted' | 'merged';
 
 /**
  * A chat left the project (#623), for one environment the project has a folder on: `cwd` is that folder, `fs` its
