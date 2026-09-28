@@ -57,6 +57,10 @@ export const aiMessageAnatomy = defineAnatomy('ai-message', {
     /** `machine / runtime / account` — the kit's env line, dropped from the row below 768 px. */
     environment: { element: 'span', parent: 'meta', tokens: ['text'] },
     time: { element: 'time', parent: 'meta', tokens: ['text'] },
+    /** The reasoning chip on the right of the meta line (`thought 6s`) at a folded detail level (#1054): it opens the `thinking` under it. */
+    thought: { element: 'button', parent: 'meta', tokens: ['color', 'text'] },
+    /** The reasoning the chip opened, inline under the meta line in `text-mute`. */
+    thinking: { element: 'div', parent: 'meta', tokens: ['text'] },
     body: { element: 'div', parent: 'root', tokens: ['text'] },
     /** An image part: a lazy thumbnail (≤ 320 px) that opens full size in a new tab. */
     image: { element: 'a', parent: 'body', tokens: ['color', 'radius-box'] },
