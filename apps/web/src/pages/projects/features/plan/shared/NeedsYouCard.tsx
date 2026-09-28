@@ -33,9 +33,12 @@ export const NeedsYouCard = component<NeedsYouCardProps>(({ props }) => {
     const run = async (write: () => Promise<boolean>, clear: boolean): Promise<void> => {
         if (st.busy) return;
         st.busy = true;
-        const ok = await write();
-        st.busy = false;
-        if (ok && clear) st.answer = '';
+        try {
+            if ((await write()) && clear) st.answer = '';
+        } finally {
+            // A write that throws never leaves the card stuck.
+            st.busy = false;
+        }
     };
     const answer = (e?: Event): void => {
         e?.preventDefault();
