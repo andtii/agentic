@@ -158,6 +158,8 @@ export async function createNodeHost(options: NodeHostOptions): Promise<NodeHost
         return who instanceof Response ? who : Response.json({ error: 'upgrade_required', detail: 'the daemon socket is a WebSocket' }, { status: 426 });
     };
 
+    let claimed = false;
+
     const asMachine = (who: DaemonIdentity) => host.actor(Machine, who.key).with({ context: asPrincipal(machinePrincipal(who.workspaceId, who.machineId)) });
 
     return {
@@ -171,7 +173,11 @@ export async function createNodeHost(options: NodeHostOptions): Promise<NodeHost
             const request = plain ? plainCookieRequest(incoming) : incoming;
             // One host in the process, but the same scope the Worker enters: an ambient hop inside resolves to it.
             return runWithHost(host, async () => {
-                setSignInOptions({ github: githubEnabled(env, request), devLogin: devLoginEnabled(env) });
+                // The passphrase door is open once the local owner exists; before that, the shell points at the claim link.
+                // Once claimed, a node stays claimed: the record is read (from disk) only until then.
+                if (localOwnerRoute && !claimed) claimed = !!options.localOwner!.load().owner;
+                const owned = localOwnerRoute ? claimed : null;
+                setSignInOptions({ github: githubEnabled(env, request), devLogin: devLoginEnabled(env), localPassphrase: owned === true, localUnclaimed: owned === false });
                 const route =
                     (await localOwnerRoute?.(request)) ??
                     devLoginRouteFor(request, env) ??

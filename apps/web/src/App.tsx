@@ -12,6 +12,7 @@ import { dataMode } from './data-mode';
 import { useActorDefs, useViewer } from './actors/defs';
 import { signInOptions } from './api/sign-in.server';
 import { DEV_LOGIN_PATH } from './auth/dev-login';
+import { localLoginHref } from './auth/sign-in';
 import { pullsNeedingYou, useNeedsSource, type PullNeeds } from './pages/inbox';
 import { mockPullNeeds } from './pages/projects/work/pull/links';
 import { PullsFeed, createWorkspacePulls, livePullNeeds, type WorkspacePulls } from './pages/projects/work/pull/LivePulls';
@@ -41,14 +42,27 @@ const userAvatar = (monogram: string): JSXElement => (
 const UserFoot = component(() => {
     const viewer = useViewer()();
     const doors = useData(signInOptions);
+    const route = useRoute();
     return () => {
         if (!viewer.pending && !viewer.workspaceId) {
             const open = doors.value;
+            const any = open?.github || open?.devLogin || open?.localPassphrase;
             return (
                 <span data-sign-in="">
+                    {open?.localPassphrase ? (
+                        <a href={localLoginHref(route.fullPath)} data-sign-in-passphrase="">
+                            Sign in with passphrase
+                        </a>
+                    ) : null}
                     {open?.github ? <a href="/auth/login" data-sign-in-github="">Sign in with GitHub</a> : null}
                     {open?.devLogin ? <a href={DEV_LOGIN_PATH} data-sign-in-dev="">Dev login</a> : null}
-                    {!open?.github && !open?.devLogin ? <span data-sign-in-none="">Signed out</span> : null}
+                    {/* The claim link is a secret: say where it is, never show it (#1016). */}
+                    {open?.localUnclaimed ? (
+                        <span data-sign-in-unclaimed="" style="color:var(--ag-text-dim);font-size:var(--text-sm)">
+                            This node is unclaimed. Open the claim link <code>agentic start</code> printed.
+                        </span>
+                    ) : null}
+                    {!any && !open?.localUnclaimed ? <span data-sign-in-none="">Signed out</span> : null}
                 </span>
             );
         }

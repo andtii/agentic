@@ -130,11 +130,11 @@ describe('dev login form (#143)', () => {
     });
 
     it('the sign-in options the shell reads default to no door and follow what the Worker records', () => {
-        expect(currentSignInOptions()).toEqual({ github: false, devLogin: false });
+        expect(currentSignInOptions()).toEqual({ github: false, devLogin: false, localPassphrase: false, localUnclaimed: false });
         setSignInOptions({ github: false, devLogin: true });
-        expect(currentSignInOptions()).toEqual({ github: false, devLogin: true });
+        expect(currentSignInOptions()).toEqual({ github: false, devLogin: true, localPassphrase: false, localUnclaimed: false });
         setSignInOptions({ github: true, devLogin: false });
-        expect(currentSignInOptions()).toEqual({ github: true, devLogin: false });
+        expect(currentSignInOptions()).toEqual({ github: true, devLogin: false, localPassphrase: false, localUnclaimed: false });
         setSignInOptions({ github: false, devLogin: false });
     });
 });
