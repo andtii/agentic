@@ -7,7 +7,8 @@ export { anthropicApiRuntime, createSessionFactory, resolveRuntime, withInstance
 export { ROUTING_TYPE, parseRoutingKey, routingKey } from './key.js';
 export { createEnvironmentProbe, locateEnvironment, readMachine, type EnvironmentProbeOptions, type LocatedEnvironment } from './locate.js';
 export type { ProjectPlacement, RoutingPorts } from './ports.js';
-export { initialRoutingState, type Route, type RouteStatus, type RoutingState } from './state.js';
+export { initialRoutingState, type ItemSession, type Route, type RouteStatus, type RoutingState } from './state.js';
+export { forgetItemSession, isItemSession, itemSessionKey, itemSessionsOf, recordItemSession } from './bindings.js';
 export { AnswerDeliveryError, answerContract, answerObjective, answerPostText, answerPrompt, answerTaskId, createAnswerFollowUp, type AnswerFollowUpOptions, type AnswerStep } from './answers.js';
 export { createToolCallPort, type ToolCallPortOptions } from './tool-call.js';
 export { pullMergeRelease, type PullMergeReleaseOptions } from './merge-release.js';

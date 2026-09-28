@@ -299,3 +299,58 @@ describe('a plan item task (#1073)', () => {
         expect((await task('t1').get()).sessionId).not.toBe((await task('t2').get()).sessionId);
     });
 });
+
+describe("an item task's session is the item's, not the chat's (#1078)", () => {
+    const chatOrigin = (chatId: ChatId, n: number) => ({ kind: 'user', chatId, messageId: `msg_${n}` as never }) as const;
+    const made = (_environmentId: string, op: WorktreeOp): { result: FsResult } => ({ result: { kind: 'worktree', path: op.path, branch: op.branch } });
+    const sessionOf = async (taskId: string): Promise<SessionId> => (await task(taskId).get()).sessionId as SessionId;
+
+    async function itemChat(): Promise<{ a: AgentId; projectId: ProjectId; chatId: ChatId }> {
+        await onlineMachine();
+        const a = await agent('agent_a', { runtime: 'in-memory', defaultEnvironmentId: E1 });
+        const projectId = await project({ features: { [GIT_FEATURE_ID]: { worktreePerChat: true } } });
+        const { chatId } = await workspace().createChat({ projectId });
+        await chat(chatId).addAgent(a, 'all');
+        sockets.worktree = made;
+        return { a, projectId, chatId };
+    }
+
+    it('an item task finishes, then a task with no item runs in the same chat: the item session is not closed', async () => {
+        const { a, projectId, chatId } = await itemChat();
+        await createTask('t1', a, { origin: chatOrigin(chatId, 1), projectId, planItem: 3 });
+        await routing().run('t1' as TaskId);
+        await settled('t1');
+        expect((await task('t1').get()).status).toBe('completed');
+        const item = await sessionOf('t1');
+        await until(async () => (await chat(chatId).get()).sessions[a]?.sessionId === item, "the item session to be the chat's binding");
+
+        await createTask('t2', a, { origin: chatOrigin(chatId, 2), projectId });
+        await routing().run('t2' as TaskId);
+        await settled('t2');
+        expect((await task('t2').get()).status).toBe('completed');
+        expect(await sessionOf('t2')).not.toBe(item);
+        expect((await session(item).get()).status).not.toBe('closed');
+
+        // A follow-up on the item goes back to the item's session, though the chat now binds the other one.
+        await createTask('t3', a, { origin: chatOrigin(chatId, 3), projectId, planItem: 3 });
+        await routing().run('t3' as TaskId);
+        await settled('t3');
+        expect((await task('t3').get()).status).toBe('completed');
+        expect(await sessionOf('t3')).toBe(item);
+    });
+
+    it("tasks with no item still reuse the chat's session", async () => {
+        const { a, projectId, chatId } = await itemChat();
+        await createTask('t1', a, { origin: chatOrigin(chatId, 1), projectId });
+        await routing().run('t1' as TaskId);
+        await settled('t1');
+        const first = await sessionOf('t1');
+        await until(async () => (await chat(chatId).get()).sessions[a]?.sessionId === first, "the chat's binding");
+        await createTask('t2', a, { origin: chatOrigin(chatId, 2), projectId });
+        await routing().run('t2' as TaskId);
+        await settled('t2');
+        expect((await task('t2').get()).status).toBe('completed');
+        expect(await sessionOf('t2')).toBe(first);
+        expect((await session(first).get()).status).not.toBe('closed');
+    });
+});
