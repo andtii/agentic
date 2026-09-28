@@ -353,15 +353,17 @@ export function defineRegistry(options: RegistryOptions = {}) {
 
     type Refs = { readonly agents: readonly AgentRef[]; readonly schedules: readonly ScheduleRef[] };
 
-    /** Read the Workspace index, then every agent and schedule it lists — side by side, index order kept. */
-    const collectRefs = async (ctx: Ctx): Promise<Refs> => {
+    /** Read the Workspace index, then every agent and schedule it lists — side by side, index order kept. `history` adds each agent's config versions (#681). */
+    const collectRefs = async (ctx: Ctx, options: { readonly history?: boolean } = {}): Promise<Refs> => {
         const ws = workspaceOf(ctx);
         const index = await ctx.actor(Workspace, workspaceKey(ws)).get();
         const [agents, schedules] = await Promise.all([
             Promise.all(
                 index.agents.map(async (id): Promise<AgentRef> => {
-                    const agent = await ctx.actor(AgentActor, agentKey(ws, id as AgentId)).get();
-                    return { id: agent.id, config: agent.config };
+                    const client = ctx.actor(AgentActor, agentKey(ws, id as AgentId));
+                    // The history only dates the grant: one that cannot be read leaves `since` out, never the agent.
+                    const [agent, history] = await Promise.all([client.get(), options.history ? client.configHistory().catch(() => undefined) : undefined]);
+                    return { id: agent.id, config: agent.config, ...(history ? { history } : {}) };
                 })
             ),
             Promise.all(
@@ -383,7 +385,7 @@ export function defineRegistry(options: RegistryOptions = {}) {
 
     const dependents = async (ctx: Ctx, id: string): Promise<Dependents> => {
         plugin(ctx, id);
-        const refs = await collectRefs(ctx);
+        const refs = await collectRefs(ctx, { history: true });
         // Read the record after the walk: it awaited, and the plugin may have moved meanwhile.
         return dependentsOf(ctx, plugin(ctx, id), refs);
     };
@@ -771,7 +773,7 @@ export function defineRegistry(options: RegistryOptions = {}) {
 
             /** `dependents` for every plugin, id order, over ONE walk of the workspace — what the Plugins page reads. */
             async dependentsAll(): Promise<Dependents[]> {
-                const refs = await collectRefs(ctx);
+                const refs = await collectRefs(ctx, { history: true });
                 return pluginIds(ctx).map((id) => dependentsOf(ctx, current(ctx, id)!, refs));
             },
 

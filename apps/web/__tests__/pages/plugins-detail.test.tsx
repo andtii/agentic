@@ -160,6 +160,13 @@ describe('/plugins/:id', () => {
         expect(root.querySelector('[data-readiness]')!.getAttribute('data-readiness')).toBe('needs-grant');
     });
 
+    it('Used by: a tile with a known grant date reads "granted <day>", as on the board (#681)', async () => {
+        const deps = dependents('gmail')!;
+        const dated = { ...deps, agents: deps.agents.map((a) => ({ ...a, since: Date.parse('2026-09-12T10:00:00Z') })) };
+        const root = await mountAt('/plugins/gmail', <PluginPageView plugin={plugin('gmail')} dependents={dated} />);
+        expect(text(root.querySelector('[data-dependent="scout"] [data-dependent-via]'))).toBe('granted 12 Sep');
+    });
+
     it('Used by: agent tiles and how they use it, with the connector note', async () => {
         const root = await view('gmail');
         const used = root.querySelector('[data-plugin-panel="dependents"]')!;

@@ -156,6 +156,11 @@ describe('plugin lifecycle', () => {
         ]);
         expect(dependents.schedules).toEqual([{ id: scheduleId, title: 'nightly triage', agentId: byTool }]);
         expect(await reg().dependents('github')).toEqual(dependents);
+        // Each dates from the config version that granted it (#681).
+        for (const id of [byConnector, byTool]) {
+            const versions = await app.as(owner).actor(AgentActor, agentKey(WS, id)).listVersions();
+            expect(dependents.agents.find((a) => a.id === id)?.since).toBe(versions.at(-1)!.at);
+        }
 
         // New use is refused from now on, with a typed error the caller can show.
         const refused = await consumer.use('github').catch((e: unknown) => e);

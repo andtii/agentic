@@ -1,6 +1,6 @@
 import type { AgentId, PluginManifest, ScheduleId } from '@agentic/core';
 import { defaultAgentConfig } from '../../src/agent/index';
-import { computeDependents, dependencyOf, toolInNamespace, toolNamespaces } from '../../src/registry/index';
+import { computeDependents, dependencyOf, dependentSince, toolInNamespace, toolNamespaces } from '../../src/registry/index';
 
 const manifest = (id: string, extra: PluginManifest['permissions'] = []): PluginManifest => ({
     id,
@@ -74,5 +74,31 @@ describe('computeDependents', () => {
 
     it('is empty when nothing references the plugin', () => {
         expect(computeDependents(manifest('nobody'), [a1, a2, a3, a4], schedules)).toEqual({ pluginId: 'nobody', agents: [], schedules: [] });
+    });
+});
+
+describe('dependentSince (#681)', () => {
+    const gh = manifest('github');
+    const cfg = (patch: Partial<ReturnType<typeof defaultAgentConfig>>) => ({ ...defaultAgentConfig(), name: 'a', ...patch });
+    const using = cfg({ connectors: [{ id: 'github' }] });
+    const tools = cfg({ connectors: [{ id: 'github' }], tools: [{ name: 'github.search' }] });
+    const none = cfg({});
+
+    it('dates the grant from the oldest version of the run that ends with the newest', () => {
+        const history = [{ at: 1, config: none }, { at: 2, config: using }, { at: 3, config: tools }];
+        expect(dependentSince({ id: 'a' as AgentId, config: tools, history }, gh)).toBe(2);
+        const deps = computeDependents(gh, [{ id: 'a' as AgentId, config: tools, history }], []);
+        expect(deps.agents).toEqual([{ id: 'a', name: 'a', via: ['connector', 'tool'], since: 2 }]);
+    });
+
+    it('a grant removed and added again dates from the re-add', () => {
+        const history = [{ at: 1, config: using }, { at: 2, config: none }, { at: 3, config: using }];
+        expect(dependentSince({ id: 'a' as AgentId, config: using, history }, gh)).toBe(3);
+    });
+
+    it('is undefined without a history, or when the newest version does not depend on it; computeDependents then omits since', () => {
+        expect(dependentSince({ id: 'a' as AgentId, config: using }, gh)).toBeUndefined();
+        expect(dependentSince({ id: 'a' as AgentId, config: none, history: [{ at: 1, config: using }, { at: 2, config: none }] }, gh)).toBeUndefined();
+        expect(computeDependents(gh, [{ id: 'a' as AgentId, config: using }], []).agents[0]).not.toHaveProperty('since');
     });
 });
