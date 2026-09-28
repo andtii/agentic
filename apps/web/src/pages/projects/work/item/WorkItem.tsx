@@ -6,7 +6,7 @@
  * its task, chat, session and plan item (`live.ts`).
  */
 import { component, signal, type Define, type JSXElement } from 'sigx';
-import { Link } from '@sigx/router';
+import { Link, useRouter } from '@sigx/router';
 import { Checkbox } from '@sigx/zero';
 import { formatRef, type Ref, type WorkStageState } from '@agentic/core';
 import { AgentTile, EmptyState, Icon, StageTrack, StatusPill, Tag, type Tone } from '@agentic/ui';
@@ -14,7 +14,9 @@ import { dataMode } from '../../../../data-mode';
 import { AGENTS, formatAge } from '../../../../mock/workspace';
 import { clockNow } from '../../../../time';
 import type { ProjectPageProps } from '../../layout/types';
-import type { WorkAgentLookup } from '../WorkView';
+import { WorkActionButtons, WorkNotice, type WorkAgentLookup } from '../WorkView';
+import type { WorkActions } from '../actions';
+import type { WorkTask } from '../model';
 import { refIcon, refLabel } from '../../features/plan/shared/model';
 import { MOCK_WORK_ITEMS } from './fixtures';
 import { useLiveWorkItems } from './live';
@@ -31,7 +33,17 @@ const mockAgent: WorkAgentLookup = (id) => {
 
 const TONE_OF: Readonly<Record<WorkStageState, Tone>> = { working: 'working', 'needs-you': 'needs-you', failed: 'failed', done: 'live' };
 
-const Header = (d: WorkItemDetail, agentOf: WorkAgentLookup) => {
+/** The page's task as the Work actions read it: its id and status are all `workActionsOf` needs. */
+const taskOf = (d: WorkItemDetail): WorkTask[] =>
+    d.task ? [{ id: d.task.id as WorkTask['id'], title: d.task.objective, status: d.task.status as WorkTask['status'], assignee: d.task.agentId as WorkTask['assignee'], updatedAt: d.item.updatedAt }] : [];
+
+/** The Work row's buttons on the page (#1040); after one the page goes back to Work, where its Undo shows. */
+export interface WorkItemActions {
+    readonly actions: WorkActions;
+    readonly onDone: () => void;
+}
+
+const Header = (d: WorkItemDetail, agentOf: WorkAgentLookup, act?: WorkItemActions) => {
     const { item } = d;
     const agentName = (id: string): string => agentOf(id).name;
     const steps = stepsOf(item);
@@ -60,6 +72,7 @@ const Header = (d: WorkItemDetail, agentOf: WorkAgentLookup) => {
                     )}
                 <span data-next-step="">{item.nextStep}</span>
                 <StatusPill status={item.stageState} tone={TONE_OF[item.stageState]} />
+                {act ? <WorkActionButtons item={item} tasks={taskOf(d)} actions={act.actions} onDone={act.onDone} /> : null}
             </div>
         </header>
     );
@@ -150,12 +163,12 @@ const missing = (item: string) => (
 );
 
 /** The page over one detail, or the not-found state; `pending` while the live reads have not landed. */
-const render = (projectId: string, param: string, d: WorkItemDetail | undefined, agentOf: WorkAgentLookup, pending = false): JSXElement => (
+const render = (projectId: string, param: string, d: WorkItemDetail | undefined, agentOf: WorkAgentLookup, pending = false, act?: WorkItemActions): JSXElement => (
     <section aria-label={d?.item.title ?? param} data-work-item={param} data-plan-backed={d?.plan ? 'true' : undefined}>
         {d
             ? (
                 <>
-                    {Header(d, agentOf)}
+                    {Header(d, agentOf, act)}
                     <div data-work-item-body="">
                         {DoneWhen(d)}
                         {Refs(d, projectId)}
@@ -170,9 +183,16 @@ const render = (projectId: string, param: string, d: WorkItemDetail | undefined,
 
 const LiveWorkItem = component<WorkItemProps>(({ props }) => {
     const live = useLiveWorkItems(() => props.project);
+    const router = useRouter();
+    const act: WorkItemActions | undefined = live.actions ? { actions: live.actions, onDone: () => { void router.push(`/projects/${props.project.id}/work`); } } : undefined;
     return () => {
         const d = findWorkItem(live.details(), props.item);
-        return render(props.project.id, props.item, d, live.agentOf, !d && live.loading);
+        return (
+            <>
+                {render(props.project.id, props.item, d, live.agentOf, !d && live.loading, act)}
+                <WorkNotice />
+            </>
+        );
     };
 }, { name: 'LiveWorkItem' });
 

@@ -26,6 +26,9 @@ export interface ProjectWorkTally {
 /** How many moves `next` carries: the card's `Next:` line. */
 export const NEXT_MOVES_MAX = 3;
 
+/** As the Work view (#1040): a failed task leaves your move a week after it failed. */
+const FAILED_KEPT_MS = 7 * 24 * 3_600_000;
+
 /** As the Work view: a PR with no checks reported waits this long for CI before it is treated as a repo without CI. */
 const NO_CHECKS_GRACE_MS = 10 * 60_000;
 
@@ -53,14 +56,15 @@ function placePull(pr: PullRequest, hasDoer: boolean, now: number): Placed {
     return you(`merge ${ref}`);
 }
 
-function placeTask(t: TaskIndexRow): Placed | null {
+function placeTask(t: TaskIndexRow, now: number): Placed | null {
     switch (t.status) {
         case 'cancelled':
             return null;
         case 'completed':
             return { group: 'done' };
         case 'failed':
-            return you(`retry ${t.id}`);
+            // Dismissed by a person, or failed over a week ago: out of the Work view (#1040).
+            return t.dismissedAt !== undefined || now - t.updatedAt > FAILED_KEPT_MS ? null : you(`retry ${t.id}`);
         case 'queued':
             return { group: 'agents' };
         case 'waiting': {
@@ -101,7 +105,7 @@ export function tallyProjectWork(tasks: readonly TaskIndexRow[], pulls: readonly
     }
     for (const t of tasks) {
         if (usedTasks.has(t.id)) continue;
-        const p = placeTask(t);
+        const p = placeTask(t, now);
         if (!p || p.group === 'done') continue;
         placed.push({ placed: p, updatedAt: t.updatedAt });
     }

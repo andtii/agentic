@@ -18,6 +18,8 @@ export interface WorkTask {
     readonly branch?: string;
     /** What it is doing now, one line ("Writing tests"). */
     readonly activity?: string;
+    /** When a person cleared it from the Work view (#1040): a dismissed task is left out for every viewer. */
+    readonly dismissedAt?: number;
     readonly updatedAt: number;
 }
 
@@ -98,8 +100,11 @@ function placePull(pr: PullRequest, stages: readonly string[], doer: AgentId | u
     return { stage: at('Merge', last), stageState: 'needs-you', owner: YOU, nextStep: `Merge — green${approved}`, group: 'your-move' };
 }
 
-/** A task without a pull request: queued is Ready, running is the doing stage, a question or approval is your move. */
-function placeTask(t: WorkTask, stages: readonly string[]): Placed | null {
+/**
+ * A task without a pull request: queued is Ready, running is the doing stage, a question or approval is your move. A
+ * failed task is your move until it is dismissed or a week old (#1040), as done work leaves "Done this week".
+ */
+function placeTask(t: WorkTask, stages: readonly string[], now: number): Placed | null {
     const last = stages.length - 1;
     const doing = Math.min(1, last);
     const me = agent(t.assignee);
@@ -109,7 +114,8 @@ function placeTask(t: WorkTask, stages: readonly string[]): Placed | null {
         case 'completed':
             return { stage: last, stageState: 'done', owner: me, nextStep: 'Completed', group: 'done' };
         case 'failed':
-            return { stage: doing, stageState: 'failed', owner: YOU, nextStep: 'Failed — look at the task and retry', group: 'your-move' };
+            if (t.dismissedAt !== undefined || now - t.updatedAt > WEEK_MS) return null;
+            return { stage: doing, stageState: 'failed', owner: YOU, nextStep: 'Failed — retry or dismiss it', group: 'your-move' };
         case 'queued':
             return { stage: 0, stageState: 'working', owner: me, nextStep: t.activity ?? 'Queued — starts when its environment is free', group: 'agents' };
         case 'waiting': {
@@ -176,7 +182,7 @@ export function workItemsOf(tasks: readonly WorkTask[], pulls: readonly PullRequ
     }
     for (const t of tasks) {
         if (usedTasks.has(t.id)) continue;
-        const placed = placeTask(t, stages);
+        const placed = placeTask(t, stages, now);
         if (!placed || (placed.group === 'done' && !recent(t.updatedAt))) continue;
         const item = itemOfTask.get(t.id);
         out.push({ id: `task:${t.id}`, title: t.title, taskId: t.id, ...(item ? { itemRef: `#${item.id}` } : {}), stages, ...placed, updatedAt: t.updatedAt });
@@ -189,6 +195,22 @@ export function workItemsOf(tasks: readonly WorkTask[], pulls: readonly PullRequ
         out.push({ id: `item:${item.id}`, title: item.title, itemRef: `#${item.id}`, stages, ...placed, updatedAt });
     }
     return out.sort((a, b) => b.updatedAt - a.updatedAt);
+}
+
+/** What a row's buttons do (#1040): retry or dismiss a failed task, stop one still queued, running or waiting. */
+export type WorkAction = 'retry' | 'dismiss' | 'stop';
+
+/**
+ * The actions a work item offers: only a task's own row (a pull request's row is the PR's). Failed → Retry and
+ * Dismiss; queued, active or waiting → Stop; anything else none.
+ */
+export function workActionsOf(item: WorkItem, tasks: readonly WorkTask[]): readonly WorkAction[] {
+    if (item.pull !== undefined || !item.taskId) return [];
+    const task = tasks.find((t) => t.id === item.taskId);
+    if (!task) return [];
+    if (task.status === 'failed') return ['retry', 'dismiss'];
+    if (task.status === 'queued' || task.status === 'active' || task.status === 'waiting') return ['stop'];
+    return [];
 }
 
 /** The agent a row shows: whoever acts next, else the agent doing the work. */

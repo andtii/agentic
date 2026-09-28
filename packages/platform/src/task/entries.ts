@@ -129,6 +129,10 @@ export function applyTaskEntry(state: TaskState, entry: unknown): void {
             if (e.branch !== undefined) state.branch = e.branch;
             if (e.activity !== undefined) state.activity = e.activity;
             return;
+        case 'dismissed':
+            if (e.dismissed) state.dismissedAt = e.at;
+            else delete state.dismissedAt;
+            return;
         case 'usage':
             state.usage = addUsage(state.usage, e.usage);
             state.costUsd += e.costUsd;
