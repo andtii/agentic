@@ -8,7 +8,7 @@ import { component, effect, onUnmounted, signal, type JSXElement } from 'sigx';
 import { Link } from '@sigx/router';
 import { actor } from '@sigx/actors';
 import { useActorState } from '@sigx/actors/app';
-import type { Decision } from '@sigx/ai-agent';
+import type { AgentEvent, Decision } from '@sigx/ai-agent';
 import type { TaskId } from '@agentic/core';
 import { EmptyState, ErrorNote } from '@agentic/ui';
 import { Page } from '../../components/Page';
@@ -20,12 +20,19 @@ import { useWorkspaceZone, zoneFormat } from '../../time';
 import { useAgentDirectory } from '../chat/directory';
 import { SessionView } from '../Session';
 import { liveSessionView } from './live';
+import { callIn, type CallFocus } from './call';
 import { liveSessionFiles, machineClientFor, useLiveFilesExtras } from './files-sources';
 
 /** What the live page tells the topbar: the view for the crumb and the pill, and the two actions. */
 export const sessionHead = signal<{ value: { id: string; view: MockSessionView; agentName?: string; cancel: () => void; close: () => void } | null }>({ value: null });
 
-export const LiveSession = component<{ id: string }>(({ props }) => {
+export type LiveSessionProps = {
+    id: string;
+    /** `?call=<callId>` (#1056): the tool call the page opens at. */
+    call?: string;
+};
+
+export const LiveSession = component<LiveSessionProps>(({ props }) => {
     const defs = useActorDefs();
     const viewer = useViewer()();
     const directory = useAgentDirectory(defs, viewer);
@@ -43,6 +50,38 @@ export const LiveSession = component<{ id: string }>(({ props }) => {
     const st = signal({ error: '', recovering: false });
     const fail = (e: unknown): void => { st.error = e instanceof Error ? e.message : String(e); };
     const client = () => actor(defs.Session, key()!);
+
+    /**
+     * The requested call (#1056). The log read (`events()`) already spans the window, the retained pages and what the
+     * machine still holds; when that read fails on the forgotten range (#397), the retained part alone is read from
+     * `archivedTo` on — once per call. Not in either: the session no longer holds it.
+     */
+    const retained = signal<{ value: { callId: string; events: readonly AgentEvent[] | null; failed: boolean } | null }>({ value: null });
+    const stopRetained = effect(() => {
+        const callId = props.call;
+        const from = info.value?.archivedTo;
+        if (!callId || events.state !== 'errored' || !from || !key() || retained.value?.callId === callId) return;
+        retained.value = { callId, events: null, failed: false };
+        client().events({ epoch: from.epoch, seq: from.seq }).then(
+            (evs) => { if (retained.value?.callId === callId) retained.value = { callId, events: evs, failed: false }; },
+            () => { if (retained.value?.callId === callId) retained.value = { callId, events: null, failed: true }; }
+        );
+    });
+    onUnmounted(stopRetained);
+    const focus = (): CallFocus | undefined => {
+        const callId = props.call;
+        if (!callId) return undefined;
+        const found = events.value ? callIn(props.id, events.value, callId) : null;
+        if (found) return { callId, status: 'found', ...found };
+        if (events.state === 'errored') {
+            const r = retained.value;
+            if (!info.value?.archivedTo || r?.failed) return { callId, status: 'missing' };
+            if (r?.callId !== callId || !r.events) return { callId, status: 'loading' };
+            const held = callIn(props.id, r.events, callId);
+            return held ? { callId, status: 'found', ...held } : { callId, status: 'missing' };
+        }
+        return events.value ? { callId, status: 'missing' } : { callId, status: 'loading' };
+    };
 
     const view = (): MockSessionView | null => {
         const i = info.value;
@@ -89,7 +128,7 @@ export const LiveSession = component<{ id: string }>(({ props }) => {
         }
         return (
             <>
-                <SessionView v={v} agent={directory.lookup(v.agentId)} onRespond={(requestId: string, decision: Decision) => void client().respond(requestId, decision).catch(fail)} onResume={() => { void resume(); }} recovering={st.recovering} time={zoneFormat(zone()).time} files={files()} />
+                <SessionView v={v} agent={directory.lookup(v.agentId)} onRespond={(requestId: string, decision: Decision) => void client().respond(requestId, decision).catch(fail)} onResume={() => { void resume(); }} recovering={st.recovering} time={zoneFormat(zone()).time} files={files()} {...(focus() ? { focus: focus()! } : {})} />
                 {st.error ? <ErrorNote data-chat-error="">{st.error}</ErrorNote> : null}
             </>
         );

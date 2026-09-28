@@ -433,6 +433,10 @@ export interface MockEvent {
     readonly seq: number;
     readonly kind: 'tool-call' | 'tool-result' | 'text' | 'request' | 'turn-end' | 'error';
     readonly text: string;
+    /** A tool event's call (#1056): its row is `id="call-<callId>"`, what `?call=` scrolls to. */
+    readonly callId?: string;
+    /** When the platform received the event (#580); events from before that carry none. */
+    readonly at?: number;
 }
 
 export interface MockSessionView {
@@ -455,6 +459,8 @@ export interface MockSessionView {
     readonly current?: { readonly part: ToolPartState; readonly transcript: AgentTranscript; /** The call's duration as the tool row prints it; the platform reports none (#154). */ readonly meta?: string };
     readonly request?: { readonly request: OpenRequest; readonly context: ApprovalContext };
     readonly events: readonly MockEvent[];
+    /** Mock only (#1056): every tool call the session still holds, whole — what `?call=` opens, including calls past the log's tail. */
+    readonly calls?: readonly ToolPartState[];
     /** Events lost across a reconnect, if any. */
     readonly gap?: { readonly from: number; readonly to: number };
     readonly capabilities: CapabilityReport;
@@ -509,13 +515,20 @@ function forgeSession(): MockSessionView {
         current: { part: tool('c_test', 'Bash', { command: 'pnpm test packages/ui' }, { output: '42 passed · 0 failed · 3.1s' }), transcript, meta: '3.4s' },
         request: { request: PUSH_REQUEST, context: { ...PUSH_CONTEXT, compact: true } },
         events: [
-            { seq: 309, kind: 'tool-call', text: 'Edit packages/ui/src/shell/shell.css' },
-            { seq: 310, kind: 'tool-result', text: 'ok +18 -6' },
-            { seq: 311, kind: 'text', text: 'The drawer used a fixed 232 px column...' },
-            { seq: 314, kind: 'tool-call', text: 'Bash pnpm test packages/ui' },
-            { seq: 316, kind: 'tool-result', text: '42 passed, 0 failed' },
-            { seq: 317, kind: 'tool-call', text: 'Bash git push origin 47-mobile-drawer' },
-            { seq: 318, kind: 'request', text: 'approval r_5d01 scope=once' }
+            { seq: 309, kind: 'tool-call', text: 'Edit packages/ui/src/shell/shell.css', callId: 'c_edit', at: minutesAgo(6) },
+            { seq: 310, kind: 'tool-result', text: 'ok +18 -6', callId: 'c_edit', at: minutesAgo(6) },
+            { seq: 311, kind: 'text', text: 'The drawer used a fixed 232 px column...', at: minutesAgo(5) },
+            { seq: 314, kind: 'tool-call', text: 'Bash pnpm test packages/ui', callId: 'c_test', at: minutesAgo(4) },
+            { seq: 316, kind: 'tool-result', text: '42 passed, 0 failed', callId: 'c_test', at: minutesAgo(3) },
+            { seq: 317, kind: 'tool-call', text: 'Bash git push origin 47-mobile-drawer', callId: 'c_push', at: minutesAgo(2) },
+            { seq: 318, kind: 'request', text: 'approval r_5d01 scope=once', at: minutesAgo(2) }
+        ],
+        // Whole calls for `?call=` (#1056): `c_build` ran before the log's tail, and its output runs past the thread's 200-line well.
+        calls: [
+            tool('c_build', 'Bash', { command: 'pnpm build' }, { output: Array.from({ length: 240 }, (_, i) => `build line ${i + 1}`).join('\n') }),
+            tool('c_edit', 'Edit', { file_path: 'packages/ui/src/shell/shell.css', old_string: 'grid-template-columns: 232px 1fr;', new_string: 'grid-template-columns: 1fr;' }, { output: 'ok +18 -6' }),
+            tool('c_test', 'Bash', { command: 'pnpm test packages/ui' }, { output: '42 passed · 0 failed · 3.1s' }),
+            tool('c_push', 'Bash', { command: 'git push origin 47-mobile-drawer' }, { status: 'pending' })
         ],
         gap: { from: 312, to: 314 },
         capabilities: FORGE_CAPABILITIES,

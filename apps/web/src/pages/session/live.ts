@@ -14,7 +14,7 @@
  * current tool call carries no duration: agent events have no timestamps.
  */
 import type { CapabilityReport, MachineId, RuntimeId, SessionId, TaskId } from '@agentic/core';
-import type { MachineView, SessionInfo } from '@agentic/platform';
+import { eventTime, type MachineView, type SessionInfo } from '@agentic/platform';
 import { createTranscript, reduceAgentEvent, type AgentEvent } from '@sigx/ai-agent';
 import type { ToolPartState } from '@sigx/ai-agent/app';
 import type { ApprovalContext } from '@agentic/ui';
@@ -38,48 +38,53 @@ const brief = (v: unknown): string => {
     }
 };
 
-/** The log, one line per event that says something (deltas fold into their part's line). */
+/** The log, one line per event that says something (deltas fold into their part's line); a tool line names its call, and every line its time when the event has one (#1056). */
 export function eventLines(events: readonly AgentEvent[]): MockEvent[] {
     const out: MockEvent[] = [];
     const text = new Map<string, string>();
     const partSeq = new Map<string, number>();
+    const partAt = new Map<string, number | undefined>();
+    const line = (seq: number, kind: MockEvent['kind'], t: string, at: number | undefined, callId?: string): MockEvent => ({ seq, kind, text: t, ...(callId !== undefined ? { callId } : {}), ...(at !== undefined ? { at } : {}) });
     for (const ev of events) {
+        const at = eventTime(ev);
         switch (ev.type) {
             case 'part-start':
                 text.set(ev.partId, '');
                 partSeq.set(ev.partId, ev.seq);
+                partAt.set(ev.partId, at);
                 break;
             case 'part-delta':
                 text.set(ev.partId, (text.get(ev.partId) ?? '') + ev.delta);
                 break;
             case 'part-end': {
                 const t = text.get(ev.partId) ?? '';
-                if (t.trim()) out.push({ seq: partSeq.get(ev.partId) ?? ev.seq, kind: 'text', text: brief(t) });
+                if (t.trim()) out.push(line(partSeq.get(ev.partId) ?? ev.seq, 'text', brief(t), partAt.get(ev.partId) ?? at));
                 text.delete(ev.partId);
                 partSeq.delete(ev.partId);
+                partAt.delete(ev.partId);
                 break;
             }
             case 'tool-call':
-                out.push({ seq: ev.seq, kind: 'tool-call', text: `${ev.name} ${brief(ev.input)}`.trim() });
+                out.push(line(ev.seq, 'tool-call', `${ev.name} ${brief(ev.input)}`.trim(), at, ev.callId));
                 break;
             case 'tool-update':
-                out.push({ seq: ev.seq, kind: 'tool-result', text: ev.error ? `${ev.status} ${brief(ev.error)}` : ev.output !== undefined ? brief(ev.output) : ev.status });
+                out.push(line(ev.seq, 'tool-result', ev.error ? `${ev.status} ${brief(ev.error)}` : ev.output !== undefined ? brief(ev.output) : ev.status, at, ev.callId));
                 break;
             case 'request':
-                out.push({ seq: ev.seq, kind: 'request', text: `${ev.kind} ${ev.requestId}${ev.permissionKey ? ` ${ev.permissionKey}` : ''}` });
+                out.push(line(ev.seq, 'request', `${ev.kind} ${ev.requestId}${ev.permissionKey ? ` ${ev.permissionKey}` : ''}`, at));
                 break;
             case 'turn-end':
-                out.push({ seq: ev.seq, kind: 'turn-end', text: ev.error ? `${ev.stopReason} · ${ev.error.message}` : ev.stopReason });
+                out.push(line(ev.seq, 'turn-end', ev.error ? `${ev.stopReason} · ${ev.error.message}` : ev.stopReason, at));
                 break;
             case 'error':
-                out.push({ seq: ev.seq, kind: 'error', text: `${ev.code}: ${ev.message}` });
+                out.push(line(ev.seq, 'error', `${ev.code}: ${ev.message}`, at));
                 break;
             default:
                 break;
         }
     }
     // A part still streaming shows as it stands.
-    for (const [partId, t] of text) if (t.trim()) out.push({ seq: partSeq.get(partId) ?? 0, kind: 'text', text: brief(t) });
+    for (const [partId, t] of text) if (t.trim()) out.push(line(partSeq.get(partId) ?? 0, 'text', brief(t), partAt.get(partId)));
     return out.slice(-LOG_TAIL);
 }
 
