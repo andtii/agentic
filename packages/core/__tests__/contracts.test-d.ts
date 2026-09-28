@@ -1,5 +1,5 @@
 import { expectTypeOf } from 'vitest';
-import type { ConnectorToolDeclaration, PlatformConnectorCall, PlatformConnectorTools, AccountKey, AccountRef, AgentId, ChatEntry, ChatFile, ChatFileBody, ChatFilePart, ChatFileRead, ChatFileStore, ChatId, ChatRoster, DaemonBuild, DaemonFeature, DaemonFrame, ChangeSet, EnvErrorCode, EnvironmentInput, EnvOp, ExecutionDefaults, FileChangeStatus, FsErrorCode, FsOp, FsReadResult, FsResult, FsTreeResult, PromptPart, WorkspaceAnswer, WorkspaceSource, LoginPhase, MachineId, MachinePolicy, MachinePolicyErrorCode, MachinePolicyOp, OpenSpec, PlatformFrame, PluginKind, Principal, ProjectId, Proposal, QuotaAccount, ReleaseAsset, RuntimeDriver, RuntimeOpenContext, SessionClosedCode, TaskContract, TaskOrigin, TaskStatus, WaitReason } from '../src/index';
+import type { ConnectorToolDeclaration, PlatformConnectorCall, PlatformConnectorTools, AccountKey, AccountRef, AgentId, ChatEntry, ChatFile, ChatFileBody, ChatFilePart, ChatFileRead, ChatFileStore, ChatId, ChatRoster, DaemonBuild, DaemonFeature, DaemonFrame, ChangeSet, EnvErrorCode, EnvironmentInput, EnvOp, ExecutionDefaults, FileChangeStatus, FsErrorCode, FsOp, FsReadResult, FsResult, FsTreeResult, PromptPart, WorkspaceAnswer, WorkspaceSource, LoginPhase, MachineId, MachinePolicy, MachinePolicyErrorCode, MachinePolicyOp, OpenSpec, PlatformFrame, PluginKind, Principal, ProjectFeatureSessionInput, ProjectId, Proposal, QuotaAccount, ReleaseAsset, RuntimeDriver, RuntimeOpenContext, SessionClosedCode, TaskContract, TaskOrigin, TaskStatus, WaitReason } from '../src/index';
 import type { PluginManifest, PluginReadinessStatus, PluginToolDeclaration, ToolGrant, ToolMode } from '../src/index';
 import type { CONNECTOR_CALL_TOOL, CONNECTOR_TOOLS_TOOL, DAEMON_FRAME_TYPES, PLATFORM_FRAME_TYPES } from '../src/index';
 
@@ -16,6 +16,8 @@ describe('contract type tests', () => {
         expectTypeOf<Discriminant<ChatEntry, 't'>>().toEqualTypeOf<'msg' | 'member' | 'status' | 'coordinator' | 'rename'>();
         expectTypeOf<Extract<ChatEntry, { t: 'msg' }>['project']>().toEqualTypeOf<{ readonly id: ProjectId | null } | undefined>();
         expectTypeOf<TaskContract['projectId']>().toEqualTypeOf<ProjectId | undefined>();
+        expectTypeOf<TaskContract['planItem']>().toEqualTypeOf<number | undefined>();
+        expectTypeOf<ProjectFeatureSessionInput['planItem']>().toEqualTypeOf<number | undefined>();
         expectTypeOf<'project-feature'>().toMatchTypeOf<PluginKind>();
         expectTypeOf<Discriminant<Principal, 'kind'>>().toEqualTypeOf<'user' | 'machine' | 'agent' | 'external'>();
     });
