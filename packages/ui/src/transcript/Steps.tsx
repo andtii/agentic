@@ -10,7 +10,8 @@
  * reader's toggle wins from then on. Given `open`, the box is controlled: it shows `open` and asks
  * `onToggle` for the change, so the page can remember each turn's state for the chat.
  */
-import { component, type Define } from '@sigx/runtime-core';
+import { watch } from '@sigx/reactivity';
+import { component, onMounted, onUnmounted, type Define } from '@sigx/runtime-core';
 import { formatExcerptNote, formatStepSummary, summariseSteps, turnOpensItself, type TranscriptStep, type TurnSteps } from '@agentic/core';
 import { Icon } from '../kit/icons.js';
 import { followDisclosure } from '../thread/disclosure.js';
@@ -30,7 +31,10 @@ export type StepsProps =
     & Define.Prop<'onToggle', (open: boolean) => void, false>
     /** The `Full output` link of a failed step. */
     & Define.Prop<'fullHref', StepHrefFn, false>
-    /** The clock a running step's time counts against; `Date.now()` by default. */
+    /**
+     * The clock a running step's time counts against. Absent, the box keeps its own: it ticks once a
+     * second while a step runs (the way `LiveLine` does) and stops once none does.
+     */
     & Define.Prop<'now', number, false>;
 
 const StepLine = component<Define.Prop<'step', TranscriptStep, true> & Define.Prop<'fullHref', StepHrefFn, false> & Define.Prop<'now', number, false>>(({ props }) => () => {
@@ -63,8 +67,36 @@ const StepLine = component<Define.Prop<'step', TranscriptStep, true> & Define.Pr
     );
 }, { name: 'Steps.Step' });
 
-export const Steps = component<StepsProps>(({ props }) => {
+export const Steps = component<StepsProps>(({ props, signal }) => {
     const own = followDisclosure(() => turnOpensItself(props.steps));
+    const clock = signal({ now: Date.now() });
+    let timer: ReturnType<typeof setInterval> | undefined;
+    const stop = (): void => {
+        if (timer !== undefined) clearInterval(timer);
+        timer = undefined;
+    };
+    // Ticks only in the browser (mounted), only without a given `now`, and only while a step runs.
+    let mounted = false;
+    const running = (): boolean => props.now === undefined && props.steps.steps.some((s) => s.state === 'running');
+    const sync = (): void => {
+        if (!mounted || !running()) return stop();
+        if (timer !== undefined) return;
+        clock.now = Date.now();
+        timer = setInterval(() => {
+            clock.now = Date.now();
+        }, 1000);
+    };
+    onMounted(() => {
+        mounted = true;
+        sync();
+    });
+    const watching = watch(running, sync);
+    onUnmounted(() => {
+        mounted = false;
+        watching.stop();
+        stop();
+    });
+    const now = (): number => props.now ?? clock.now;
     const isOpen = (): boolean => props.open ?? own.open;
     const toggle = (): void => {
         const next = !isOpen();
@@ -90,7 +122,7 @@ export const Steps = component<StepsProps>(({ props }) => {
                 {open && (
                     <ol data-scope={SCOPE} data-part="list" id={id}>
                         {steps.steps.map((step) => (
-                            <StepLine key={step.id} step={step} fullHref={props.fullHref} now={props.now} />
+                            <StepLine key={step.id} step={step} fullHref={props.fullHref} now={now()} />
                         ))}
                     </ol>
                 )}
