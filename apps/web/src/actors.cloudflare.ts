@@ -29,6 +29,7 @@ import { closeOrphanedLiveSockets } from './actors/hibernation';
 import type { ActorDefs } from './actors/defs';
 import type { AuthWiring } from './auth';
 import { actorKeyOfObject, createDaemonSocketHost, createDaemonSocketRegistry, forwardDaemonSocket, DAEMON_SOCKET_PREFIX } from './daemon';
+import { createExportHandler, createExportRoute, type ExportNamespace } from './export';
 import { createPurgeHandler, durableObjectWorkspaceStore, r2ArtifactSink, type R2BucketLike } from './retention';
 import { runWithHost } from './host-scope';
 import { observeSlowTurns } from './actors/slow-turns';
@@ -155,6 +156,7 @@ export function createActorHost(actors: readonly AnyActorDefinition[] = defaultA
     return class ActorHost extends Base {
         readonly #daemon;
         readonly #purge;
+        readonly #export;
         readonly #orphans;
         constructor(state: DurableObjectStateLike, env: PlatformEnv) {
             ensureServerApp(env, actors);
@@ -165,6 +167,7 @@ export function createActorHost(actors: readonly AnyActorDefinition[] = defaultA
             if (own?.type === 'machine') daemonSockets.bind(own.key, state);
             this.#daemon = createDaemonSocketHost({ state, host: () => this.host(), machine: Machine, registry: daemonSockets });
             this.#purge = createPurgeHandler({ state, host: () => this.host(), own, secret: () => secrets.sessionSecret });
+            this.#export = createExportHandler({ state, secret: () => secrets.sessionSecret });
         }
         /** The running host, with the slow-turn log attached (#492) — once; the base memoizes the host. */
         override async host(): Promise<Host> {
@@ -173,6 +176,9 @@ export function createActorHost(actors: readonly AnyActorDefinition[] = defaultA
             return host;
         }
         override async fetch(request: Request): Promise<Response> {
+            // The export (#994) reads storage only — answered before the host boots, so nothing activates.
+            const exported = this.#export.fetch(request);
+            if (exported) return exported;
             const host = await this.host();
             return runWithHost(host, () => this.#purge.fetch(request) ?? this.#daemon.fetch(request) ?? super.fetch(request));
         }
@@ -259,6 +265,9 @@ export function createActorWorker(options: ActorWorkerOptions = {}) {
                 ensureServerApp(env, actors);
                 return forwardDaemonSocket(request, env.ACTORS);
             }
+            // The state export (#994): fanned out to the listed objects, before (and without) the Worker host.
+            const exported = createExportRoute({ namespace: () => env.ACTORS as ExportNamespace, bucket: () => env.ARTIFACTS, secret: () => sessionSecretOf(env.SESSION_SECRET) }).fetch(request);
+            if (exported) return exported;
             return (await boot(env))(request);
         }
     };
