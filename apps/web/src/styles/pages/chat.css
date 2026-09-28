@@ -172,6 +172,19 @@
 [data-context-drawer] [data-chat-context] { border: 0; padding: 0; }
 [data-chat-summary] { color: var(--color-warning); }
 
+/* ---- the chat's header (#1058; chat-modes ChatFocus): title, the rule's note, then VIEW and DETAIL ---- */
+[data-chat-head] { flex: none; display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: var(--space-md) var(--space-xl); padding: var(--space-xl) var(--space-2xl) var(--space-lg); border-block-end: var(--border) solid var(--ag-line); min-inline-size: 0; }
+[data-chat-head-text] { display: flex; flex-direction: column; gap: var(--space-2xs); flex: 1 1 240px; min-inline-size: 0; }
+[data-chat-head-title] { font-size: var(--text-lg); font-weight: var(--weight-semibold); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+[data-chat-view-note] { margin: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-sm); font-size: var(--text-sm); color: var(--ag-text-dim); }
+[data-chat-view-auto] { appearance: none; border: 0; background: none; padding: 0; font: inherit; color: var(--color-primary); text-decoration: underline; cursor: pointer; }
+[data-chat-view-auto]:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+[data-chat-head-controls] { display: flex; flex-wrap: wrap; gap: var(--space-md) var(--space-lg); min-inline-size: 0; }
+[data-chat-control] { display: flex; flex-direction: column; gap: var(--space-2xs); min-inline-size: 0; }
+[data-chat-control-label] { font-family: var(--font-mono); font-size: var(--text-xs); letter-spacing: 0.06em; text-transform: uppercase; color: var(--ag-text-dim); }
+/* the live line under the last turn: the thread row's width */
+[data-chat-live] { min-inline-size: 0; }
+
 @media (--below-xl) {
     [data-scope="button"].ag-chat-tasks { display: inline-flex; }
     /* Chat keeps list + thread; the context panel sits behind the tasks button */
@@ -186,4 +199,6 @@
     [data-page="chat"] > [data-chat-list] { display: none; }
     [data-chat-composer] { padding: 0; }
     [data-chat-empty] { padding: var(--space-lg); }
+    [data-chat-head] { padding: var(--space-md) var(--space-lg); gap: var(--space-sm) var(--space-md); }
+    [data-chat-head-title] { display: none; }
 }

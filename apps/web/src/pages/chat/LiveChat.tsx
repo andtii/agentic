@@ -42,8 +42,8 @@ import { Drawer } from '@sigx/zero';
 import { createId, isChatFilePart, sessionFileUri, type AgentId, type ChatFilePart, type ChatId, type MachineId, type ProjectId, type ProjectRequest, type PromptPart, type SessionOptionsPatch, type TaskId, type WorkdirRef } from '@agentic/core';
 import { acrossProjects, activeIn, bringInVisitors, visitingManagers, visitorOf, visitorsIn, type IndexedEntry } from '@agentic/platform';
 import type { Decision, ToolPartState } from '@sigx/ai-agent';
-import type { AgentMessage } from '@sigx/ai-agent/app';
-import { Composer, ConfirmDialog, EmptyState, ErrorNote, NOBODY_HINT, Thread, prepareImage, type ComposerInsert, type Mention, type MessageAuthor, type RespondOptions, type ThreadInsert } from '@agentic/ui';
+import type { AgentMessage, AgentTranscript } from '@sigx/ai-agent/app';
+import { Composer, ConfirmDialog, EmptyState, ErrorNote, NOBODY_HINT, prepareImage, type ComposerInsert, type Mention, type MessageAuthor, type RespondOptions, type ThreadInsert } from '@agentic/ui';
 import { Page } from '../../components/Page';
 import { baseTurnId, capacityWaitText, FailureNotice, interruptionOf, machineOfflineText, useInterruptionReads } from '../../components/status';
 import { useActorDefs, useViewer } from '../../actors/defs';
@@ -61,7 +61,14 @@ import { useAgentDirectory } from './directory';
 import { openFeed, type FeedHandle } from './feeds';
 import { chatHref, chatIdOfRoute, chatRedirect } from './href';
 import { chatHead, chatSearchRequest, chatSettingsRequest, closeChatSearch, closeChatSettings, closeNewChat, newChatRequest, openNewChat } from './head';
-import { answerRequest, chatFailure, type InterruptionOfTurn, chatTasks, chatTitle, chatTranscript, chatWaitsOf, composeTranscript, detachedQuestions, entryTranscript, keepEntries, lastOf, membersOf, mentionsIn, notStoppedLine, queuedAgents, runActivation, stopTargets, waitingAgents, workingAgents, type SessionActorClient } from './live';
+import { answerRequest, chatFailure, type InterruptionOfTurn, chatTasks, chatTitle, chatTranscript, chatWaitsOf, composeTranscript, detachedQuestions, entryTranscript, keepEntries, lastOf, membersOf, mentionsIn, notStoppedLine, queuedAgents, runActivation, sessionMidTurn, stopTargets, waitingAgents, workingAgents, type SessionActorClient } from './live';
+import { CHAT_VIEWS, FollowPanel, type ChatViewModel } from './views';
+import { useChatView } from './views/controller';
+import { liveWorkOf, type TimedFeed } from './views/live-work';
+import { agentsAtWork } from './views/pick';
+import { foldSession, withRawTurns } from './views/raw';
+import { stepHrefOf } from './views/step-href';
+import { ViewHeader } from './views/ViewHeader';
 import { LiveChatList, archiveChat, createChatWith } from './LiveChats';
 import { queryOf } from '../session/files';
 import { fileToken, fileTokensIn, mentionOfQuery, viewDiffLinks } from '../session/references';
@@ -124,6 +131,18 @@ export const LiveChat = component<{ id: string; projectId?: string }>(({ props }
     const transcript = signal(chatTranscript('chat'));
     const authors = signal<{ value: Record<string, MessageAuthor> }>({ value: {} });
     const feeds = signal<{ list: FeedHandle[] }>({ list: [] });
+    // The view and detail (#1058): the agents at work are the working, the waiting and the ones whose feed is mid-turn.
+    const chatView = useChatView({
+        ws: () => viewer.workspaceId ?? null,
+        chatId: props.id,
+        working: () => agentsAtWork(workingAgents(index.value ?? [], props.id), waitingAgents(kept.list), feeds.list.filter((f) => sessionMidTurn(f.transcript)).map((f) => f.agentId)).size
+    });
+    // Raw on a finished turn (#1058): each session's log read once, while Raw is on, folded for the turns' calls.
+    const raw = signal<{ on: boolean; folded: Record<string, AgentTranscript>; asked: string[] }>({ on: false, folded: {}, asked: [] });
+    // Who is followed (#1060 fills the panel): the page keeps the context panel while nobody is.
+    const follow = signal<{ agentId: string | null }>({ agentId: null });
+    // When the page first saw each session mid-turn: the live line's clock when its feed did not see the turn start.
+    const firstSeen = new Map<string, number>();
     // This chat's requests to each visiting manager's project (#762), as the request cards read them live.
     const sentFrom = signal<{ value: Readonly<Record<string, readonly ProjectRequest[]>> }>({ value: {} });
     const reportRequests = (projectId: ProjectId, list: readonly ProjectRequest[]): void => {
@@ -225,6 +244,25 @@ export const LiveChat = component<{ id: string; projectId?: string }>(({ props }
         }
     };
 
+    /** The session each agent message's turn ran in, by message id — what Raw reads a finished turn back from. */
+    const sessionOfEntry = (): Map<string, string> => new Map(kept.list.flatMap(({ entry }) => (entry.t === 'msg' && entry.author.kind === 'agent' && entry.author.sessionId && entry.steps ? [[entry.id as string, entry.author.sessionId as string] as const] : [])));
+    onMounted(() => {
+        const stopRaw = effect(() => {
+            const ws = viewer.workspaceId;
+            if (!ws || !raw.on) return;
+            for (const sessionId of new Set(sessionOfEntry().values())) {
+                if (raw.asked.includes(sessionId)) continue;
+                raw.asked = [...raw.asked, sessionId];
+                void actor(defs.Session, sessionKeyOf(ws, sessionId)).events().then(
+                    (events) => { raw.folded = { ...raw.folded, [sessionId]: foldSession(sessionId, events) }; },
+                    // A session the platform no longer holds: its turns keep their steps summary.
+                    () => undefined
+                );
+            }
+        });
+        onUnmounted(stopRaw);
+    });
+
     // The feeds follow `sessions` (#392): opened on the client only (a server render tails nothing), closed when a session leaves the chat or the page unmounts.
     onMounted(() => {
         const stop = effect(() => {
@@ -250,9 +288,19 @@ export const LiveChat = component<{ id: string; projectId?: string }>(({ props }
         onUnmounted(stopSeen);
     });
 
+    // Raw on or off, as its own flag: the thread recomposes when it flips, not whenever the pick's inputs move.
+    const stopRawFlag = effect(() => {
+        const on = chatView.detail() === 'raw';
+        if (raw.on !== on) raw.on = on;
+    });
+    onUnmounted(stopRawFlag);
     // The thread's one transcript: the chat's rows plus every feed's in-flight rows, recomposed as either side changes.
     const stopCompose = effect(() => {
-        const entries = entryTranscript(kept.list, directory.lookup, YOU, time, interruptionOfTurn);
+        let entries = entryTranscript(kept.list, directory.lookup, YOU, time, interruptionOfTurn);
+        if (raw.on) {
+            const sessions = sessionOfEntry();
+            entries = { ...entries, messages: withRawTurns(entries.messages, (m) => sessions.get(m.id), raw.folded) };
+        }
         authors.value = composeTranscript(transcript, entries, feeds.list, directory.lookup);
     });
     onUnmounted(stopCompose);
@@ -584,31 +632,65 @@ export const LiveChat = component<{ id: string; projectId?: string }>(({ props }
         const slotEnv = slotView?.environments.find((e) => e.id === slot?.wait.environmentId);
         const empty = transcript.messages.length === 0;
         const loading = summary.loading && !s;
+        const pick = chatView.pick();
+        const detail = chatView.detail();
+        const now = Date.now();
+        const timed: TimedFeed[] = feeds.list.map((f) => {
+            if (!sessionMidTurn(f.transcript)) {
+                firstSeen.delete(f.sessionId);
+                return f;
+            }
+            if (!firstSeen.has(f.sessionId)) firstSeen.set(f.sessionId, now);
+            return { sessionId: f.sessionId, agentId: f.agentId, transcript: f.transcript, turnStartedAt: f.turnStartedAt ?? firstSeen.get(f.sessionId)! };
+        });
+        const model: ChatViewModel = {
+            chatId: props.id,
+            thread: {
+                transcript,
+                describe,
+                inserts,
+                toolLinks,
+                pullLinks: chatPullLinks(s?.projectId),
+                hasEarlier: older.next !== null && older.next !== undefined,
+                onEarlier: () => { void loadOlder(); },
+                onRespond: respond,
+                describeRequest: (r) => {
+                    const feed = feeds.list.find((f) => f.transcript.requests[r.requestId]);
+                    if (!feed) return undefined;
+                    const who = directory.lookup(feed.agentId);
+                    return { requestedBy: { name: who.name, hue: who.hue } };
+                }
+            },
+            detail,
+            stepsOpen: chatView.stepsOpen,
+            onStepsToggle: chatView.onStepsToggle,
+            stepHref: stepHrefOf((agentId) => s?.sessions?.[agentId]?.sessionId),
+            // Stop on a live line (#1058): the turn cancelled through the member's feed client (`Session.cancel`).
+            live: liveWorkOf(timed, directory.lookup, now, (f) => {
+                const client = feeds.list.find((x) => x.sessionId === f.sessionId)?.client();
+                if (client) void client.cancel().catch(fail);
+                else void session(f.sessionId).cancel().catch(fail);
+            }),
+            members,
+            lookup: directory.lookup,
+            feeds: feeds.list,
+            ...(s?.coordinator ? { coordinator: s.coordinator } : {}),
+            followed: follow.agentId,
+            onFollow: (agentId) => { follow.agentId = agentId; }
+        };
+        const View = CHAT_VIEWS[pick.view];
+        const followedFeed = follow.agentId ? feeds.list.find((f) => f.agentId === follow.agentId) : undefined;
         return (
             <Page title={chat.title} page="chat" hideTitle flush>
                 {/* Inside a project (#929) the project's menu is the way back to its chats: no global list column. */}
                 {props.projectId ? null : <LiveChatList currentId={props.id} directory={directory} onNewChat={openNewChat} />}
-                <section data-chat-main aria-label="Conversation" aria-busy={loading ? 'true' : undefined}>
+                <section data-chat-main aria-label="Conversation" aria-busy={loading ? 'true' : undefined} ref={chatView.mainRef}>
+                    {s ? <ViewHeader title={chat.title} pick={pick} detail={detail} narrow={chatView.narrow()} onView={chatView.choose} onDetail={chatView.chooseDetail} /> : null}
                     {chatSearchRequest.open && s ? <ChatSearchPanel search={search} lookup={directory.lookup} time={time} onClose={closeChatSearch} /> : null}
                     {empty
                         ? <div data-chat-empty><EmptyState variant="chat" /></div>
                         : (
-                            <Thread
-                                transcript={transcript}
-                                describe={describe}
-                                inserts={inserts}
-                                toolLinks={toolLinks}
-                                pullLinks={chatPullLinks(s?.projectId)}
-                                hasEarlier={older.next !== null && older.next !== undefined}
-                                onEarlier={() => { void loadOlder(); }}
-                                onRespond={respond}
-                                describeRequest={(r) => {
-                                    const feed = feeds.list.find((f) => f.transcript.requests[r.requestId]);
-                                    if (!feed) return undefined;
-                                    const who = directory.lookup(feed.agentId);
-                                    return { requestedBy: { name: who.name, hue: who.hue } };
-                                }}
-                            />
+                            <View view={model} />
                         )}
                     {viewer.workspaceId && s?.projectId ? visitors.map((v) => (
                         <ChatRequestsFrom key={v.projectId} workspaceId={viewer.workspaceId!} chatId={props.id} chatProjectId={s.projectId!} {...(project ? { homeProjectName: project.name } : {})} projectId={v.projectId} projectName={v.projectName} managerName={directory.lookup(v.agentId).name} time={time} onRequests={reportRequests} headless />
@@ -663,7 +745,9 @@ export const LiveChat = component<{ id: string; projectId?: string }>(({ props }
                         />
                     </div>
                 </section>
-                <ContextPanel chat={chat} tasks={tasks} lookup={directory.lookup} candidates={candidates} time={time} onAddAgent={(e) => addAgent(e.agentId, e.access)} onStopChain={() => { void stopChain(); }} environments={workdirs.list()} machineOf={workdirs.machineOf} project={project} {...(machineName ? { machineName } : {})} hosted={workdirs.hosted} machines={workdirs.machines()} accountEnvironment={workdirs.accountEnvironment} onSetWorkdir={(e) => setWorkdir(e.agentId, e.ref)} onResetSession={(e) => { void resetSession(e.agentId); }} onSetOptions={(e) => setOptions(e.agentId, e.patch)} visitorOf={visitorOfMember} across={across} chips={context.chips()} onInsertRef={insertRef} />
+                {follow.agentId
+                    ? <FollowPanel follow={{ agentId: follow.agentId, ...(followedFeed ? { feed: followedFeed } : {}), view: model, onClose: () => { follow.agentId = null; }, onMessage: (agentId) => { mention.insert = { id: `follow-${++mentionSeq}`, text: `@${directory.lookup(agentId).name} ` }; } }} />
+                    : <ContextPanel chat={chat} tasks={tasks} lookup={directory.lookup} candidates={candidates} time={time} onAddAgent={(e) => addAgent(e.agentId, e.access)} onStopChain={() => { void stopChain(); }} environments={workdirs.list()} machineOf={workdirs.machineOf} project={project} {...(machineName ? { machineName } : {})} hosted={workdirs.hosted} machines={workdirs.machines()} accountEnvironment={workdirs.accountEnvironment} onSetWorkdir={(e) => setWorkdir(e.agentId, e.ref)} onResetSession={(e) => { void resetSession(e.agentId); }} onSetOptions={(e) => setOptions(e.agentId, e.patch)} visitorOf={visitorOfMember} across={across} chips={context.chips()} onInsertRef={insertRef} />}
                 <Drawer.Root model={() => contextDrawer.open} placement="end" label="Members and tasks" onOpenChange={(open: boolean) => { if (!open) closeContextDrawer(); }}>
                     <Drawer.Panel>
                         <div data-context-drawer>

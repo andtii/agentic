@@ -14,6 +14,7 @@ import { createTranscript } from '@sigx/ai-agent';
 import type { AgentTranscript, OpenRequest, ToolPartState } from '@sigx/ai-agent/app';
 import type { AgentHue, ApprovalContext, EnvironmentParts, MessageAuthor, Recipient } from '@agentic/ui';
 import { interruptionLine, type Interruption } from '../components/status/interruption';
+import { MODE_CHATS, modeChatView, type MockLiveWork } from './chat-modes';
 
 /** The workspace clock: every mock time is relative to this instant, so ages are stable. */
 export const MOCK_NOW = Date.parse('2026-09-17T12:16:00Z');
@@ -321,7 +322,7 @@ export const PROJECT_CHATS: readonly MockProjectChat[] = [
     { id: 'pc11', title: 'Lunch spots near the office', speaker: 'atlas', lastLine: 'The ramen place opens at 11.', members: pcMembers(['atlas'], 'atlas', 'idle', 'atlas'), unread: 0, waiting: false, updatedAt: minutesAgo(400) }
 ];
 
-export const chatSummary = (id: string): MockChatSummary | undefined => CHATS.find((c) => c.id === id) ?? PROJECT_CHATS.find((c) => c.id === id);
+export const chatSummary = (id: string): MockChatSummary | undefined => CHATS.find((c) => c.id === id) ?? PROJECT_CHATS.find((c) => c.id === id) ?? MODE_CHATS.find((c) => c.id === id);
 
 /** The transcript view of a chat: the messages, who wrote each, what each tool call's meta is, and the approval context. */
 export interface MockChatView {
@@ -333,6 +334,10 @@ export interface MockChatView {
     readonly tasks: readonly MockTaskRow[];
     /** The session log the thread's long outputs link to. */
     readonly logHref?: string;
+    /** The agents at work now (#1058): the live lines under the last turn. */
+    readonly live?: readonly MockLiveWork[];
+    /** A finished turn's calls, by message, as the Raw detail reads them back from the Session (#1058). */
+    readonly raw?: Readonly<Record<string, readonly ToolPartState[]>>;
 }
 
 const tool = (callId: string, name: string, input: unknown, extra: Partial<ToolPartState> = {}): ToolPartState => ({ type: 'tool', callId, name, status: 'completed', input, ...extra });
@@ -685,6 +690,9 @@ export function loadChat(id: string): MockChatView | undefined {
         default: {
             const pc = PROJECT_CHATS.find((c) => c.id === id);
             if (pc) return { chat, tasks, ...projectChatTranscript(pc) };
+            // The chat-modes samples (#1058, `chat-modes.ts`).
+            const modes = modeChatView(id);
+            if (modes) return { chat, tasks, ...modes };
             return { chat, tasks, ...plainTranscript(id, chat.members[0]?.agentId ?? 'atlas', 0, '') };
         }
     }

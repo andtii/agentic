@@ -1,10 +1,13 @@
-import { describe, it, expect } from 'vitest';
+import { afterEach, describe, it, expect } from 'vitest';
 import { NOBODY_HINT } from '@agentic/ui';
 import { CHATS, loadChat, mentionedIn, resolveAddressing, type MockChatMember } from '../../src/mock/workspace';
 import { topbarFor } from '../../src/components/topbar';
 import { mountRoute, page, all, texts } from './mount';
+import { clearViewPrefs, saveDetail } from './chat-view-prefs';
 
 const member = (agentId: string, coordinator = false): MockChatMember => ({ agentId, status: 'idle', coordinator, history: { access: 'all' } });
+
+afterEach(clearViewPrefs);
 
 describe('/chats/:id (Chat)', () => {
     it('renders the three columns flush: chat list, conversation, members and tasks', async () => {
@@ -21,6 +24,8 @@ describe('/chats/:id (Chat)', () => {
     });
 
     it('renders the transcript with attribution, tool cards with meta, the approval card with context rows, and the streaming pill', async () => {
+        // Three agents at work: the chat picks Team, whose default detail (Messages) folds the tool cards away (#1058).
+        saveDetail('c1', 'raw');
         const dom = await mountRoute('/chats/c1');
         expect(texts(all(dom, 'ai-message', 'name'))).toEqual(['Andii', 'Atlas', 'Forge', 'Lint']);
         expect(all(dom, 'ai-message', 'environment').length).toBe(3);

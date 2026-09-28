@@ -4,7 +4,7 @@ import { Link, useRoute, useRouter } from '@sigx/router';
 import type { ToolPartState } from '@sigx/ai-agent';
 import { Drawer } from '@sigx/zero';
 import { visitingManagers } from '@agentic/platform';
-import { Button, Composer, EmptyState, NOBODY_HINT, Tag, Thread, type ComposerInsert, type Mention, type RefSource } from '@agentic/ui';
+import { Button, Composer, EmptyState, NOBODY_HINT, Tag, type ComposerInsert, type Mention, type RefSource } from '@agentic/ui';
 import { Page } from '../components/Page';
 import { defineTopbar, routeId, type TopbarContribution } from '../components/topbar';
 import { mockChatPosts } from '../mock/chat-posts';
@@ -22,6 +22,10 @@ import { chatIdOfRoute, chatRedirect } from './chat/href';
 import { lookupOver, type AgentLookup } from './chat/live';
 import { chatAddressing, chatRefSources, chipPrefixes, contextChips, type ChatFeatureView } from './chat/project-context';
 import { LiveChat } from './chat/LiveChat';
+import { CHAT_VIEWS, FollowPanel, type ChatViewModel, type LiveWork } from './chat/views';
+import { useChatView } from './chat/views/controller';
+import { stepHrefOf } from './chat/views/step-href';
+import { ViewHeader } from './chat/views/ViewHeader';
 import { chatPullLinks } from './projects/work/pull/links';
 import { mockWorkdirEnvironments } from './workdir/environments';
 import { queryOf } from './session/files';
@@ -102,7 +106,9 @@ defineTopbar('chat', (route) => chatTopbar(routeId(route)));
 export const ChatScreen = component<{ id: string; projectId?: string }>(({ props }) => {
     const route = useRoute();
     const chats = loadChats();
-    const st = signal({ draft: '' });
+    const st = signal({ draft: '', stopped: [] as string[], followed: null as string | null });
+    // When the page opened: the sample live lines count their time from it.
+    const openedAt = Date.now();
     // Folders picked on the mock page: kept for the visit, like its composer.
     const folders = signal<{ value: Record<string, WorkdirRef | null> }>({ value: {} });
     const view = () => {
@@ -122,6 +128,22 @@ export const ChatScreen = component<{ id: string; projectId?: string }>(({ props
         }
         return { ...v, authors, chat: { ...v.chat, members } };
     };
+    /** The sample agents at work (#1058): the chat's live lines, less the ones stopped on this visit. */
+    const liveOf = (v: NonNullable<ReturnType<typeof view>>): LiveWork[] => (v.live ?? []).filter((w) => !st.stopped.includes(w.agentId)).map((w) => {
+        const a = agentNamed(w.agentId);
+        return { agentId: w.agentId, name: a.name, hue: a.hue, step: w.step, startedAt: openedAt - w.seconds * 1000, onStop: () => { st.stopped = [...st.stopped, w.agentId]; } };
+    });
+    // The view and detail (#1058): working and waiting members, plus a live line, count as at work.
+    const chatView = useChatView({
+        ws: () => USER.workspace,
+        chatId: props.id,
+        working: () => {
+            const v = loadChat(props.id);
+            if (!v) return 0;
+            const busy = v.chat.members.filter((m) => m.status === 'active' || m.status === 'waiting').map((m) => m.agentId);
+            return new Set([...busy, ...(v.live ?? []).filter((w) => !st.stopped.includes(w.agentId)).map((w) => w.agentId)]).size;
+        }
+    });
     // "Mention in chat" (#565): `?file=` puts `@file:<path>` into the composer once.
     const router = useRouter();
     const mention = signal<{ insert: ComposerInsert | null }>({ insert: null });
@@ -183,24 +205,46 @@ export const ChatScreen = component<{ id: string; projectId?: string }>(({ props
         }
         const empty = v.transcript.messages.length === 0;
         const project = v.chat.projectId ? projectNamed(v.chat.projectId) : undefined;
+        const pick = chatView.pick();
+        const detail = chatView.detail();
+        // Raw (#1058): a finished turn shows the calls it made, as the Session holds them.
+        if (detail === 'raw' && v.raw) v.transcript.messages = v.transcript.messages.map((m) => (v.raw![m.id] ? { ...m, parts: [...v.raw![m.id]!, ...m.parts] } : m));
+        const actorOf = new Map(v.transcript.messages.flatMap((m) => (m.actor ? m.parts.flatMap((p) => (p.type === 'tool' ? [[p.callId, m.actor!] as const] : [])) : [])));
+        const model: ChatViewModel = {
+            chatId: v.chat.id,
+            thread: {
+                transcript: v.transcript,
+                describe: (m) => v.authors[m.id],
+                toolMeta: (p) => v.toolMeta[p.callId],
+                toolLinks: toolLinks(v.chat.id, actorOf),
+                pullLinks: chatPullLinks(v.chat.projectId),
+                describeRequest: (r) => v.approvals[r.requestId],
+                ...(v.logHref ? { logHref: v.logHref } : {}),
+                onRespond: () => undefined
+            },
+            detail,
+            stepsOpen: chatView.stepsOpen,
+            onStepsToggle: chatView.onStepsToggle,
+            stepHref: stepHrefOf((agentId) => chatSessionOf(v.chat.id, agentId)?.id),
+            live: liveOf(v),
+            members: v.chat.members,
+            lookup: mockLookup,
+            feeds: [],
+            ...(v.chat.members.find((m) => m.coordinator) ? { coordinator: v.chat.members.find((m) => m.coordinator)!.agentId } : {}),
+            followed: st.followed,
+            onFollow: (agentId) => { st.followed = agentId; }
+        };
+        const View = CHAT_VIEWS[pick.view];
         return (
             <Page title={v.chat.title} page="chat" hideTitle flush>
                 {/* Inside a project (#929) the project's menu is the way back to its chats: no global list column. */}
                 {props.projectId ? null : <ChatList chats={chats} currentId={v.chat.id} projects={PROJECTS} />}
-                <section data-chat-main aria-label="Conversation">
+                <section data-chat-main aria-label="Conversation" ref={chatView.mainRef}>
+                    <ViewHeader title={v.chat.title} pick={pick} detail={detail} narrow={chatView.narrow()} onView={chatView.choose} onDetail={chatView.chooseDetail} />
                     {empty
                         ? <div data-chat-empty><EmptyState variant="chat" /></div>
                         : (
-                            <Thread
-                                transcript={v.transcript}
-                                describe={(m) => v.authors[m.id]}
-                                toolMeta={(p) => v.toolMeta[p.callId]}
-                                toolLinks={toolLinks(v.chat.id, new Map(v.transcript.messages.flatMap((m) => (m.actor ? m.parts.flatMap((p) => (p.type === 'tool' ? [[p.callId, m.actor!] as const] : [])) : []))))}
-                                pullLinks={chatPullLinks(v.chat.projectId)}
-                                describeRequest={(r) => v.approvals[r.requestId]}
-                                logHref={v.logHref}
-                                onRespond={() => undefined}
-                            />
+                            <View view={model} />
                         )}
                     <div data-chat-composer onInput={(e: Event) => { st.draft = (e.target as HTMLTextAreaElement).value ?? ''; }}>
                         <Composer
@@ -215,7 +259,9 @@ export const ChatScreen = component<{ id: string; projectId?: string }>(({ props
                         />
                     </div>
                 </section>
-                <ContextPanel chat={v.chat} tasks={v.tasks} environments={mockWorkdirEnvironments.list()} machines={mockWorkdirEnvironments.machines()} project={project} onSetWorkdir={setWorkdir} />
+                {st.followed
+                    ? <FollowPanel follow={{ agentId: st.followed, view: model, onClose: () => { st.followed = null; }, onMessage: (agentId) => { mention.insert = { id: ++mentionSeq, text: `@${agentNamed(agentId).name} ` }; } }} />
+                    : <ContextPanel chat={v.chat} tasks={v.tasks} environments={mockWorkdirEnvironments.list()} machines={mockWorkdirEnvironments.machines()} project={project} onSetWorkdir={setWorkdir} />}
                 <Drawer.Root model={() => contextDrawer.open} placement="end" label="Members and tasks" onOpenChange={(open: boolean) => { if (!open) closeContextDrawer(); }}>
                     <Drawer.Panel>
                         <div data-context-drawer>
