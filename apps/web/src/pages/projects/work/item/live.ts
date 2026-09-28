@@ -13,7 +13,7 @@ import { featuresOf, planItemsOf, projectTasks, useFeatureUi, usePlans, usePulls
 import { workItemsOf } from '../model';
 import type { WorkAgentLookup } from '../WorkView';
 import type { WorkItemDetail, WorkItemPlan } from './model';
-import { liveWorkActions, type WorkActions } from '../actions';
+import { livePlanItemWrites, liveWorkActions, type PlanItemWrites, type WorkActions } from '../actions';
 
 /** A TaskIndex row as far as the page reads it. */
 export type WorkItemTaskRow = Pick<TaskIndexRow, 'id' | 'objective' | 'status' | 'assignee' | 'chatId' | 'sessionId'>;
@@ -70,6 +70,8 @@ export interface LiveWorkItems {
     readonly agentOf: WorkAgentLookup;
     /** The task's Retry, Dismiss and Stop (#1040), as on its Work row; absent until the workspace is known. */
     readonly actions?: WorkActions;
+    /** A plan item's Reopen, Reassign and Drop (#1041), as on its Work row. */
+    readonly planWrites?: PlanItemWrites;
     readonly loading: boolean;
 }
 
@@ -88,7 +90,7 @@ export function useLiveWorkItems(project: () => ProjectRecord): LiveWorkItems {
     const plans = usePlans(() => project().id, { defs, viewer });
     const pulls = usePulls(() => project().id);
     return {
-        ...(viewer.workspaceId ? { actions: liveWorkActions(defs, viewer.workspaceId, directory.lookup) } : {}),
+        ...(viewer.workspaceId ? { actions: liveWorkActions(defs, viewer.workspaceId, directory.lookup), planWrites: livePlanItemWrites(defs, viewer.workspaceId, () => project().id) } : {}),
         details: () => {
             // The project read on every call: the route may move to another one while the page stays mounted.
             const p = project();

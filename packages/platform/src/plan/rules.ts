@@ -13,9 +13,12 @@
  * - **Touches**: claiming an item whose paths overlap a live claim of another agent warns both agents and
  *   suggests an order (the item already being worked first).
  * - **Done**: when every done-when line is ticked, or a person marks it.
+ * - **Dropped** (#1041): the manager or a person drops an item that will not be carried out, with a note and
+ *   optionally the item that supersedes it. Terminal like done but not done: items `after` it stay blocked, and the
+ *   manager is told which ones to relink. It leaves every queue and the Work view; setting it `ready` reopens it.
  * - Every change adds a line to the item's activity and yields an audit record with its actor (History).
  *
- * A stored item is `ready`, `claimed`, `needs-you`, `stuck` or `done`; `blocked` is derived for the view from
+ * A stored item is `ready`, `claimed`, `needs-you`, `stuck`, `done` or `dropped`; `blocked` is derived for the view from
  * its unfinished `after` items. Errors are `PlanRuleError`s carrying the HTTP status the actor answers with.
  */
 import {
@@ -32,6 +35,7 @@ import {
     type PlanAsk,
     type PlanClaim,
     type PlanDoneWhen,
+    type PlanDrop,
     type PlanItem,
     type PlanItemState,
     type PlanOption,
@@ -107,6 +111,8 @@ export interface StoredItem {
     options?: PlanOption[];
     /** While `needs-you`: who asked what (#1043), so an `answer` goes back to them. */
     ask?: PlanAsk;
+    /** While `dropped` (#1041): who dropped it, why, and what supersedes it. */
+    dropped?: PlanDrop;
     createdAt: number;
     updatedAt: number;
 }
@@ -132,13 +138,14 @@ export interface StoredPlan {
  * or (`ready`, #981) an idle agent's queue has an item it can claim now. The manager also hears (#982) when an item is
  * `done`, set to `needs-you`, when a member goes `idle` (no claim, empty queue) and when one has `stalled` (ready work
  * at the head of its queue, unclaimed for longer than the lease). The agent that asked a person hears the `answer`, and
- * an agent a note names hears the `mention` (#1043).
+ * an agent a note names hears the `mention` (#1043). When someone else drops an item (`dropped`, #1041) the manager hears
+ * which items wait on it, so it relinks them.
  */
 export interface PlanNotice {
     readonly seq: number;
     readonly at: number;
     readonly to: PlanActor;
-    readonly kind: 'lease-expired' | 'touches' | 'handoff' | 'reassigned' | 'ready' | 'done' | 'needs-you' | 'idle' | 'stalled' | 'answer' | 'mention';
+    readonly kind: 'lease-expired' | 'touches' | 'handoff' | 'reassigned' | 'ready' | 'done' | 'needs-you' | 'idle' | 'stalled' | 'answer' | 'mention' | 'dropped';
     readonly itemId: number;
     readonly text: string;
     /** `touches`: the other item and the suggested order (first to last). */
@@ -252,7 +259,7 @@ export interface PlanChange {
     readonly summary: string;
 }
 
-export type PlanOp = 'plan-created' | 'phase-added' | 'items-added' | 'split' | 'assigned' | 'claimed' | 'released' | 'updated' | 'ticked' | 'noted' | 'ref-added' | 'handed-off' | 'done' | 'lease-expired';
+export type PlanOp = 'plan-created' | 'phase-added' | 'items-added' | 'split' | 'assigned' | 'claimed' | 'released' | 'updated' | 'ticked' | 'noted' | 'ref-added' | 'handed-off' | 'done' | 'dropped' | 'lease-expired';
 
 /** What a mutation hands back: its changes (audited by the actor) and, for a claim, the touches warnings. */
 export interface Outcome<T> {
@@ -456,6 +463,38 @@ function finish(book: PlanBook, item: StoredItem, call: PlanCall, how: string, p
     return { op: 'done', actor: call.actor, planId: item.planId, itemId: item.id, summary: `#${item.id} done (${how}): ${item.title}` };
 }
 
+/** The open items of this project that wait on `itemId` (`after`). */
+export const dependentsOf = (book: PlanBook, itemId: number): StoredItem[] =>
+    all(book)
+        .filter((i) => i.after.includes(itemId) && i.state !== 'done' && i.state !== 'dropped')
+        .sort((a, b) => a.id - b.id);
+
+/**
+ * Drop an item (#1041): its claim ends (the agent working it is told to stop), it leaves every queue, and it keeps
+ * who dropped it and why. Items `after` it are not unblocked: unless the manager dropped it itself, the manager is
+ * told which ones wait on it so it relinks them (`plan_update` with `after`).
+ */
+function drop(book: PlanBook, item: StoredItem, call: PlanCall, actor: PlanActor, noteLine: string | undefined, supersededBy: number | undefined): PlanChange {
+    const holder = liveClaim(item, call.now) ? item.claim!.agentId : undefined;
+    const was = item.state;
+    delete item.claim;
+    delete item.finishedClaim;
+    delete item.handedOff;
+    // A needs-you item keeps its question, so reopening it to needs-you (an Undo) asks the same agent again.
+    dequeue(book, item.id);
+    item.state = 'dropped';
+    item.dropped = { by: actor, at: call.now, ...(noteLine !== undefined ? { note: noteLine } : {}), ...(supersededBy !== undefined ? { supersededBy } : {}) };
+    const why = `${supersededBy !== undefined ? ` (superseded by #${supersededBy})` : ''}`;
+    note(item, call.now, actor, `${was} → dropped${why}`);
+    if (holder !== undefined && !sameActor(agentActor(holder), actor)) tell(book, { at: call.now, to: agentActor(holder), kind: 'dropped', itemId: item.id, text: `${who(actor)} dropped #${item.id}${why}; stop working on it: ${item.title}` });
+    const waiting = dependentsOf(book, item.id);
+    if (call.manager !== null && !sameActor(actor, agentActor(call.manager))) {
+        const relink = waiting.length ? ` ${waiting.map((i) => `#${i.id}`).join(', ')} wait${waiting.length === 1 ? 's' : ''} on it and stay${waiting.length === 1 ? 's' : ''} blocked: relink ${waiting.length === 1 ? 'it' : 'them'} with plan_update after${supersededBy !== undefined ? ` (to #${supersededBy}?)` : ''}.` : '';
+        tellManager(book, call, { kind: 'dropped', itemId: item.id, text: `${who(actor)} dropped #${item.id}${why}: ${item.title}${noteLine ? ` — ${noteLine}` : ''}.${relink}` });
+    }
+    return { op: 'dropped', actor, planId: item.planId, itemId: item.id, summary: `#${item.id} dropped${why}: ${item.title}` };
+}
+
 // ---------------------------------------------------------------------------
 // Leases
 
@@ -581,7 +620,7 @@ export function addItems(book: PlanBook, call: PlanCall, planId: string, phaseN:
 export function splitItem(book: PlanBook, call: PlanCall, itemId: number, parts: readonly PlanItemInput[]): Outcome<StoredItem[]> {
     const actor = requireManager(call, 'split an item');
     const item = itemOf(book, itemId);
-    if (item.state === 'done') fail('done', `#${item.id} is done`);
+    if (item.state === 'done' || item.state === 'dropped') fail('done', `#${item.id} is ${item.state}`);
     if (liveClaim(item, call.now)) fail('taken', `#${item.id} is being worked by @${item.claim!.agentId}; hand it off first`);
     let k = 0;
     const checked = list(parts, 'parts', ITEMS_PER_CALL_MAX, (i) => checkInput(book, i, k++));
@@ -628,6 +667,7 @@ export function assign(book: PlanBook, call: PlanCall, itemId: number, to: PlanA
     const actor = requireManager(call, 'assign items');
     const item = itemOf(book, itemId);
     if (item.state === 'done') fail('done', `#${item.id} is done`);
+    if (item.state === 'dropped') fail('done', `#${item.id} is dropped; reopen it first`);
     const target = to === null ? null : checkActor(to);
     if (target?.kind === 'agent' && !call.members.includes(target.agentId)) fail('invalid', `@${target.agentId} is not a member of this project`);
     if (index !== undefined && (!Number.isSafeInteger(index) || index < 0)) fail('invalid', 'index must be a queue position');
@@ -675,6 +715,7 @@ export interface ClaimOptions {
 /** Why `agentId` may not claim `item` now, or `null`. The same checks `claim` refuses with, for `next`. */
 export function claimRefusal(book: PlanBook, call: PlanCall, agentId: AgentId, item: StoredItem): PlanRuleError | null {
     if (item.state === 'done') return new PlanRuleError('done', `#${item.id} is done`);
+    if (item.state === 'dropped') return new PlanRuleError('done', `#${item.id} is dropped`);
     const waits = waitsOn(book, item);
     if (waits.length) return new PlanRuleError('blocked', `#${item.id} waits on ${waits.map((n) => `#${n}`).join(', ')}`);
     if (liveClaim(item, call.now) && item.claim!.agentId !== agentId) return new PlanRuleError('taken', `#${item.id} is being worked by @${item.claim!.agentId}`);
@@ -759,7 +800,7 @@ export interface HandoffOptions {
 export function handoff(book: PlanBook, call: PlanCall, itemId: number, to: PlanActor | null, noteText: string, options: HandoffOptions = {}): Outcome<StoredItem> {
     const actor = requireActor(call);
     const item = itemOf(book, itemId);
-    if (item.state === 'done') fail('done', `#${item.id} is done`);
+    if (item.state === 'done' || item.state === 'dropped') fail('done', `#${item.id} is ${item.state}`);
     const line = text(noteText, 'a handoff note', TEXT_MAX);
     const holder = liveClaim(item, call.now) ? agentActor(item.claim!.agentId) : undefined;
     if (!isManager(call) && !sameActor(holder, actor) && !sameActor(item.assignee, actor)) fail('forbidden', `only whoever holds #${item.id}, its assignee or the project manager may hand it off`);
@@ -803,7 +844,7 @@ export function pullMerged(book: PlanBook, call: PlanCall, pr: { readonly number
     const done: StoredItem[] = [];
     const changes: PlanChange[] = [];
     for (const item of all(book)) {
-        if (item.state === 'done' || !item.handedOff) continue;
+        if (item.state === 'done' || item.state === 'dropped' || !item.handedOff) continue;
         const byTask = pr.taskId !== undefined && item.handedOff.taskId === pr.taskId;
         const byRef = item.refs.some((r) => r.kind === 'pr' && r.n === pr.number);
         if (!byTask && !byRef) continue;
@@ -823,8 +864,11 @@ export interface PlanItemPatch {
     /**
      * `needs-you` / `stuck` release the claim and wait at the top of the queue; `ready` returns it; `done` is a
      * person's, or an agent's once every done-when line is ticked where the project lets agents tick (#938).
+     * `dropped` (#1041) is the manager's or a person's: the item will not be carried out; `ready` reopens it.
      */
-    readonly state?: 'ready' | 'needs-you' | 'stuck' | 'done';
+    readonly state?: 'ready' | 'needs-you' | 'stuck' | 'done' | 'dropped';
+    /** With `dropped`: the item (`#n`, this project) that replaces this one. */
+    readonly supersededBy?: number;
     /** The task carrying the item out (the claimer's). */
     readonly taskId?: TaskId;
     /** Agents the note names (#1043): each is told the note. Project members or the manager; needs a `note`. */
@@ -855,7 +899,16 @@ export function update(book: PlanBook, call: PlanCall, itemId: number, patch: Pl
         return { index: v!.index as number, checked: v!.checked as boolean };
     });
     const state = patch.state;
-    if (state !== undefined && !(['ready', 'needs-you', 'stuck', 'done'] as const).includes(state)) fail('invalid', 'state is ready, needs-you, stuck or done');
+    if (state !== undefined && !(['ready', 'needs-you', 'stuck', 'done', 'dropped'] as const).includes(state)) fail('invalid', 'state is ready, needs-you, stuck, done or dropped');
+    if (patch.supersededBy !== undefined) {
+        if (state !== 'dropped') fail('invalid', 'supersededBy goes with state dropped');
+        if (!Number.isSafeInteger(patch.supersededBy) || !book.items[String(patch.supersededBy)]) fail('invalid', `supersededBy names #${String(patch.supersededBy)}, which is not an item of this project`);
+        if (patch.supersededBy === item.id) fail('invalid', `#${item.id} cannot supersede itself`);
+    }
+    // Dropping is the manager's or a person's (#1041), and so is reopening a dropped item (to ready, or back to stuck or needs-you).
+    const reopening = item.state === 'dropped' && (state === 'ready' || state === 'stuck' || state === 'needs-you');
+    if (state === 'dropped' && item.state !== 'dropped' && !isManager(call)) fail('forbidden', `only the project manager and people drop #${item.id}`);
+    if (reopening && !isManager(call)) fail('forbidden', `only the project manager and people reopen #${item.id}`);
     // Where agents may not tick (`agentsMayTick` off), an agent asks and a person ticks (#938).
     const agentsMayTick = call.agentsMayTick !== false;
     if (ticks.length && actor.kind === 'agent' && !agentsMayTick) fail('forbidden', `in this project a person ticks done-when lines; add a note or set #${item.id} to needs-you to ask one`);
@@ -868,7 +921,7 @@ export function update(book: PlanBook, call: PlanCall, itemId: number, patch: Pl
         if (!holder || !sameActor(holder, actor)) fail('forbidden', 'only the agent working the item sets its task');
         if (typeof patch.taskId !== 'string' || !patch.taskId.trim() || patch.taskId.length > 200) fail('invalid', 'taskId must be a task id');
     }
-    if (item.state === 'done' && (ticks.length || (state !== undefined && state !== 'ready') || patch.taskId !== undefined)) fail('done', `#${item.id} is done`);
+    if ((item.state === 'done' || item.state === 'dropped') && (ticks.length || (state !== undefined && state !== 'ready' && !reopening && !(state === 'dropped' && item.state === 'dropped')) || patch.taskId !== undefined)) fail('done', `#${item.id} is ${item.state}`);
     if (state === 'ready' && item.state === 'done' && actor.kind !== 'user') fail('forbidden', `only a person reopens #${item.id}`);
 
     const changes: PlanChange[] = [];
@@ -886,7 +939,8 @@ export function update(book: PlanBook, call: PlanCall, itemId: number, patch: Pl
         note(item, call.now, actor, ticks.map((t) => `${t.checked ? 'ticked' : 'unticked'} "${item.doneWhen[t.index]!.text}"`).join('; '));
         changes.push({ op: 'ticked', actor, planId: item.planId, itemId: item.id, summary: `#${item.id} done-when ${item.doneWhen.filter((d) => d.checked).length}/${item.doneWhen.length}: ${item.title}` });
     }
-    if (state === 'done') changes.push(finish(book, item, call, `marked done by ${who(actor)}`));
+    if (state === 'dropped' && item.state !== 'dropped') changes.push(drop(book, item, call, actor, noteLine, patch.supersededBy));
+    else if (state === 'done') changes.push(finish(book, item, call, `marked done by ${who(actor)}`));
     else if (item.state !== 'done' && ticks.length && planDoneWhenMet(item.doneWhen)) changes.push(finish(book, item, call, 'every done-when ticked'));
     else if (state !== undefined && state !== item.state) {
         const was = item.state;
@@ -896,11 +950,14 @@ export function update(book: PlanBook, call: PlanCall, itemId: number, patch: Pl
         delete item.claim;
         delete item.finishedClaim;
         if (was === 'done') delete item.handedOff;
+        delete item.dropped;
         item.state = state;
         // The question is kept for whoever answers it (#1043); it goes once the item no longer waits on a person.
-        if (state === 'needs-you') item.ask = { by: actor, ...(noteLine !== undefined ? { text: noteLine } : {}), at: call.now, ...(actor.kind === 'agent' && askTask !== undefined ? { taskId: askTask } : {}) };
-        else delete item.ask;
-        if (was === 'done' && item.assignee) enqueue(book, item.assignee, item.id, 0);
+        // Reopened to needs-you from dropped (#1041), it keeps the question it was dropped with.
+        if (state === 'needs-you') {
+            if (!(was === 'dropped' && item.ask)) item.ask = { by: actor, ...(noteLine !== undefined ? { text: noteLine } : {}), at: call.now, ...(actor.kind === 'agent' && askTask !== undefined ? { taskId: askTask } : {}) };
+        } else delete item.ask;
+        if ((was === 'done' || was === 'dropped') && item.assignee) enqueue(book, item.assignee, item.id, 0);
         else if (agent !== undefined && item.assignee) enqueue(book, item.assignee, item.id, 0);
         note(item, call.now, actor, `${was} → ${state}`);
         // An agent asking for a person: the manager asks them (#982).
@@ -994,7 +1051,8 @@ export function itemView(book: PlanBook, item: StoredItem, now: number): PlanIte
         doneWhen: item.doneWhen.map((d) => ({ ...d })),
         activity: item.activity.map((a) => ({ ...a, actor: { ...a.actor } })),
         ...(item.options ? { options: item.options.map((o) => ({ ...o })) } : {}),
-        ...(item.ask ? { ask: { ...item.ask, by: { ...item.ask.by } } } : {})
+        ...(item.ask ? { ask: { ...item.ask, by: { ...item.ask.by } } } : {}),
+        ...(item.state === 'dropped' && item.dropped ? { dropped: { ...item.dropped, by: { ...item.dropped.by } } } : {})
     };
 }
 
@@ -1009,7 +1067,7 @@ export function planView(book: PlanBook, plan: StoredPlan, now: number): Plan {
     };
 }
 
-/** One not-done item with where it sits — the Work view's plan rows (K1). */
+/** One not-done, not-dropped item with where it sits — the Work view's plan rows (K1). */
 export interface OpenPlanItem {
     readonly planId: string;
     readonly planTitle: string;
@@ -1024,7 +1082,7 @@ export function openItems(book: PlanBook, now: number): OpenPlanItem[] {
         for (const phase of plan.phases) {
             for (const n of phase.items) {
                 const item = book.items[String(n)];
-                if (!item || item.state === 'done') continue;
+                if (!item || item.state === 'done' || item.state === 'dropped') continue;
                 out.push({ planId: plan.id, planTitle: plan.title, phase: { n: phase.n, title: phase.title }, item: itemView(book, item, now), updatedAt: item.updatedAt });
             }
         }

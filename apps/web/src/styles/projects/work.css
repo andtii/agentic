@@ -140,6 +140,11 @@
 /* A task row's Retry, Dismiss and Stop (#1040): at the end of the owner cell, shown on hover where there is hover. */
 [data-work-actions] { display: inline-flex; flex: none; gap: var(--space-2xs); margin-inline-start: auto; }
 [data-work-actions] button { min-block-size: 0; padding-block: 0; font-size: var(--text-xs); }
+/* Plan item rows (#1041): Decide is a link; Reassign opens a member picker, Drop a reason field. */
+[data-work-actions][data-plan-item-actions] { flex-wrap: wrap; align-items: center; }
+[data-work-plan-action="decide"] { font-size: var(--text-xs); font-weight: var(--weight-semibold); }
+[data-work-reassign], [data-work-drop] { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--space-2xs); }
+[data-work-drop] [data-scope="input"] { min-inline-size: 12rem; }
 @media (hover: hover) {
     [data-work-row] [data-work-actions] { opacity: 0; transition: opacity 120ms; }
     [data-work-row]:hover [data-work-actions], [data-work-row]:focus-within [data-work-actions] { opacity: 1; }

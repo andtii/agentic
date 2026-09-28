@@ -192,6 +192,16 @@ export const ItemDetail = component<ItemDetailProps>(({ props }) => {
                             </dd>
                         </>
                         : null}
+                    {item.state === 'dropped' && item.dropped
+                        ? <>
+                            <dt>Dropped</dt>
+                            <dd data-fact="dropped">
+                                <span>{`by ${name(item.dropped.by)}`}</span>
+                                {item.dropped.supersededBy !== undefined ? <> <span data-dim="">superseded by</span> {ItemChip(item.dropped.supersededBy, items, props.onPick)}</> : null}
+                                {item.dropped.note ? <p data-plan-dropped-note="">{item.dropped.note}</p> : null}
+                            </dd>
+                        </>
+                        : null}
                     {item.after.length ? <><dt>After</dt><dd data-fact="after">{item.after.map((n) => ItemChip(n, items, props.onPick))}</dd></> : null}
                     {unblocks.length ? <><dt>Unblocks</dt><dd data-fact="unblocks">{unblocks.map((u) => ItemChip(u.id, items, props.onPick))}</dd></> : null}
                     {item.touches.length

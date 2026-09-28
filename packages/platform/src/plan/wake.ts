@@ -90,7 +90,8 @@ const NOTICE_TITLES: Record<PlanNotice['kind'], string> = {
     idle: 'member idle',
     stalled: 'member stalled',
     answer: 'answered',
-    mention: 'mentioned you'
+    mention: 'mentioned you',
+    dropped: 'dropped'
 };
 
 /** The Inbox row for a person's notices. */

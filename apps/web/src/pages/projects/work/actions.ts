@@ -7,12 +7,16 @@
  * Stop and Dismiss take no confirm but offer an Undo: a stop waits `WORK_UNDO_MS` before it is sent (a cancel cannot
  * be taken back), a dismiss is sent at once and undone with `Task.dismiss(by, false)`. The row leaves the view at once
  * either way. One notice at a time (`workNotice`), module-wide so the work item page can act and hand over to Work.
+ *
+ * Plan item rows (#1041) settle a stuck or needs-you item on the project's Plan actor: **Reopen** sets it `ready` (it
+ * stays in its queue), **Reassign** reopens it into another member's queue, **Drop** sets it `dropped` with an optional
+ * reason and offers an Undo that reopens it to the state it had.
  */
 import { signal } from 'sigx';
 import { actor } from '@sigx/actors';
-import { createId, type AgentId, type ChatId, type TaskId } from '@agentic/core';
+import { createId, type AgentId, type ChatId, type PlanActor, type PlanItemState, type TaskId } from '@agentic/core';
 import type { ActorDefs } from '../../../actors/defs';
-import { chatKeyOf, routingKeyOf, taskKeyOf } from '../../../actors/keys';
+import { chatKeyOf, planKeyOf, routingKeyOf, taskKeyOf } from '../../../actors/keys';
 import { runActivation, type AgentLookup } from '../../chat/live';
 import type { WorkAction } from './model';
 
@@ -30,12 +34,23 @@ export interface WorkActions {
     retry(taskId: TaskId): Promise<unknown>;
 }
 
+/** What a plan item row's buttons call (#1041): live the project's Plan actor, in tests a fake. */
+export interface PlanItemWrites {
+    /** Set the item's state: `ready` reopens it, `dropped` drops it (with `note` as the reason). */
+    setState(itemId: number, state: 'ready' | 'stuck' | 'needs-you' | 'dropped', note?: string): Promise<unknown>;
+    /** Put the item in `to`'s queue. */
+    assign(itemId: number, to: PlanActor): Promise<unknown>;
+}
+
 /** The one notice under the Work view: what was just done, whether it can be undone, or what failed. */
 export const workNotice = signal({ text: '', undo: false, error: '' });
 /** Task ids the view leaves out right away, before the index catches up (and while a stop can still be undone). */
 export const workHidden = signal({ ids: [] as string[] });
 
-let pending: { readonly action: 'stop' | 'dismiss'; readonly taskId: TaskId; readonly actions: WorkActions; timer?: ReturnType<typeof setTimeout> } | undefined;
+type Pending =
+    | { readonly action: 'stop' | 'dismiss'; readonly taskId: TaskId; readonly actions: WorkActions; timer?: ReturnType<typeof setTimeout> }
+    | { readonly action: 'drop'; readonly itemId: number; readonly was: PlanItemState; readonly writes: PlanItemWrites; timer?: undefined };
+let pending: Pending | undefined;
 /** Bumped by every action: a late failure only speaks when no newer action has taken the notice. */
 let noticeSeq = 0;
 
@@ -57,6 +72,10 @@ export function flushWorkAction(): void {
     pending = undefined;
     if (!p) return;
     clearTimeout(p.timer);
+    if (p.action === 'drop') {
+        show(`item:${p.itemId}`);
+        return;
+    }
     if (p.action === 'dismiss') {
         show(p.taskId);
         return;
@@ -81,7 +100,7 @@ export async function runWorkAction(actions: WorkActions, action: WorkAction, ta
     workNotice.error = '';
     if (action === 'stop') {
         hide(taskId);
-        const p: NonNullable<typeof pending> = { action, taskId, actions };
+        const p: Pending = { action, taskId, actions };
         p.timer = setTimeout(() => {
             if (pending === p) flushWorkAction();
         }, WORK_UNDO_MS);
@@ -124,6 +143,16 @@ export async function undoWorkAction(): Promise<void> {
     workNotice.undo = false;
     if (!p) return;
     clearTimeout(p.timer);
+    if (p.action === 'drop') {
+        show(`item:${p.itemId}`);
+        try {
+            // Reopened to the state it was dropped from: a needs-you item keeps its question, a stuck one its queue.
+            await p.writes.setState(p.itemId, p.was === 'stuck' || p.was === 'needs-you' ? p.was : 'ready');
+        } catch (e) {
+            workNotice.error = `Could not undo: ${failed(e)}`;
+        }
+        return;
+    }
     show(p.taskId);
     if (p.action === 'dismiss') {
         try {
@@ -133,6 +162,72 @@ export async function undoWorkAction(): Promise<void> {
             workNotice.error = `Could not undo: ${failed(e)}`;
         }
     }
+}
+
+/** What a plan item button needs besides the action: the item, its title and state, and for Reassign whom to (and their name). */
+export interface PlanItemTarget {
+    readonly itemId: number;
+    readonly title: string;
+    readonly state: PlanItemState;
+}
+
+/**
+ * Run one action on a plan item's row (#1041). The row leaves the view while the write is in flight; Drop's notice
+ * offers an Undo. `decide` is a link, not an action.
+ */
+export async function runPlanItemAction(
+    writes: PlanItemWrites,
+    action: 'reopen' | 'reassign' | 'drop',
+    target: PlanItemTarget,
+    arg: { readonly to?: PlanActor; readonly toName?: string; readonly note?: string } = {}
+): Promise<boolean> {
+    flushWorkAction();
+    const seq = ++noticeSeq;
+    workNotice.error = '';
+    const key = `item:${target.itemId}`;
+    hide(key);
+    try {
+        if (action === 'drop') {
+            await writes.setState(target.itemId, 'dropped', arg.note?.trim() || undefined);
+            if (seq !== noticeSeq) {
+                show(key);
+                return true;
+            }
+            pending = { action: 'drop', itemId: target.itemId, was: target.state, writes };
+            workNotice.text = `Dropped #${target.itemId} “${target.title}”`;
+            workNotice.undo = true;
+            return true;
+        }
+        if (action === 'reassign') {
+            if (!arg.to) throw new Error('pick a member');
+            // Reopened first: a stuck item moved to another queue is ready work there.
+            if (target.state !== 'ready') await writes.setState(target.itemId, 'ready');
+            await writes.assign(target.itemId, arg.to);
+        } else {
+            await writes.setState(target.itemId, 'ready');
+        }
+        show(key);
+        if (seq !== noticeSeq) return true;
+        workNotice.text = action === 'reassign' ? `Reassigned #${target.itemId} to ${arg.toName ?? 'them'}` : `Reopened #${target.itemId} “${target.title}”`;
+        workNotice.undo = false;
+        return true;
+    } catch (e) {
+        show(key);
+        if (seq !== noticeSeq) return false;
+        workNotice.text = '';
+        workNotice.undo = false;
+        workNotice.error = `Could not ${action} #${target.itemId}: ${failed(e).replace(/^\[plan\]\s*/, '')}`;
+        return false;
+    }
+}
+
+/** The live plan item writes (#1041): the project's Plan actor, as the signed-in person. */
+export function livePlanItemWrites(defs: ActorDefs, ws: string, projectId: () => string): PlanItemWrites {
+    const plan = () => actor(defs.Plan, planKeyOf(ws, projectId()));
+    return {
+        setState: (itemId, state, note) => plan().update(itemId, { state, ...(note !== undefined ? { note } : {}) }),
+        assign: (itemId, to) => plan().assign(itemId, to)
+    };
 }
 
 /** Close the notice; a Stop still in its Undo window is sent now. */

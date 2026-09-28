@@ -74,6 +74,7 @@
 [data-plan-item-main] { display: flex; flex-direction: column; gap: 2px; min-inline-size: 0; }
 [data-plan-item-title] { font-size: var(--text-sm); font-weight: var(--weight-semibold); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 [data-plan-item][data-state="done"] [data-plan-item-title] { color: var(--ag-text-muted); text-decoration: line-through; font-weight: var(--weight-normal); }
+[data-plan-item][data-state="dropped"] [data-plan-item-title] { color: var(--ag-text-dim); text-decoration: line-through; font-weight: var(--weight-normal); }
 [data-plan-item-meta] { font-family: var(--font-mono); font-size: 11px; color: var(--ag-text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 [data-plan-item-owner] { display: flex; align-items: center; gap: var(--space-xs); min-inline-size: 0; }
 [data-plan-owner-text] { display: flex; flex-direction: column; min-inline-size: 0; }

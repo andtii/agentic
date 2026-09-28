@@ -23,10 +23,10 @@ import type { ProjectPageProps } from '../layout/types';
 import { LiveStartTask } from '../../task/LiveStartTask';
 import { openStartTask } from '../../task/start';
 import { useLiveWork } from './LiveWork';
-import { closeWorkNotice, runWorkAction, undoWorkAction, workHidden, workNotice, type WorkActions } from './actions';
+import { closeWorkNotice, runPlanItemAction, runWorkAction, undoWorkAction, workHidden, workNotice, type PlanItemWrites, type WorkActions } from './actions';
 import { PullsSignIn } from './pull/PullsSignIn';
 import { mockWorkFeatures, mockWorkTasks, usePlanItems, usePulls } from './live';
-import { WORK_GROUPS, filterWork, groupWork, isStale, workActionsOf, workAgentOf, workItemsOf, type WorkAction, type WorkFeatures, type WorkFilter, type WorkTask } from './model';
+import { WORK_GROUPS, filterWork, groupWork, isStale, planItemActionsOf, planItemOfRow, workActionsOf, workAgentOf, workItemsOf, type WorkAction, type WorkFeatures, type WorkFilter, type WorkTask } from './model';
 
 defineTopbar('project-work', (route) => ({ trail: projectTrail(route, { label: 'Work', href: `/projects/${String(route.params.id)}/work` }) }));
 
@@ -49,7 +49,11 @@ export type WorkBoardProps =
     /** "New task" opens the Start task dialog; absent (mock data), the button is disabled. */
     & Define.Prop<'onNewTask', () => void>
     /** What a task row's Retry, Dismiss and Stop call (#1040); absent (mock data), rows have no buttons. */
-    & Define.Prop<'actions', WorkActions>;
+    & Define.Prop<'actions', WorkActions>
+    /** What a plan item row's Reopen, Reassign and Drop call (#1041); absent (mock data), those rows have no buttons. */
+    & Define.Prop<'planWrites', PlanItemWrites>
+    /** The project's agent members, whom Reassign offers. */
+    & Define.Prop<'members', readonly string[]>;
 
 const ACTION_BUTTON: Readonly<Record<WorkAction, { readonly label: string; readonly icon: 'play' | 'close' | 'stop' }>> = {
     retry: { label: 'Retry', icon: 'play' },
@@ -79,6 +83,90 @@ export const WorkActionButtons = component<{ item: WorkItem; tasks: readonly Wor
     );
 }, { name: 'WorkActionButtons' });
 
+/** Where Decide goes (#1041): the item on the Plan page, where its options are. */
+export const planItemHref = (projectId: string, itemId: number): string => `/projects/${projectId}/plan?item=${itemId}`;
+
+export interface PlanItemButtonsProps {
+    item: WorkItem;
+    planItems: readonly PlanItem[];
+    projectId: string;
+    writes: PlanItemWrites;
+    members: readonly string[];
+    agentOf: WorkAgentLookup;
+    onDone?: () => void;
+}
+
+/**
+ * A plan item's buttons (#1041), the row's and the work item page's: stuck → Reopen, Reassign (a member picker) and
+ * Drop (with an optional reason); needs-you → Decide (the item on the Plan page) and Drop.
+ */
+export const PlanItemActionButtons = component<PlanItemButtonsProps>(({ props }) => {
+    const st = signal({ open: '' as '' | 'reassign' | 'drop', reason: '' });
+    return () => {
+        const list = planItemActionsOf(props.item, props.planItems);
+        const p = planItemOfRow(props.item, props.planItems);
+        if (!list.length || !p) return null;
+        const target = { itemId: p.id, title: p.title, state: p.state };
+        const done = (ok: boolean): void => {
+            if (!ok) return;
+            st.open = '';
+            st.reason = '';
+            props.onDone?.();
+        };
+        const current = p.assignee?.kind === 'agent' ? p.assignee.agentId : undefined;
+        const others = props.members.filter((id) => id !== current);
+        return (
+            <span data-work-actions="" data-plan-item-actions={p.id}>
+                {list.map((a) => a === 'decide'
+                    ? <span data-work-plan-action="decide"><Link to={planItemHref(props.projectId, p.id)}>Decide</Link></span>
+                    : (
+                        <Button
+                            intent="default"
+                            icon={a === 'reopen' ? 'play' : a === 'reassign' ? 'agents' : 'close'}
+                            name="work-plan-action"
+                            value={a}
+                            onClick={() => {
+                                if (a === 'reopen') void runPlanItemAction(props.writes, 'reopen', target).then(done);
+                                else st.open = st.open === a ? '' : a;
+                            }}
+                        >
+                            {a === 'reopen' ? 'Reopen' : a === 'reassign' ? 'Reassign' : 'Drop'}
+                        </Button>
+                    ))}
+                {st.open === 'reassign'
+                    ? (
+                        <span data-work-reassign="" role="group" aria-label={`Reassign #${p.id} to`}>
+                            {others.length
+                                ? others.map((id) => {
+                                    const a = props.agentOf(id);
+                                    return (
+                                        <Button intent="default" name="work-reassign" value={id} onClick={() => { void runPlanItemAction(props.writes, 'reassign', target, { to: { kind: 'agent', agentId: id as never }, toName: a.name }).then(done); }}>
+                                            <AgentTile name={a.name} hue={a.hue} size={18} />{a.name}
+                                        </Button>
+                                    );
+                                })
+                                : <span data-work-note="">No other member to hand it to</span>}
+                        </span>
+                    )
+                    : null}
+                {st.open === 'drop'
+                    ? (
+                        <form data-work-drop="" onSubmit={(e: Event) => { e.preventDefault(); void runPlanItemAction(props.writes, 'drop', target, { note: st.reason }).then(done); }}>
+                            <Input.Root model={() => st.reason} autocomplete="off">
+                                <Input.Label visuallyHidden>{`Why drop #${p.id}?`}</Input.Label>
+                                <Input.Control>
+                                    <Input.Input data-work-drop-reason="" placeholder="Why? e.g. superseded by #18" />
+                                </Input.Control>
+                            </Input.Root>
+                            <Button intent="danger" type="submit" name="work-drop-confirm">{`Drop #${p.id}`}</Button>
+                        </form>
+                    )
+                    : null}
+            </span>
+        );
+    };
+}, { name: 'PlanItemActionButtons' });
+
 /** The notice under the last action: what was done, with Undo while it can be undone, or what failed. */
 export const WorkNotice = component(() => () => {
     if (!workNotice.text && !workNotice.error) return null;
@@ -91,7 +179,13 @@ export const WorkNotice = component(() => () => {
     );
 }, { name: 'WorkNotice' });
 
-const WorkRow = component<{ item: WorkItem; projectId: string; tasks: readonly WorkTask[]; pulls: readonly PullRequest[]; agentOf: WorkAgentLookup; now: number; actions?: WorkActions }>(({ props }) => () => {
+interface WorkRowPlan {
+    readonly items: readonly PlanItem[];
+    readonly writes: PlanItemWrites;
+    readonly members: readonly string[];
+}
+
+const WorkRow = component<{ item: WorkItem; projectId: string; tasks: readonly WorkTask[]; pulls: readonly PullRequest[]; agentOf: WorkAgentLookup; now: number; actions?: WorkActions; plan?: WorkRowPlan }>(({ props }) => () => {
     const i = props.item;
     const pr = i.pull !== undefined ? props.pulls.find((p) => p.number === i.pull) : undefined;
     const task = i.taskId ? props.tasks.find((t) => t.id === i.taskId) : undefined;
@@ -127,6 +221,7 @@ const WorkRow = component<{ item: WorkItem; projectId: string; tasks: readonly W
                     })()}
                 <span data-work-next title={i.nextStep}>{i.nextStep}</span>
                 {props.actions ? <WorkActionButtons item={i} tasks={props.tasks} actions={props.actions} /> : null}
+                {props.plan ? <PlanItemActionButtons item={i} planItems={props.plan.items} projectId={props.projectId} writes={props.plan.writes} members={props.plan.members} agentOf={props.agentOf} /> : null}
             </div>
             <Age at={i.updatedAt} now={props.now} class={stale ? 'is-stale' : undefined} />
         </li>
@@ -142,7 +237,9 @@ export const WorkBoard = component<WorkBoardProps>(({ props }) => {
         // A row just stopped or dismissed leaves at once, before the index catches up (#1040).
         const hidden = workHidden.ids;
         const tasks = hidden.length ? props.tasks.filter((t) => !hidden.includes(t.id)) : props.tasks;
-        const all = workItemsOf(tasks, pulls, props.planItems, props.features, now);
+        const planItems = hidden.length ? props.planItems.filter((i) => !hidden.includes(`item:${i.id}`)) : props.planItems;
+        const all = workItemsOf(tasks, pulls, planItems, props.features, now);
+        const plan: WorkRowPlan | undefined = props.planWrites ? { items: planItems, writes: props.planWrites, members: props.members ?? [] } : undefined;
         const stages = workStagesFor(props.features.enabled, props.features.uiOf);
         const plain = stages === WORK_STAGES_FALLBACK;
         const f = filter();
@@ -189,7 +286,7 @@ export const WorkBoard = component<WorkBoardProps>(({ props }) => {
                             </button>
                             {open
                                 ? rows.length
-                                    ? <ul data-work-rows>{rows.map((item) => <WorkRow item={item} projectId={props.projectId} tasks={tasks} pulls={pulls} agentOf={props.agentOf} now={now} {...(props.actions ? { actions: props.actions } : {})} />)}</ul>
+                                    ? <ul data-work-rows>{rows.map((item) => <WorkRow item={item} projectId={props.projectId} tasks={tasks} pulls={pulls} agentOf={props.agentOf} now={now} {...(props.actions ? { actions: props.actions } : {})} {...(plan ? { plan } : {})} />)}</ul>
                                     : <p data-work-empty>{g.id === 'your-move' ? 'Nothing waits on you.' : 'No agent is on anything here.'}</p>
                                 : null}
                         </section>
@@ -226,6 +323,7 @@ const MockWork = component<ProjectPageProps>(({ props }) => {
 const LiveWork = component<ProjectPageProps>(({ props }) => {
     const live = useLiveWork(() => props.project);
     const actions = live.actions;
+    const planWrites = live.planWrites;
     return () => (
         <>
             {live.loading && !live.tasks().length ? <p data-panel-note aria-busy="true">Loading work…</p> : null}
@@ -240,6 +338,7 @@ const LiveWork = component<ProjectPageProps>(({ props }) => {
                 now={Date.now()}
                 onNewTask={() => openStartTask()}
                 {...(actions ? { actions } : {})}
+                {...(planWrites ? { planWrites, members: props.project.members.agentIds } : {})}
             />
             <LiveStartTask />
         </>

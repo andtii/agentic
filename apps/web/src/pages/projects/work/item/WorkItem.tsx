@@ -14,8 +14,8 @@ import { dataMode } from '../../../../data-mode';
 import { AGENTS, formatAge } from '../../../../mock/workspace';
 import { clockNow } from '../../../../time';
 import type { ProjectPageProps } from '../../layout/types';
-import { WorkActionButtons, WorkNotice, type WorkAgentLookup } from '../WorkView';
-import type { WorkActions } from '../actions';
+import { PlanItemActionButtons, WorkActionButtons, WorkNotice, type WorkAgentLookup } from '../WorkView';
+import type { PlanItemWrites, WorkActions } from '../actions';
 import type { WorkTask } from '../model';
 import { refIcon, refLabel } from '../../features/plan/shared/model';
 import { MOCK_WORK_ITEMS } from './fixtures';
@@ -41,9 +41,12 @@ const taskOf = (d: WorkItemDetail): WorkTask[] =>
 export interface WorkItemActions {
     readonly actions: WorkActions;
     readonly onDone: () => void;
+    /** A plan item's Reopen, Reassign and Drop (#1041), and the members Reassign offers. */
+    readonly planWrites?: PlanItemWrites;
+    readonly members?: readonly string[];
 }
 
-const Header = (d: WorkItemDetail, agentOf: WorkAgentLookup, act?: WorkItemActions) => {
+const Header = (d: WorkItemDetail, projectId: string, agentOf: WorkAgentLookup, act?: WorkItemActions) => {
     const { item } = d;
     const agentName = (id: string): string => agentOf(id).name;
     const steps = stepsOf(item);
@@ -73,6 +76,7 @@ const Header = (d: WorkItemDetail, agentOf: WorkAgentLookup, act?: WorkItemActio
                 <span data-next-step="">{item.nextStep}</span>
                 <StatusPill status={item.stageState} tone={TONE_OF[item.stageState]} />
                 {act ? <WorkActionButtons item={item} tasks={taskOf(d)} actions={act.actions} onDone={act.onDone} /> : null}
+                {act?.planWrites && d.plan ? <PlanItemActionButtons item={item} planItems={[d.plan.item]} projectId={projectId} writes={act.planWrites} members={act.members ?? []} agentOf={agentOf} onDone={act.onDone} /> : null}
             </div>
         </header>
     );
@@ -168,7 +172,7 @@ const render = (projectId: string, param: string, d: WorkItemDetail | undefined,
         {d
             ? (
                 <>
-                    {Header(d, agentOf, act)}
+                    {Header(d, projectId, agentOf, act)}
                     <div data-work-item-body="">
                         {DoneWhen(d)}
                         {Refs(d, projectId)}
@@ -184,7 +188,13 @@ const render = (projectId: string, param: string, d: WorkItemDetail | undefined,
 const LiveWorkItem = component<WorkItemProps>(({ props }) => {
     const live = useLiveWorkItems(() => props.project);
     const router = useRouter();
-    const act: WorkItemActions | undefined = live.actions ? { actions: live.actions, onDone: () => { void router.push(`/projects/${props.project.id}/work`); } } : undefined;
+    const act: WorkItemActions | undefined = live.actions
+        ? {
+            actions: live.actions,
+            onDone: () => { void router.push(`/projects/${props.project.id}/work`); },
+            ...(live.planWrites ? { planWrites: live.planWrites, members: props.project.members.agentIds } : {})
+        }
+        : undefined;
     return () => {
         const d = findWorkItem(live.details(), props.item);
         return (
