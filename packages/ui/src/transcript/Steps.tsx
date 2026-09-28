@@ -33,8 +33,6 @@ export type StepsProps =
     /** The clock a running step's time counts against; `Date.now()` by default. */
     & Define.Prop<'now', number, false>;
 
-let nextId = 0;
-
 const StepLine = component<Define.Prop<'step', TranscriptStep, true> & Define.Prop<'fullHref', StepHrefFn, false> & Define.Prop<'now', number, false>>(({ props }) => () => {
     const step = props.step;
     const look = stepLook(step.state);
@@ -66,7 +64,6 @@ const StepLine = component<Define.Prop<'step', TranscriptStep, true> & Define.Pr
 }, { name: 'Steps.Step' });
 
 export const Steps = component<StepsProps>(({ props }) => {
-    const id = `ai-steps-${++nextId}`;
     const own = followDisclosure(() => turnOpensItself(props.steps));
     const isOpen = (): boolean => props.open ?? own.open;
     const toggle = (): void => {
@@ -81,6 +78,8 @@ export const Steps = component<StepsProps>(({ props }) => {
         const steps = props.steps;
         const summary = summariseSteps(steps);
         const open = isOpen();
+        // From the turn, not a counter: the same id on the server and the client.
+        const id = `ai-steps-${steps.turnId}`;
         return (
             <div data-scope={SCOPE} data-part="root">
                 <button type="button" data-scope={SCOPE} data-part="summary" aria-expanded={open ? 'true' : 'false'} aria-controls={id} onClick={toggle}>
