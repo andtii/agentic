@@ -202,6 +202,9 @@ export const SELF = {
     async fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
         // A streamed body needs `duplex` on Node's `Request`; workerd infers it.
         const request = new Request(input, init?.body instanceof ReadableStream ? ({ ...init, duplex: 'half' } as RequestInit) : init);
+        // The suite describes an https deployment (the Worker always is; a node sits behind `tailscale serve`), so the
+        // request arrives as a TLS-terminating proxy hands it on: the `__Host-` cookies stay as they are (#989).
+        if (!request.headers.has('x-forwarded-proto')) request.headers.set('x-forwarded-proto', 'https');
         if (request.headers.get('upgrade')?.toLowerCase() === 'websocket') {
             const { pathname } = new URL(request.url);
             if (pathname === ACTOR_SOCKET_PATH || pathname.startsWith(`${ACTOR_SOCKET_PATH}/`)) return actorSocket(request);

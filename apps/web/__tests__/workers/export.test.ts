@@ -11,6 +11,7 @@ import { durableObjectName } from '@sigx/actors-cloudflare';
 import { EXPORT_HEADER, EXPORT_PATH, type ExportLine } from '../../src/export';
 import { overHttp, signIn } from './http';
 import { TEST_SESSION_SECRET } from './secret';
+import { onWorkerd } from './host-kind';
 
 const userId = 'gh_9940';
 const workspaceId = userId as WorkspaceId;
@@ -20,7 +21,8 @@ const exportIds = (ids: string[], secret: string | null = TEST_SESSION_SECRET) =
     SELF.fetch(`https://agentic.test${EXPORT_PATH}`, { method: 'POST', headers: secret ? { [EXPORT_HEADER]: secret } : {}, body: JSON.stringify({ ids }) });
 
 describe('worker: the state export (#994)', () => {
-    it('exports the workspace and chat objects by their listed ids, and refuses without the secret', async () => {
+    // The export is the Cloudflare side of the migration (a Durable Object answers it); a node imports, it has none.
+    it.skipIf(!onWorkerd)('exports the workspace and chat objects by their listed ids, and refuses without the secret', async () => {
         const cookie = await signIn(userId);
         const wsKey = workspaceKey(workspaceId);
         const ws = overHttp(Workspace, wsKey, cookie);
