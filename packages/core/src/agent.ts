@@ -106,6 +106,44 @@ export interface AgentConfig {
     readonly collaborators: 'all' | readonly AgentId[];
 }
 
+/**
+ * An agent as the lists draw it (#1125): what the Workspace index keeps per agent, so the agent directory reads
+ * names, roles and default environments from `Workspace.get` instead of a live `Agent.get` per agent. The Agent
+ * actor writes it in the same turn as every new config version. A subset of `AgentView`'s shape (same field
+ * paths), so a full view passes wherever a summary is read.
+ */
+export interface AgentSummary {
+    readonly id: AgentId;
+    /** The config version this summary was taken from; a later version replaces it, never an earlier one. */
+    readonly configVersion: number;
+    readonly config: {
+        readonly name: string;
+        readonly role: string;
+        readonly description: string;
+        readonly execution: Pick<ExecutionDefaults, 'runtime' | 'account' | 'defaultEnvironmentId' | 'model'>;
+    };
+}
+
+/** The summary of agent `id` at config version `configVersion` — a new plain object; absent optional fields stay absent. */
+export function agentSummaryOf(id: AgentId, configVersion: number, config: AgentConfig): AgentSummary {
+    const { runtime, account, defaultEnvironmentId, model } = config.execution;
+    return {
+        id,
+        configVersion,
+        config: {
+            name: config.name,
+            role: config.role,
+            description: config.description,
+            execution: {
+                runtime,
+                ...(account === undefined ? {} : { account: { ...account } }),
+                ...(defaultEnvironmentId === undefined ? {} : { defaultEnvironmentId }),
+                ...(model === undefined ? {} : { model })
+            }
+        }
+    };
+}
+
 /** One durable config version (AGT-06). */
 export interface AgentConfigVersion {
     readonly version: number;
