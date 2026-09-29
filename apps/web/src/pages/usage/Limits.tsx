@@ -58,6 +58,7 @@ export const LiveLimits = component<Define.Prop<'compact', boolean>>(({ props })
     return (): JSXElement => {
         const paired = (index.value ?? []).filter((m) => m.status === 'paired');
         const views = paired.map((m) => store.machine(m.id)).filter((v): v is MachineView => !!v);
-        return <LimitsSection accounts={limitAccountsOf(views)} compact={props.compact} loading={index.loading || views.length < paired.length} />;
+        // The store's `loading` settles even when a machine's record can't be read (#1137).
+        return <LimitsSection accounts={limitAccountsOf(views)} compact={props.compact} loading={index.loading || store.loading} />;
     };
 });
