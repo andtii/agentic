@@ -9,7 +9,8 @@
  */
 import { plainCodeRenderer, useCodeRenderer } from '@agentic/ui';
 import { afterEach } from 'vitest';
-import { defineApp, type JSXElement } from 'sigx';
+import { component, defineApp, type JSXElement } from 'sigx';
+import { initAppStores } from '@agentic/client';
 import '@sigx/runtime-dom';
 import { RouterView } from '@sigx/router';
 import type { AnyActorDefinition } from '@sigx/actors';
@@ -144,7 +145,12 @@ export async function mountLive(path: string, harness: LiveHarness, tree: JSXEle
     await router.isReady();
     const container = document.createElement('div');
     document.body.appendChild(container);
-    const app = defineApp(tree);
+    // The shell creates the app stores (#1116), as `App` does: a store a page created first would close its reads with that page.
+    const Shell = component(() => {
+        initAppStores();
+        return () => tree;
+    });
+    const app = defineApp(<Shell />);
     app.use(router);
     app.use(actorsPlugin({ transport: harness.transport, live: { debounceMs: 0, retryMs: 10, maxRetryMs: 50 } }));
     app.defineProvide(useActorDefs, clientDefs);

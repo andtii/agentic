@@ -12,3 +12,4 @@ export { INTERRUPTION_AUDIT_KINDS, INTERRUPTION_AUDIT_ROWS, useInboxStore } from
 export { useRegistryStore } from './stores/index';
 export { isAuthError, readinessById, readinessFacts, readyRuntimeIds, signedOutPluginIds } from './readiness';
 export { foldEnvironments, machineKeyOf, pairedOf, useMachineStore, type EnvironmentEntry, type MachineEntry } from './stores/index';
+export { useAgentStore, type AgentEntry } from './stores/index';

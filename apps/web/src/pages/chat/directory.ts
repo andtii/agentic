@@ -1,21 +1,15 @@
 /**
- * The workspace's agents as identities (#34): one live read of the
- * Workspace index, then `Agent.get()` per id in one `useData` fetch, so
- * the pages resolve names, hues and environments synchronously through a
- * lookup — the same shape the mock `agentNamed` has.
- *
- * Each agent is also a live `Agent.get` subscription on the page's live
- * channel (#258), so a config edit — a new default environment, a rename —
- * reaches every page without a reload; the fetch fills in until a frame
- * comes, and on the server nothing subscribes.
+ * The workspace's agents as identities (#34), read through the app's agent
+ * store (#1119, `@agentic/client`): one live read of the Workspace index (the
+ * workspace store), `Agent.get()` per id in one SSR-seeded fetch, and a live
+ * `Agent.get` subscription per agent (#258) — opened once per app, not per
+ * page, so a route change redials nothing. The pages resolve names, hues and
+ * environments synchronously through a lookup — the same shape the mock
+ * `agentNamed` has.
  */
-import { effect, onMounted, onUnmounted, signal, useData } from 'sigx';
-import { actor } from '@sigx/actors';
-import { useActorState, useActorsContext, type ActorLiveChannel } from '@sigx/actors/app';
-import type { AgentId } from '@agentic/core';
-import type { AgentView } from '@agentic/platform';
+import { computed } from 'sigx';
+import { useAgentStore } from '@agentic/client';
 import type { ActorDefs, ViewerState } from '../../actors/defs';
-import { agentKeyOf, workspaceKeyOf } from '../../actors/keys';
 import { identityOf, lookupOver, type AgentIdentity, type AgentLookup } from './live';
 
 export interface AgentDirectory {
@@ -27,78 +21,22 @@ export interface AgentDirectory {
     readonly error: Error | null;
 }
 
-export function useAgentDirectory(defs: ActorDefs, viewer: ViewerState): AgentDirectory {
-    const index = useActorState(defs.Workspace, () => viewer.workspaceId && ([workspaceKeyOf(viewer.workspaceId), 'get'] as const), { live: true });
-    const agents = useData(
-        () => {
-            const ws = viewer.workspaceId;
-            const ids = index.value?.agents;
-            return ws && ids ? (['agents', ws, ...ids] as const) : false;
-        },
-        async (key): Promise<Record<string, AgentIdentity>> => {
-            const [, ws, ...ids] = key as readonly [string, string, ...string[]];
-            const views = await Promise.all(
-                ids.map(async (id): Promise<AgentView | null> => {
-                    try {
-                        return await actor(defs.AgentActor, agentKeyOf(ws, id)).get();
-                    } catch {
-                        // Not configured yet, or gone: the directory shows the id until it is.
-                        return null;
-                    }
-                })
-            );
-            const out: Record<string, AgentIdentity> = {};
-            views.forEach((view, i) => {
-                if (view) out[view.id] = identityOf(view, i);
-            });
-            return out;
-        }
-    );
-    // Live identities, by id; a fetched one answers until its first frame (#258).
-    const live = signal<{ byId: Record<string, AgentIdentity> }>({ byId: {} });
-    const channel: ActorLiveChannel = useActorsContext().live;
-    const subs = new Map<string, () => void>();
-    let stop: (() => void) | undefined;
-    // Client only: `onMounted` never runs in a server render.
-    onMounted(() => {
-        stop = effect(() => {
-            const ws = viewer.workspaceId;
-            const ids = ws ? (index.value?.agents ?? []) : [];
-            // Keyed by actor key, not id: a workspace switch drops every old subscription and its identity.
-            const wanted = new Map(ids.map((id, i) => [agentKeyOf(ws!, id as AgentId), { id, i }] as const));
-            for (const [key, off] of subs) {
-                if (wanted.has(key)) continue;
-                off();
-                subs.delete(key);
-            }
-            const keep = new Set<string>(ids);
-            if (Object.keys(live.byId).some((id) => !keep.has(id))) live.byId = Object.fromEntries(Object.entries(live.byId).filter(([id]) => keep.has(id)));
-            for (const [key, { id, i }] of wanted) {
-                if (subs.has(key)) continue;
-                subs.set(
-                    key,
-                    channel.subscribe({ type: 'Agent', key, method: 'get' }, (value: unknown) => {
-                        const view = value as AgentView | null;
-                        if (view?.config && subs.has(key)) live.byId = { ...live.byId, [id]: identityOf(view, i) };
-                    })
-                );
-            }
-        });
+/** Called in a component's setup. The arguments are kept for the call sites; the store reads the app's own definitions and viewer. */
+export function useAgentDirectory(_defs: ActorDefs, _viewer: ViewerState): AgentDirectory {
+    const store = useAgentStore();
+    const identities = computed((): Record<string, AgentIdentity> => {
+        const out: Record<string, AgentIdentity> = {};
+        for (const [id, entry] of Object.entries(store.agents)) out[id] = identityOf(entry.view, entry.index);
+        return out;
     });
-    onUnmounted(() => {
-        stop?.();
-        for (const off of subs.values()) off();
-        subs.clear();
-    });
-    const merged = (): Record<string, AgentIdentity> => ({ ...agents.value, ...live.byId });
     return {
-        lookup: (id) => lookupOver(merged())(id),
-        all: () => Object.values(merged()),
+        lookup: (id) => lookupOver(identities.value)(id),
+        all: () => Object.values(identities.value),
         get loading() {
-            return index.loading || agents.loading;
+            return store.loading;
         },
         get error() {
-            return index.error ?? agents.error;
+            return (store.error as Error | null) ?? null;
         }
     };
 }
