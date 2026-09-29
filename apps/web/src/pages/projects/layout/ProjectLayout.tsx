@@ -20,9 +20,9 @@ import { useActorDefs, useViewer } from '../../../actors/defs';
 import { Page } from '../../../components/Page';
 import { dataMode } from '../../../data-mode';
 import { LAST_PROJECT_ID, PROJECTS, projectNamed } from '../../../mock/workspace';
-import { projectHead, type ProjectHead } from '../head';
+import { useProjectHeadStore, type ProjectHead } from '../head';
 import { useProjects } from '../live';
-import { countsFor, projectCounts } from './counts';
+import { countsFor, useProjectCountsStore, type ProjectMenuCounts } from './counts';
 import { ProjectPicker } from './ProjectPicker';
 import type { ProjectPage } from './types';
 
@@ -53,9 +53,11 @@ const LiveProjectLayout = component<LayoutProps>(({ props }) => {
     const viewer = useViewer()();
     const projects = useProjects(defs, viewer);
     const summaries = useWorkspaceStore().projectSummariesRead;
+    const { head: projectHead } = useProjectHeadStore();
+    const { counts: projectCounts } = useProjectCountsStore();
     // The head and counts this instance published: a later layout (the next project page) may already have replaced them.
     let mine: ProjectHead | null = null;
-    let myCounts: typeof projectCounts.value = null;
+    let myCounts: { readonly id: string; readonly counts: ProjectMenuCounts } | null = null;
     const stop = effect(() => {
         const p = projects.byId(props.id);
         mine = p ? headOf(p) : { id: props.id, name: props.id };

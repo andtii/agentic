@@ -1,24 +1,18 @@
 /**
  * The chat-view seam's pure parts (#1058): the pick rule, the detail default, the header note, the scroll
- * anchor, the saved choices, Raw's read-back, the live lines and a step's `Full output` address.
+ * anchor, Raw's read-back, the live lines and a step's `Full output` address.
  */
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { createTranscript, type AgentEvent } from '@sigx/ai-agent';
 import type { AgentMessage } from '@sigx/ai-agent/app';
 import type { StepsMessage } from '@agentic/ui';
 import type { TranscriptStep, TurnSteps } from '@agentic/core';
 import { lookupOver } from '../../src/pages/chat/live';
-import { EXPANDED_CAP, resetViewPrefs, setStepsExpanded, setViewDetail, setViewPin, viewPrefs } from '../../src/pages/chat/view-prefs';
 import { LANES_MIN_WIDTH, agentsAtWork, anchorOf, defaultDetail, pickDetail, pickView, restoreScroll, viewNote } from '../../src/pages/chat/views/pick';
 import { foldSession, turnToolParts, withRawTurns } from '../../src/pages/chat/views/raw';
 import { currentStep, liveWorkOf } from '../../src/pages/chat/views/live-work';
 import { stepHrefOf } from '../../src/pages/chat/views/step-href';
 import { CHAT_VIEWS } from '../../src/pages/chat/views';
-
-afterEach(() => {
-    globalThis.localStorage?.clear();
-    resetViewPrefs();
-});
 
 describe('pickView', () => {
     it('0 or 1 agents at work is Focus, 2 or more is Team', () => {
@@ -79,49 +73,6 @@ describe('the scroll anchor', () => {
         // The row now sits 500 px below the scroller's top; it sat 20 px below it.
         expect(restoreScroll(1000, { index: 3, offset: 20 }, 500)).toBe(1480);
         expect(restoreScroll(0, { index: 0, offset: 50 }, 0)).toBe(0);
-    });
-});
-
-describe('view-prefs', () => {
-    it('keeps the pin, the detail and the opened boxes per workspace and chat, in storage', () => {
-        setViewPin('ws1', 'c1', 'lanes');
-        setViewDetail('ws1', 'c1', 'raw');
-        setStepsExpanded('ws1', 'c1', 'm1', true);
-        setStepsExpanded('ws1', 'c1', 'm2', true);
-        setStepsExpanded('ws1', 'c1', 'm1', false);
-        expect(viewPrefs('ws1', 'c1')).toEqual({ pin: 'lanes', detail: 'raw', expanded: ['m2'] });
-        expect(viewPrefs('ws1', 'c2')).toEqual({ expanded: [] });
-        // A new page reads them back.
-        resetViewPrefs();
-        expect(viewPrefs('ws1', 'c1')).toEqual({ pin: 'lanes', detail: 'raw', expanded: ['m2'] });
-        expect(viewPrefs('ws2', 'c1')).toEqual({ expanded: [] });
-    });
-
-    it('unpins', () => {
-        setViewPin('ws1', 'c1', 'team');
-        setViewPin('ws1', 'c1', undefined);
-        expect(viewPrefs('ws1', 'c1').pin).toBeUndefined();
-    });
-
-    it('drops what storage holds that it does not know, and keeps only the newest opened boxes', () => {
-        globalThis.localStorage.setItem('agentic:chat-view:ws1', JSON.stringify({ c1: { pin: 'grid', detail: 'all', expanded: ['m1', 3] }, c2: 'x' }));
-        expect(viewPrefs('ws1', 'c1')).toEqual({ expanded: ['m1'] });
-        expect(viewPrefs('ws1', 'c2')).toEqual({ expanded: [] });
-        for (let i = 0; i < EXPANDED_CAP + 5; i++) setStepsExpanded('ws1', 'c3', `m${i}`, true);
-        expect(viewPrefs('ws1', 'c3').expanded).toHaveLength(EXPANDED_CAP);
-        expect(viewPrefs('ws1', 'c3').expanded[0]).toBe('m5');
-    });
-
-    it('lives for the page when storage refuses', () => {
-        const store = globalThis.localStorage;
-        const setItem = store.setItem;
-        store.setItem = () => { throw new Error('quota'); };
-        try {
-            setViewDetail('ws1', 'c1', 'messages');
-            expect(viewPrefs('ws1', 'c1').detail).toBe('messages');
-        } finally {
-            store.setItem = setItem;
-        }
     });
 });
 

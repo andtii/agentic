@@ -1,6 +1,6 @@
 /**
  * The chat page's view state (#1058), shared by the mock and the live page: the viewer's saved choices
- * (`view-prefs.ts`), the screen width Lanes needs, the pick (`pick.ts`), each turn's steps box state, and
+ * (`view-prefs.ts`, the chat prefs store), the screen width Lanes needs, the pick (`pick.ts`), each turn's steps box state, and
  * the scroll anchor a view switch keeps.
  *
  * A steps box the viewer opened is remembered for the chat (`expanded`); one they closed stays closed for
@@ -9,7 +9,7 @@
 import { onMounted, onUnmounted, signal, watch } from 'sigx';
 import type { AgentMessage } from '@sigx/ai-agent/app';
 import type { DetailLevel } from '@agentic/ui';
-import { setStepsExpanded, setViewDetail, setViewPin, viewPrefs, type ChatViewName } from '../view-prefs';
+import { useViewPrefs, type ChatViewName } from '../view-prefs';
 import { LANES_MIN_WIDTH, anchorOf, pickDetail, pickView, restoreScroll, type ScrollAnchor, type ViewPick } from './pick';
 
 export interface ChatViewState {
@@ -39,9 +39,10 @@ function rowsOf(root: HTMLElement): { el: HTMLElement; top: number; bottom: numb
 
 export function useChatView(opts: { readonly ws: () => string | null; readonly chatId: string; readonly working: () => number }): ChatViewState {
     const st = signal({ width: undefined as number | undefined, closed: [] as string[] });
+    const saved = useViewPrefs();
     const prefs = () => {
         const ws = opts.ws();
-        return ws ? viewPrefs(ws, opts.chatId) : { expanded: [] as readonly string[] };
+        return ws ? saved.viewPrefs(ws, opts.chatId) : { expanded: [] as readonly string[] };
     };
     const pick = (): ViewPick => pickView(opts.working(), prefs().pin, st.width);
     const detail = (): DetailLevel => pickDetail(pick().view, prefs().detail);
@@ -81,17 +82,17 @@ export function useChatView(opts: { readonly ws: () => string | null; readonly c
             const ws = opts.ws();
             if (!ws) return;
             record();
-            setViewPin(ws, opts.chatId, view === 'auto' ? undefined : view);
+            saved.setViewPin(ws, opts.chatId, view === 'auto' ? undefined : view);
         },
         chooseDetail: (d) => {
             const ws = opts.ws();
-            if (ws) setViewDetail(ws, opts.chatId, d);
+            if (ws) saved.setViewDetail(ws, opts.chatId, d);
         },
         stepsOpen: (m) => (prefs().expanded.includes(m.id) ? true : st.closed.includes(m.id) ? false : undefined),
         onStepsToggle: (m, open) => {
             st.closed = open ? st.closed.filter((id) => id !== m.id) : [...st.closed.filter((id) => id !== m.id), m.id];
             const ws = opts.ws();
-            if (ws) setStepsExpanded(ws, opts.chatId, m.id, open);
+            if (ws) saved.setStepsExpanded(ws, opts.chatId, m.id, open);
         },
         mainRef: (el) => {
             if (main === el) return;

@@ -57,11 +57,11 @@ import { deleteChatText } from './delete';
 import { ContextPanel } from './ContextPanel';
 import { DetachedQuestionCard } from './DetachedQuestionCard';
 import { ChatRequestsFrom, RequestCard, acceptedAt } from './entries/RequestCard';
-import { closeContextDrawer, contextDrawer } from './context-drawer';
+import { useContextDrawerStore } from './context-drawer';
 import { useAgentDirectory } from './directory';
 import { openFeed, type FeedHandle } from './feeds';
 import { chatHref, chatIdOfRoute, chatRedirect } from './href';
-import { chatHead, chatSearchRequest, chatSettingsRequest, closeChatSearch, closeChatSettings, closeNewChat, newChatRequest, openNewChat } from './head';
+import { useChatHeadStore } from './head';
 import { answerRequest, chatFailure, type InterruptionOfTurn, chatTasks, chatTitle, chatTranscript, chatWaitsOf, composeTranscript, detachedQuestions, entryTranscript, keepEntries, lastOf, membersOf, mentionsIn, notStoppedLine, queuedAgents, runActivation, sessionMidTurn, stopTargets, waitingAgents, workingAgents, type SessionActorClient } from './live';
 import { CHAT_VIEWS, FollowPanel, type ChatViewModel } from './views';
 import { useChatView } from './views/controller';
@@ -74,7 +74,7 @@ import { LiveChatList, archiveChat, createChatWith } from './LiveChats';
 import { queryOf } from '../session/files';
 import { fileToken, fileTokensIn, mentionOfQuery, viewDiffLinks } from '../session/references';
 import { NewChatDialog, type NewChatCreate } from './NewChatDialog';
-import { markSeen } from './read-marks';
+import { useReadMarks } from './read-marks';
 import { chatAddressing, useChatProjectContext } from './project-context';
 import { useProjects } from '../projects/live';
 import { chatPullLinks } from '../projects/work/pull/links';
@@ -92,6 +92,10 @@ export const LiveChat = component<{ id: string; projectId?: string }>(({ props }
     const defs = useActorDefs();
     const viewer = useViewer()();
     const router = useRouter();
+    // The app's stores (#1124), kept for the watchers and handlers below: the head the topbar reads, its requests, the drawer, the read marks.
+    const { head: chatHead, search: chatSearchRequest, settings: chatSettingsRequest, newChat: newChatRequest, closeChatSearch, closeChatSettings, closeNewChat, openNewChat } = useChatHeadStore();
+    const { drawer: contextDrawer, closeContextDrawer } = useContextDrawerStore();
+    const { markSeen } = useReadMarks();
     const directory = useAgentDirectory(defs, viewer);
     const key = (): string | null => (viewer.workspaceId ? chatKeyOf(viewer.workspaceId, props.id) : null);
 

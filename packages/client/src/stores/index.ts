@@ -10,3 +10,4 @@ export { useRegistryStore } from './registry';
 export { foldEnvironments, machineKeyOf, pairedOf, useMachineStore, type EnvironmentEntry, type MachineEntry } from './machines';
 export { useAgentStore, type AgentEntry } from './agents';
 export { useTaskStore } from './tasks';
+export { EXPANDED_CAP, chatSeenKey, chatViewKey, parseReadMarks, parseViewPrefs, useChatPrefsStore, type ChatDetailLevel, type ChatViewName, type ChatViewPrefs, type ReadMarks } from './chat-prefs';

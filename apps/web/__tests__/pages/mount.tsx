@@ -8,6 +8,8 @@ import { defineApp } from 'sigx';
 import '@sigx/runtime-dom';
 import { RouterView } from '@sigx/router';
 import { plainCodeRenderer, useCodeRenderer } from '@agentic/ui';
+import { useKeyValueStorage } from '@agentic/client';
+import { webKeyValueStorage } from '../../src/actors/storage';
 import { createServerRouter } from '../../src/router';
 
 const closers: (() => void)[] = [];
@@ -25,6 +27,8 @@ export async function mountRoute(path: string): Promise<HTMLDivElement> {
     app.use(router);
     // happy-dom runs no Monaco: the plain grid draws every code surface (#564).
     app.defineProvide(useCodeRenderer, () => plainCodeRenderer);
+    // The app's storage, as `App` provides it: the chat prefs store reads what a test saved to `localStorage`.
+    app.defineProvide(useKeyValueStorage, () => webKeyValueStorage);
     app.mount(container);
     await tick();
     closers.push(() => {

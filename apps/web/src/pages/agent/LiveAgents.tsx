@@ -21,7 +21,7 @@ import { agentKeyOf, workspaceKeyOf } from '../../actors/keys';
 import { useAgentDirectory } from '../chat/directory';
 import { presencePill } from '../Agents';
 import { useAgentCorrections, useMemoryCount, useWorkspaceTasks } from './activity';
-import { closeNewAgent, newAgentRequest } from './head';
+import { useAgentHeadStore } from './head';
 import { CREATED_REASON, newAgentPatch, presenceOf, tasksByAssignee, type NewAgentInput } from './live';
 import { NewAgentDialog } from './NewAgentDialog';
 import { AgentCardLink } from './AgentCardLink';
@@ -55,6 +55,7 @@ const CardStats = component<Define.Prop<'agentId', string, true> & Define.Prop<'
 
 export const LiveAgents = component(() => {
     useHead({ title: 'Agents' });
+    const { newAgent: newAgentRequest, closeNewAgent } = useAgentHeadStore();
     const defs = useActorDefs();
     const viewer = useViewer()();
     const router = useRouter();

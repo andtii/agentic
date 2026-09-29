@@ -15,7 +15,7 @@ import { projectFeatureCatalogue } from '../plugins/features';
 import { AGENTS, PROJECTS, USER, agentNamed, chatSessionOf, formatTime, loadChat, loadChats, projectNamed, type MockChatSummary } from '../mock/workspace';
 import { ChatList, MemberTiles } from './chat/ChatList';
 import { ContextPanel } from './chat/ContextPanel';
-import { closeContextDrawer, contextDrawer, openContextDrawer } from './chat/context-drawer';
+import { openContextDrawer, useContextDrawerStore } from './chat/context-drawer';
 import { dataMode } from '../data-mode';
 import { chatHead, openChatSettings, toggleChatSearch } from './chat/head';
 import { chatIdOfRoute, chatRedirect } from './chat/href';
@@ -105,6 +105,7 @@ defineTopbar('chat', (route) => chatTopbar(routeId(route)));
  */
 export const ChatScreen = component<{ id: string; projectId?: string }>(({ props }) => {
     const route = useRoute();
+    const { drawer: contextDrawer, closeContextDrawer } = useContextDrawerStore();
     const chats = loadChats();
     const st = signal({ draft: '', stopped: [] as string[], followed: null as string | null });
     // When the page opened: the sample live lines count their time from it.

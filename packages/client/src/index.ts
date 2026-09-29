@@ -14,3 +14,4 @@ export { isAuthError, readinessById, readinessFacts, readyRuntimeIds, signedOutP
 export { foldEnvironments, machineKeyOf, pairedOf, useMachineStore, type EnvironmentEntry, type MachineEntry } from './stores/index';
 export { useAgentStore, type AgentEntry } from './stores/index';
 export { useTaskStore } from './stores/index';
+export { EXPANDED_CAP, chatSeenKey, chatViewKey, parseReadMarks, parseViewPrefs, useChatPrefsStore, type ChatDetailLevel, type ChatViewName, type ChatViewPrefs, type ReadMarks } from './stores/index';
