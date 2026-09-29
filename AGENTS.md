@@ -210,6 +210,7 @@ Run the desktop app: `pnpm --filter @agentic/desktop dev` (`tauri dev`; needs a 
 | `packages/plugins-plan` | `@agentic/plugins-plan` | plan project feature plugin: plans of phases and items, queues, claims (scaffold) |
 | `packages/connectors` | `@agentic/connectors` | native connectors over conduit: the engine with injected stores, operations as namespaced connector tools, connector manifests (Gmail first) |
 | `packages/daemon-protocol` | `@agentic/daemon-protocol` | envelope validators + `daemonConformance` |
+| `packages/client` | `@agentic/client` | DOM-free client layer: app-lifetime `@sigx/store` stores (`defineAppStore`, `initAppStores`, `useLiveActorState`) and the injectables they read (`useActorDefs`, `useViewer`, `KeyValueStorage`), for the web shell and the planned Lynx shell |
 | `packages/ui` | `@agentic/ui` | zero fragment (`ai-*` scopes), layout shell, streaming markdown |
 | `packages/mcp` | `@agentic/mcp` | MCP client + platform MCP server (orchestration surface) |
 | `packages/a2a` | `@agentic/a2a` | A2A 1.0 server + client adapter |
@@ -222,9 +223,11 @@ Path aliases: `tsconfig.json` and `vitest.config.ts` map `@agentic/*` to
 `packages/*/src`, so tests and typecheck run against source, not dist.
 
 Layering (imports point downward only): core ← daemon-protocol ← memory /
-learning ← runtimes ← platform ← apps. `packages/*` never import the `sigx`
+learning ← runtimes ← platform ← client ← apps (`client` takes only types from
+`platform`). `packages/*` never import the `sigx`
 umbrella — peer on `@sigx/runtime-core` / `@sigx/reactivity` / `@sigx/actors`
-so they stay edge-safe; only `apps/web` and `packages/ui` touch the DOM.
+so they stay edge-safe; only `apps/web` and `packages/ui` touch the DOM
+(`packages/client` is DOM-free by lint rule and test).
 
 ## Parallel work with git worktrees
 

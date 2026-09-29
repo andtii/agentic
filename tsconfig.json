@@ -70,6 +70,9 @@
       "@agentic/a2a": [
         "./packages/a2a/src/index.ts"
       ],
+      "@agentic/client": [
+        "./packages/client/src/index.ts"
+      ],
       "@agentic/ui": [
         "./packages/ui/src/index.ts"
       ],

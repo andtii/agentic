@@ -6,5 +6,29 @@
   "ignorePatterns": [
     "**/dist/**",
     "**/node_modules/**"
+  ],
+  "overrides": [
+    {
+      "files": ["packages/client/src/**"],
+      "rules": {
+        "no-restricted-imports": ["error", {
+          "paths": [
+            { "name": "sigx", "message": "@agentic/client is DOM-free (#1116): import @sigx/runtime-core / @sigx/reactivity, not the sigx umbrella." },
+            { "name": "@sigx/runtime-dom", "message": "@agentic/client is DOM-free (#1116)." },
+            { "name": "@sigx/router", "message": "@agentic/client is DOM-free (#1116)." },
+            { "name": "@agentic/ui", "message": "@agentic/client is DOM-free (#1116)." }
+          ],
+          "patterns": [
+            { "group": ["@sigx/runtime-dom/*", "@sigx/zero*", "@agentic/ui/*"], "message": "@agentic/client is DOM-free (#1116)." }
+          ]
+        }],
+        "no-restricted-globals": ["error",
+          { "name": "window", "message": "@agentic/client is DOM-free (#1116)." },
+          { "name": "document", "message": "@agentic/client is DOM-free (#1116)." },
+          { "name": "localStorage", "message": "@agentic/client is DOM-free (#1116): read the KeyValueStorage injectable." },
+          { "name": "sessionStorage", "message": "@agentic/client is DOM-free (#1116): read the KeyValueStorage injectable." }
+        ]
+      }
+    }
   ]
 }
