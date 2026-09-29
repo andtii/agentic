@@ -4,16 +4,14 @@
  * paired machine of the workspace with `Machine.online` and its session
  * count — the rows the design track's `ConnectionStrip` draws
  * (`connectionRows` in `@agentic/ui`). The machine list is the Workspace
- * index read live; each machine's record is a live read of its own
- * (`MachineWatch`, renderless), so a daemon dropping its socket flips its
- * row without a reload.
+ * index read live; each machine's record is the machines store's live
+ * `Machine.get` (#1120), so a daemon dropping its socket flips its row
+ * without a reload.
  */
-import { component, effect, onUnmounted, signal, type JSXElement } from 'sigx';
-import { useActorState } from '@sigx/actors/app';
+import { component, type JSXElement } from 'sigx';
+import type { MachineView } from '@agentic/platform';
 import { ConnectionStrip, connectionRows, type MachineConnection } from '@agentic/ui';
-import { useWorkspaceStore } from '@agentic/client';
-import { useActorDefs, useViewer } from '../../actors/defs';
-import { machineKeyOf } from '../../actors/keys';
+import { useMachineStore, useWorkspaceStore } from '@agentic/client';
 import { clientConnection } from './client';
 
 export interface MachinePresence {
@@ -43,36 +41,19 @@ export function machineRowsOf(machines: readonly { readonly id: string; readonly
         });
 }
 
-/** Renderless: keeps one machine's presence in the shared map through a live read of `Machine.get`. */
-const MachineWatch = component<{ id: string; workspaceId: string; onPresence: (id: string, p: MachinePresence) => void }>(({ props }) => {
-    const defs = useActorDefs();
-    const view = useActorState(defs.Machine, () => [machineKeyOf(props.workspaceId, props.id), 'get'] as const, { live: true });
-    const stop = effect(() => {
-        const v = view.value;
-        if (v) props.onPresence(props.id, { online: v.online, sessions: v.activeSessions.length, ...(v.lastSeen !== undefined ? { lastSeen: v.lastSeen } : {}) });
-    });
-    onUnmounted(stop);
-    return (): JSXElement => null;
-});
+/** Each machine's presence from its record. */
+export function presenceOf(views: Readonly<Record<string, MachineView>>): Record<string, MachinePresence> {
+    const out: Record<string, MachinePresence> = {};
+    for (const [id, v] of Object.entries(views)) out[id] = { online: v.online, sessions: v.activeSessions.length, ...(v.lastSeen !== undefined ? { lastSeen: v.lastSeen } : {}) };
+    return out;
+}
 
 export const LiveConnection = component(() => {
-    const viewer = useViewer()();
     const machines = useWorkspaceStore().machinesRead;
-    const presence = signal<{ map: Record<string, MachinePresence> }>({ map: {} });
-    const report = (id: string, p: MachinePresence): void => {
-        const prev = presence.map[id];
-        if (prev && prev.online === p.online && prev.sessions === p.sessions && prev.lastSeen === p.lastSeen) return;
-        presence.map = { ...presence.map, [id]: p };
-    };
+    const store = useMachineStore();
     return (): JSXElement => {
-        const ws = viewer.workspaceId;
         const list = machines.value ?? [];
-        const rows = connectionRows(clientConnection(), machineRowsOf(list, presence.map, Date.now()));
-        return (
-            <>
-                <ConnectionStrip rows={rows} />
-                {ws ? list.filter((m) => m.status === 'paired').map((m) => <MachineWatch id={m.id} workspaceId={ws} onPresence={report} />) : null}
-            </>
-        );
+        const rows = connectionRows(clientConnection(), machineRowsOf(list, presenceOf(store.views), Date.now()));
+        return <ConnectionStrip rows={rows} />;
     };
 });
