@@ -12,8 +12,9 @@ import { useActorState } from '@sigx/actors/app';
 import type { PlanItem, ProjectFeatureUi, PullRequest } from '@agentic/core';
 import type { Visitor } from '@agentic/platform';
 import type { Recipient, RefSource } from '@agentic/ui';
+import { useRegistryStore } from '@agentic/client';
 import type { ActorDefs, ViewerState } from '../../actors/defs';
-import { planKeyOf, pullsKeyOf, registryKeyOf } from '../../actors/keys';
+import { planKeyOf, pullsKeyOf } from '../../actors/keys';
 import { resolveAddressing, type Addressing, type MockChatMember } from '../../mock/workspace';
 import { planItemsOf } from '../projects/work/live';
 import { mentionsIn, type AgentLookup } from './live';
@@ -106,7 +107,7 @@ export function useChatProjectContext(
     viewer: Pick<ViewerState, 'workspaceId'>,
     project: () => { readonly id: string; readonly features: Readonly<Record<string, unknown>> } | undefined
 ): ChatProjectContext {
-    const views = useActorState(defs.Registry, () => viewer.workspaceId && project() && ([registryKeyOf(viewer.workspaceId), 'projectFeatures'] as const), { live: true });
+    const views = useRegistryStore().projectFeaturesRead;
     const chips = (): ContextChip[] => {
         const p = project();
         return p ? contextChips(Object.keys(p.features), views.value ?? []) : [];

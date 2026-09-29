@@ -9,8 +9,9 @@ import { actor } from '@sigx/actors';
 import { useActorState } from '@sigx/actors/app';
 import type { AgentId, MemoryEntry } from '@agentic/core';
 import type { AgentView, PendingProposal, TaskIndexRow } from '@agentic/platform';
+import { useRegistryStore } from '@agentic/client';
 import type { ActorDefs, ViewerState } from '../../actors/defs';
-import { agentKeyOf, ledgerKeyOf, memoryKeyOf, registryKeyOf, taskIndexKeyOf, taskKeyOf } from '../../actors/keys';
+import { agentKeyOf, ledgerKeyOf, memoryKeyOf, taskIndexKeyOf, taskKeyOf } from '../../actors/keys';
 import { activeTasks, isoWeekOf, weekMonths, type AgentActivity } from './live';
 
 /** Entries read per `Memory.exportPage` call. */
@@ -33,8 +34,8 @@ export interface ActiveMemory {
  * while the flat plugin is active, the Memory actor otherwise (and until the Registry answers). The two share the key
  * and the method table, so only the definition differs.
  */
-export function useActiveMemory(defs: Pick<ActorDefs, 'Registry'>, viewer: Pick<ViewerState, 'workspaceId'>): ActiveMemory {
-    const overview = useActorState(defs.Registry, () => { const ws = viewer.workspaceId; return ws && ([registryKeyOf(ws), 'overview'] as const); }, { live: true });
+export function useActiveMemory(_defs: Pick<ActorDefs, 'Registry'>, _viewer: Pick<ViewerState, 'workspaceId'>): ActiveMemory {
+    const overview = useRegistryStore().overviewRead;
     const active = (): string | undefined => overview.value?.active.memory;
     return {
         flat: () => active() === FLAT_MEMORY_PLUGIN,

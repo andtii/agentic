@@ -14,10 +14,10 @@
 import { component, effect, onUnmounted, signal, useData, useHead, type Define } from 'sigx';
 import { Link, useRoute, useRouter } from '@sigx/router';
 import { actor } from '@sigx/actors';
-import { useActorState } from '@sigx/actors/app';
 import { runtimeKindOf, type PermissionScope, type ToolMode } from '@agentic/core';
 import type { Dependents, SlotKind } from '@agentic/platform';
 import { EmptyState, ErrorNote } from '@agentic/ui';
+import { useLiveActorState, useRegistryStore } from '@agentic/client';
 import { useActorDefs, useViewer } from '../../actors/defs';
 import { registryKeyOf } from '../../actors/keys';
 import { useAgentDirectory } from '../chat/directory';
@@ -56,8 +56,10 @@ export const LivePlugin = component<LivePluginProps>(({ props }) => {
         async (k): Promise<Dependents | undefined> => (await actor(defs.Registry, (k as readonly string[])[1]!).dependentsAll()).find((d) => d.pluginId === props.id)
     );
     // The tools' effective modes (PLG-03) and the connector records (transport, endpoint, reported tools), both live.
-    const policy = useActorState(defs.Registry, () => { const k = key(); return !!k && !!plugin() && ([k, 'toolPolicy', props.id] as const); }, { live: true });
-    const connectors = useActorState(defs.Registry, () => { const k = key(); return !!k && ([k, 'connectors'] as const); }, { live: true });
+    // `toolPolicy(id)` is keyed by the plugin, so it is this page's own read, not the registry store's; `useLiveActorState`
+    // (not `useActorState(…, { live: true })`, signalxjs/actors#494) so its subscription closes with the page.
+    const policy = useLiveActorState({ onDeactivated: onUnmounted }, defs.Registry, () => { const k = key(); return !!k && !!plugin() && ([k, 'toolPolicy', props.id] as const); });
+    const connectors = useRegistryStore().connectorsRead;
     // The topbar reads the crumb from here.
     const stopHead = effect(() => {
         const p = plugin();

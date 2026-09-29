@@ -7,12 +7,11 @@
  * `environments` is left to the machines wiring (#144). The runtimes are the
  * workspace's enabled runtime plugins with what each still needs (#234).
  */
-import { useActorState } from '@sigx/actors/app';
 import type { AgentConfig } from '@agentic/core';
 import type { ConnectorRecord } from '@agentic/platform';
 import type { FieldOption, RuntimeOption } from '@agentic/ui';
+import { useRegistryStore } from '@agentic/client';
 import type { ActorDefs, ViewerState } from '../../actors/defs';
-import { registryKeyOf } from '../../actors/keys';
 import { useWorkspaceReadiness } from '../plugins/readiness';
 import { runtimeOptions } from './runtimes';
 
@@ -52,7 +51,7 @@ export function agentCatalog(config: AgentConfig, connectors: readonly Connector
 
 /** The catalogue, with the Registry's connectors and runtime plugins read live. Call in a component's setup. */
 export function useAgentCatalog(defs: ActorDefs, viewer: ViewerState): (config: AgentConfig) => AgentCatalog {
-    const connectors = useActorState(defs.Registry, () => viewer.workspaceId && ([registryKeyOf(viewer.workspaceId), 'connectors'] as const), { live: true });
+    const connectors = useRegistryStore().connectorsRead;
     const readiness = useWorkspaceReadiness(defs, viewer);
     return (config) => {
         const plugins = readiness.overview()?.plugins;

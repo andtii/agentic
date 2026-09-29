@@ -19,11 +19,10 @@
  * workspace's `ConnectorAccounts` and the connector record, ids only.
  */
 import { component, signal, type Define, type JSXElement } from 'sigx';
-import { useActorState } from '@sigx/actors/app';
 import type { PluginView } from '@agentic/platform';
 import { Button, ErrorNote, Label, StatusPill } from '@agentic/ui';
+import { useRegistryStore } from '@agentic/client';
 import type { ActorDefs } from '../../actors/defs';
-import { connectorAccountsKeyOf, registryKeyOf } from '../../actors/keys';
 import { connectorDisconnectPath, connectorRedirectUri, connectorStartPath } from '../../connectors/paths';
 import { pageOrigin } from '../machines/LivePair';
 import { connectBlocker, connectionOf, connectionPill, connectionText, connectOutcome, unsupportedOf, type ConnectionState } from './conduit';
@@ -131,8 +130,8 @@ export type LiveConduitConnectProps =
     & Define.Prop<'post', (path: string) => Promise<Response>>;
 
 export const LiveConduitConnect = component<LiveConduitConnectProps>(({ props }) => {
-    const connectors = useActorState(props.defs.Registry, () => [registryKeyOf(props.workspaceId), 'connectors'] as const, { live: true });
-    const accounts = useActorState(props.defs.ConnectorAccounts, () => [connectorAccountsKeyOf(props.workspaceId), 'accounts'] as const, { live: true });
+    const connectors = useRegistryStore().connectorsRead;
+    const accounts = useRegistryStore().accountsRead;
     const st = signal({ busy: false, notice: '', error: '' });
     const outcome = connectOutcome(props.query ?? {});
 

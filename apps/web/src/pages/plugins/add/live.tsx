@@ -10,8 +10,8 @@
  */
 import { component, type Define } from 'sigx';
 import { actor } from '@sigx/actors';
-import { useActorState } from '@sigx/actors/app';
 import { EmptyState } from '@agentic/ui';
+import { useRegistryStore } from '@agentic/client';
 import { useActorDefs, useViewer } from '../../../actors/defs';
 import { agentKeyOf, registryKeyOf } from '../../../actors/keys';
 import { connectorStartPath } from '../../../connectors/paths';
@@ -32,8 +32,8 @@ export const LiveAddConnector = component<LiveAddConnectorProps>(({ props }) => 
     const viewer = useViewer()();
     const directory = useAgentDirectory(defs, viewer);
     const registryKey = (): string | null => (viewer.workspaceId ? registryKeyOf(viewer.workspaceId) : null);
-    const connectors = useActorState(defs.Registry, () => { const k = registryKey(); return k && ([k, 'connectors'] as const); }, { live: true });
-    const overview = useActorState(defs.Registry, () => { const k = registryKey(); return k && ([k, 'overview'] as const); }, { live: true });
+    const connectors = useRegistryStore().connectorsRead;
+    const overview = useRegistryStore().overviewRead;
     const registry = () => actor(defs.Registry, registryKey()!);
 
     const port: AddConnectorPort = {

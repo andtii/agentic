@@ -15,11 +15,11 @@
  */
 import { component, signal, useData, type Define } from 'sigx';
 import { actor } from '@sigx/actors';
-import { useActorState } from '@sigx/actors/app';
 import type { Dependents } from '@agentic/platform';
 import { EmptyState } from '@agentic/ui';
+import { useRegistryStore } from '@agentic/client';
 import { useActorDefs, useViewer } from '../../actors/defs';
-import { connectorAccountsKeyOf, registryKeyOf } from '../../actors/keys';
+import { registryKeyOf } from '../../actors/keys';
 import { useAgentDirectory } from '../chat/directory';
 import { OpsPage } from '../ops/OpsPage';
 import { AddConnectorDialog, type AddConnectorRequest } from './AddConnectorDialog';
@@ -47,8 +47,8 @@ export const LiveConnectorsView = component<LiveConnectorsViewProps>(({ props })
     const agents = useAgentDirectory(defs, viewer);
     const ready = useWorkspaceReadiness(defs, viewer);
     const key = (): string | null => (viewer.workspaceId ? registryKeyOf(viewer.workspaceId) : null);
-    const records = useActorState(defs.Registry, () => { const k = key(); return k && ([k, 'connectors'] as const); }, { live: true });
-    const accounts = useActorState(defs.ConnectorAccounts, () => { const ws = viewer.workspaceId; return ws && ([connectorAccountsKeyOf(ws), 'accounts'] as const); }, { live: true });
+    const records = useRegistryStore().connectorsRead;
+    const accounts = useRegistryStore().accountsRead;
     // Who picks each connector — one read for all of them, as the catalogue does.
     const usedBy = useData(
         () => {
