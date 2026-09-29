@@ -5,7 +5,8 @@ import type { ProjectId } from '@agentic/core';
 import { Page } from '../../../components/Page';
 import { defineTopbar } from '../../../components/topbar';
 import { useActorDefs, useViewer } from '../../../actors/defs';
-import { chatKeyOf, taskIndexKeyOf } from '../../../actors/keys';
+import { useTaskStore } from '@agentic/client';
+import { chatKeyOf } from '../../../actors/keys';
 import { dataMode } from '../../../data-mode';
 import { MOCK_PROJECT_CHATS } from '../../../mock/projects/chats';
 import { PROJECTS, USER, agentNamed, formatAge } from '../../../mock/workspace';
@@ -91,7 +92,7 @@ const LiveProjectChats = component<ProjectPageProps>(({ props }) => {
     const directory = useAgentDirectory(defs, viewer);
     const chats = useChatRows(defs, viewer, directory);
     const projects = useProjects(defs, viewer);
-    const index = useActorState(defs.TaskIndex, () => viewer.workspaceId && ([taskIndexKeyOf(viewer.workspaceId), 'list'] as const), { live: true });
+    const index = useTaskStore().read;
     // The chats this page moved: shown in the project at once, before the chat's own read comes back.
     const st = signal({ moved: {} as Record<string, string>, busy: false, error: '' });
     const rows = (): ProjectChatRow[] => {

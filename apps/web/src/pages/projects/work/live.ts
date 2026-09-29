@@ -7,9 +7,9 @@
 import { useActorState } from '@sigx/actors/app';
 import type { AgentId, Plan, PlanItem, ProjectFeatureUi, ProjectRecord, PullRequest, TaskId } from '@agentic/core';
 import type { PullsReadiness, TaskIndexRow } from '@agentic/platform';
+import { useRegistryStore, useTaskStore } from '@agentic/client';
 import { useActorDefs, useViewer, type ActorDefs, type ViewerState } from '../../../actors/defs';
-import { planKeyOf, pullsKeyOf, taskIndexKeyOf } from '../../../actors/keys';
-import { useRegistryStore } from '@agentic/client';
+import { planKeyOf, pullsKeyOf } from '../../../actors/keys';
 import { dataMode } from '../../../data-mode';
 import { MOCK_WORK, mockFeatureUi } from '../../../mock/projects/work';
 import type { WorkFeatures, WorkTask } from './model';
@@ -113,9 +113,9 @@ export function useFeatureUi(_defs: Pick<ActorDefs, 'Registry'>, _viewer: Pick<V
     return (id) => store.projectFeatures.find((v) => v.id === id)?.ui;
 }
 
-/** The workspace's TaskIndex, live. */
-export function useTaskIndexRows(defs: Pick<ActorDefs, 'TaskIndex'>, viewer: Pick<ViewerState, 'workspaceId'>): { rows(): readonly TaskIndexRow[]; readonly loading: boolean } {
-    const index = useActorState(defs.TaskIndex, () => viewer.workspaceId && ([taskIndexKeyOf(viewer.workspaceId), 'list'] as const), { live: true });
+/** The workspace's TaskIndex, live — through the task store (#1122), so every page shares one subscription. */
+export function useTaskIndexRows(_defs: Pick<ActorDefs, 'TaskIndex'>, _viewer: Pick<ViewerState, 'workspaceId'>): { rows(): readonly TaskIndexRow[]; readonly loading: boolean } {
+    const index = useTaskStore().read;
     return {
         rows: () => index.value ?? [],
         get loading() {
