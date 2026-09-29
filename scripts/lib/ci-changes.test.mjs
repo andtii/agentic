@@ -27,6 +27,10 @@ test('a platform change runs workers, node and e2e', () => {
     assert.deepEqual(lanesFor(['packages/platform/src/plan/actor.ts']), { ...none, code: true, workers: true, node: true, e2e: true });
 });
 
+test('a client stores change runs workers, node and e2e (#1129)', () => {
+    assert.deepEqual(lanesFor(['packages/client/src/stores.ts']), { ...none, code: true, workers: true, node: true, e2e: true });
+});
+
 test('a node host change runs the node lane only', () => {
     assert.deepEqual(lanesFor(['apps/node/src/host.ts']), { ...none, code: true, node: true });
 });
