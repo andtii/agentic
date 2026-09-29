@@ -15,8 +15,8 @@
  * ports: its tasks record the failure in `ops` and change nothing.
  */
 
-import type { AgentConfig, AgentId, ChatFileStore, ChatId, ConnectorRef, HostOs, MachineId, NotificationPrefs, ProjectColor, ProjectFeatures, ProjectId, ProjectManagerSpec, ProjectMembers, PmPolicy, ProjectPatch, ProjectRecord, RetentionSettings, ScheduleId, UpdateSettings, WorkdirRef, WorkspaceDefaults, WorkspaceId, WorkspaceSettings } from '@agentic/core';
-import { actorKey, createId, DEFAULT_UPDATE_SETTINGS, DEFAULT_WORKSPACE_SETTINGS, MEMBER_LIMIT_MAX, parseProjectFolderKey, pathWithin, PROJECT_COLORS, PROJECTS_MAX } from '@agentic/core';
+import type { AgentConfig, AgentId, AgentSummary, ChatFileStore, ChatId, ConnectorRef, HostOs, MachineId, NotificationPrefs, ProjectColor, ProjectFeatures, ProjectId, ProjectManagerSpec, ProjectMembers, PmPolicy, ProjectPatch, ProjectRecord, RetentionSettings, ScheduleId, UpdateSettings, WorkdirRef, WorkspaceDefaults, WorkspaceId, WorkspaceSettings } from '@agentic/core';
+import { actorKey, agentSummaryOf, createId, DEFAULT_UPDATE_SETTINGS, DEFAULT_WORKSPACE_SETTINGS, MEMBER_LIMIT_MAX, parseProjectFolderKey, pathWithin, PROJECT_COLORS, PROJECTS_MAX } from '@agentic/core';
 import { defineActor, type ActorContext, type ActorPolicy, type AnyActorDefinition } from '@sigx/actors';
 import { ServerFnError } from '@sigx/server';
 import type { ProjectChangedData } from '../audit/events.js';
@@ -171,6 +171,11 @@ export interface WorkspaceState {
     owner: string;
     createdAt: number;
     agents: AgentId[];
+    /**
+     * Each agent as the lists draw it (#1125), by id: written by the Agent actor with every config version
+     * (`setAgentSummary`), backfilled by `get` for an agent that has none. Absent on older records.
+     */
+    agentSummaries?: Record<AgentId, AgentSummary>;
     chats: ChatId[];
     /** Chats deleted (#674, `deleteChat`): out of `chats`, kept so `deleteAll` still purges their records (the store may not list). Absent while none is. */
     deletedChats?: ChatId[];
@@ -516,6 +521,30 @@ async function armFeaturePurge(ctx: ActorContext<WorkspaceState>, at: number): P
     else await ctx.reminders.set(REMOVED_FEATURES_REMINDER, { due });
 }
 
+/**
+ * Give every indexed agent without a summary one (#1125), read from its Agent actor — records from before the
+ * summaries existed. One save for all of them; an agent that cannot be read is left for the next read.
+ */
+async function backfillAgentSummaries(ctx: ActorContext<WorkspaceState>): Promise<void> {
+    const missing = ctx.state.agents.filter((id) => !ctx.state.agentSummaries?.[id]);
+    if (!missing.length) return;
+    const workspaceId = ownerOfWorkspaceKey(ctx.key) as WorkspaceId;
+    const read: AgentSummary[] = [];
+    await eachLimited(missing, SUMMARY_CONCURRENCY, async (id) => {
+        try {
+            const view = await ctx.actor(AgentActor, agentKey(workspaceId, id)).get();
+            read.push(agentSummaryOf(id, view.configVersion, view.config));
+        } catch {
+            // Unreadable now: it stays out of the summaries and is read again next time.
+        }
+    });
+    // A summary the Agent wrote meanwhile is newer than the one read here.
+    const fresh = read.filter((summary) => ctx.state.agents.includes(summary.id) && !ctx.state.agentSummaries?.[summary.id]);
+    if (!fresh.length) return;
+    ctx.state.agentSummaries = { ...ctx.state.agentSummaries, ...Object.fromEntries(fresh.map((summary) => [summary.id, summary])) };
+    await ctx.save();
+}
+
 export function defineWorkspace(options: WorkspaceOptions = {}) {
     // Resolved per call, not captured: tests replace `Date.now` after this module loaded.
     const now = options.now ?? (() => Date.now());
@@ -527,7 +556,8 @@ export function defineWorkspace(options: WorkspaceOptions = {}) {
         authorize,
         persistence: 'explicit',
         // `projects` interleaves: `Chat.setProject` reads it back over a hop inside `createChat`'s own turn.
-        methodReentrancy: { get: 'always', recentWorkdirs: 'always', projects: 'always', listMachines: 'always', projectSummaries: 'always' },
+        // `setAgentSummary` interleaves: the Agent writes it inside `update`, which the Workspace itself calls over a hop (`createProjectManager`).
+        methodReentrancy: { get: 'always', recentWorkdirs: 'always', projects: 'always', listMachines: 'always', projectSummaries: 'always', setAgentSummary: 'always' },
         state: (key): WorkspaceState => ({
             v: WORKSPACE_STATE_VERSION,
             owner: ownerOfWorkspaceKey(key),
@@ -540,8 +570,26 @@ export function defineWorkspace(options: WorkspaceOptions = {}) {
             ops: {}
         }),
         methods: (ctx) => ({
+            /** The index. An agent without a summary (a record from before #1125) gets one here, read once from its Agent. */
             async get(): Promise<WorkspaceView> {
+                await backfillAgentSummaries(ctx);
                 return ctx.snapshot();
+            },
+
+            /**
+             * Keep agent `summary.id`'s summary (#1125): the Agent actor calls it with every config version it saves.
+             * An earlier version than the one held is ignored (hops may land out of order), and so is an agent the
+             * index does not list.
+             */
+            async setAgentSummary(summary: AgentSummary): Promise<void> {
+                if (!summary || typeof summary !== 'object' || typeof summary.id !== 'string' || typeof summary.configVersion !== 'number' || !summary.config || typeof summary.config !== 'object') {
+                    throw new ServerFnError(400, 'Workspace.setAgentSummary: a summary needs an id, a configVersion and a config');
+                }
+                if (!ctx.state.agents.includes(summary.id)) return;
+                const held = ctx.state.agentSummaries?.[summary.id];
+                if (held && held.configVersion > summary.configVersion) return;
+                ctx.state.agentSummaries = { ...ctx.state.agentSummaries, [summary.id]: summary };
+                await ctx.save();
             },
 
             /** Records the id in the index; the Agent actor's config is written by the Agent lane. */

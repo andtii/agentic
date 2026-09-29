@@ -1,9 +1,10 @@
 // @vitest-environment happy-dom
 /**
- * The agent store (#1119): the shell creates it, pages read the agent
- * directory through it, and navigating between those pages opens no new
- * subscription — one live `Agent.get` per agent for the app's lifetime,
- * following the Workspace index's agent ids.
+ * The agent store (#1119, #1125): the shell creates it, pages read the agent
+ * directory through it, and it reads the agents' summaries off the Workspace
+ * index — no `Agent` call and no `Agent` socket, ever. Navigating between pages
+ * opens no new subscription, and a rename (a new index frame) reaches every
+ * page without a reload.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { component, defineApp, signal, type JSXElement } from '@sigx/runtime-core';
@@ -12,45 +13,49 @@ import { actorsPlugin } from '@sigx/actors/app';
 import { __actorRef, type ActorSubscription, type ActorTransport } from '@sigx/actors/client';
 import { initAppStores, memoryKeyValueStorage, useActorDefs, useAgentStore, useKeyValueStorage, useViewer, type ActorDefs } from '../src/index';
 
-const agentView = (id: string, name: string) => ({ id, config: { name }, configVersion: 1 });
+const summary = (id: string, name: string, configVersion = 1) => ({ id, configVersion, config: { name, role: '', description: '', execution: { runtime: 'anthropic-api' } } });
 
-/** A transport answering the Workspace's and the Agents' reads; its live channel records every subscription and counts the open ones. */
+/** A transport answering the Workspace's reads (and counting any Agent call); its live channel records every subscription. */
 function agentsTransport(initial: string[]) {
-    const state = { agents: initial };
+    const state = {
+        agents: initial,
+        agentSummaries: Object.fromEntries(initial.map((id) => [id, summary(id, `agent ${id}`)])) as Record<string, ReturnType<typeof summary>>
+    };
     const open = new Map<ActorSubscription, (value: unknown) => void>();
     const opened: string[] = [];
     const closed: string[] = [];
     const agentCalls: string[] = [];
+    const index = () => ({ settings: {}, machines: [], agents: state.agents, agentSummaries: state.agentSummaries, chats: [], schedules: [] });
     const transport: ActorTransport = {
         name: 'agents',
         call: async (symbol, args) => {
             const [type, method] = symbol.split('#');
             if (type === 'Agent') {
-                const key = String((args as unknown[])[0]);
-                agentCalls.push(key);
-                const id = key.split(':').pop()!;
-                return agentView(id, `fetched ${id}`);
+                agentCalls.push(String((args as unknown[])[0]));
+                throw new Error('the directory must not read an Agent');
             }
-            if (method === 'get') return { settings: {}, machines: [], agents: state.agents, chats: [], schedules: [] };
+            if (method === 'get') return index();
             return method === 'projects' ? [] : method === 'listMachines' ? [] : { projects: [], unassigned: 0 };
         },
         stream: () => ({ [Symbol.asyncIterator]: () => ({ next: () => new Promise<IteratorResult<unknown>>(() => undefined) }) }),
         live: () => ({
             subscribe(sub, onValue) {
+                const name = `${sub.type}:${sub.key}#${sub.method}`;
                 open.set(sub, onValue);
-                opened.push(sub.key);
+                opened.push(name);
                 return () => {
                     open.delete(sub);
-                    closed.push(sub.key);
+                    closed.push(name);
                 };
             }
         })
     };
-    const push = (key: string, method: string, value: unknown): void => {
-        for (const [sub, fn] of open) if (sub.key === key && sub.method === method) fn(value);
+    /** Push the index as it is now to the Workspace `get` subscribers. */
+    const pushIndex = (ws: string): void => {
+        for (const [sub, fn] of open) if (sub.key === `ws:${ws}` && sub.method === 'get') fn(index());
     };
-    const agentSubs = (): string[] => [...open.keys()].filter((s) => s.type === 'Agent').map((s) => s.key).sort();
-    return { state, transport, agentSubs, opened: () => opened.filter((k) => !k.startsWith('ws:')).sort(), closed, agentCalls, push };
+    const agentSubs = (): string[] => [...open.keys()].filter((s) => s.type === 'Agent').map((s) => s.key);
+    return { state, transport, agentSubs, opened: () => [...opened].sort(), closed, agentCalls, pushIndex };
 }
 
 const Workspace = __actorRef('Workspace', '/_sigx/actor', [], []);
@@ -95,10 +100,8 @@ const names = (store: ReturnType<typeof useAgentStore>): string =>
         .map((e) => `${e.view.config.name}@${e.index}`)
         .join(',');
 
-const key = (id: string, ws = 'ws1'): string => `${ws}:agent:${id}`;
-
-describe('useAgentStore (#1119)', () => {
-    it('subscribes once per agent per app: two page mount/unmount cycles open no new subscription', async () => {
+describe('useAgentStore (#1119, #1125)', () => {
+    it('two page mount/unmount cycles open no new subscription, and none to an Agent', async () => {
         const live = agentsTransport(['a1', 'a2']);
         const page = signal({ at: 'one' as 'one' | 'two' | 'none' });
         const One = component(() => {
@@ -116,32 +119,35 @@ describe('useAgentStore (#1119)', () => {
         const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
         const close = mount(<Shell />, live.transport, { id: 'ws1' });
         await tick();
-        const both = [key('a1'), key('a2')];
-        expect(live.agentSubs()).toEqual(both);
-        expect(text('.one')).toBe('fetched a1@0,fetched a2@1');
+        expect(text('.one')).toBe('agent a1@0,agent a2@1');
+        const first = live.opened();
+        expect(first).toContain('Workspace:ws:ws1#get');
 
         for (const at of ['none', 'two', 'none', 'one', 'none', 'two'] as const) {
             page.at = at;
             await tick();
-            expect(live.agentSubs(), `after switching to ${at}`).toEqual(both);
+            expect(live.agentSubs(), `after switching to ${at}`).toEqual([]);
         }
-        expect(live.opened()).toEqual(both);
+        expect(live.opened()).toEqual(first);
         expect(live.closed).toEqual([]);
+        expect(live.agentCalls).toEqual([]);
         expect(text('.two')).toBe('a1,a2 false');
         expect(warn.mock.calls.map((c) => String(c[0])).filter((m) => m.includes('initAppStores'))).toEqual([]);
 
-        // A frame replaces the fetched view.
+        // A rename is a new index frame: the page shows it with no reload and no Agent read.
         page.at = 'one';
         await tick();
-        live.push(key('a2'), 'get', agentView('a2', 'renamed'));
+        live.state.agentSummaries = { ...live.state.agentSummaries, a2: summary('a2', 'renamed', 2) };
+        live.pushIndex('ws1');
         await tick();
-        expect(text('.one')).toBe('fetched a1@0,renamed@1');
+        expect(text('.one')).toBe('agent a1@0,renamed@1');
+        expect(live.agentSubs()).toEqual([]);
+        expect(live.agentCalls).toEqual([]);
 
         close();
-        expect(live.agentSubs()).toEqual([]);
     });
 
-    it('adding or removing an agent in the index subscribes or closes only that agent', async () => {
+    it('follows the index: an added agent appears once summarised, a removed one leaves and moves the rest up', async () => {
         const live = agentsTransport(['a1', 'a2']);
         const Shell = component(() => {
             initAppStores();
@@ -150,30 +156,27 @@ describe('useAgentStore (#1119)', () => {
         });
         mount(<Shell />, live.transport, { id: 'ws2' });
         await tick();
-        expect(live.agentSubs()).toEqual([key('a1', 'ws2'), key('a2', 'ws2')]);
+        expect(text('.all')).toBe('agent a1@0,agent a2@1');
 
+        // Listed, not summarised yet: left out until its summary lands.
         live.state.agents = ['a1', 'a2', 'a3'];
-        live.push('ws:ws2', 'get', { settings: {}, machines: [], agents: live.state.agents, chats: [], schedules: [] });
+        live.pushIndex('ws2');
         await tick();
-        expect(live.agentSubs()).toEqual([key('a1', 'ws2'), key('a2', 'ws2'), key('a3', 'ws2')]);
-        expect(live.opened()).toEqual([key('a1', 'ws2'), key('a2', 'ws2'), key('a3', 'ws2')]);
-        expect(live.closed).toEqual([]);
-        expect(text('.all')).toBe('fetched a1@0,fetched a2@1,fetched a3@2');
-        live.push(key('a3', 'ws2'), 'get', agentView('a3', 'live a3'));
+        expect(text('.all')).toBe('agent a1@0,agent a2@1');
+        live.state.agentSummaries = { ...live.state.agentSummaries, a3: summary('a3', 'agent a3') };
+        live.pushIndex('ws2');
         await tick();
-        expect(text('.all')).toBe('fetched a1@0,fetched a2@1,live a3@2');
+        expect(text('.all')).toBe('agent a1@0,agent a2@1,agent a3@2');
 
         live.state.agents = ['a1', 'a3'];
-        live.push('ws:ws2', 'get', { settings: {}, machines: [], agents: live.state.agents, chats: [], schedules: [] });
+        live.pushIndex('ws2');
         await tick();
-        expect(live.agentSubs()).toEqual([key('a1', 'ws2'), key('a3', 'ws2')]);
-        expect(live.closed).toEqual([key('a2', 'ws2')]);
-        // The live a3 moves to the removed agent's place.
-        expect(text('.all')).toBe('fetched a1@0,live a3@1');
-        expect(live.opened()).toEqual([key('a1', 'ws2'), key('a2', 'ws2'), key('a3', 'ws2')]);
+        expect(text('.all')).toBe('agent a1@0,agent a3@1');
+        expect(live.agentSubs()).toEqual([]);
+        expect(live.agentCalls).toEqual([]);
     });
 
-    it('closes every agent on a workspace switch', async () => {
+    it('answers empty once the viewer has no workspace', async () => {
         const live = agentsTransport(['a1']);
         const workspace = signal({ id: 'ws3' as string | null });
         const Shell = component(() => {
@@ -183,10 +186,9 @@ describe('useAgentStore (#1119)', () => {
         });
         mount(<Shell />, live.transport, workspace);
         await tick();
-        expect(live.agentSubs()).toEqual([key('a1', 'ws3')]);
+        expect(text('.all')).toBe('agent a1@0');
         workspace.id = null;
         await tick();
-        expect(live.agentSubs()).toEqual([]);
         expect(text('.all')).toBe('');
     });
 

@@ -111,6 +111,8 @@ async function onlineMachine(name = 'laptop', roots: Partial<Record<EnvironmentI
 describe('Workspace projects (#332)', () => {
     it('upsert / list / note / remove round-trip with one save each, and the record survives a restart', async () => {
         const { agentId } = await ws().createAgent({ name: 'Ada' });
+        // The first read backfills Ada's summary (#1125) — one save of its own, before the counting starts.
+        await ws().get();
         const before = workspaceSaves().length;
         const created = await ws().upsertProject({ name: '  Agentic   platform ', description: 'the repo', members: { agentIds: [agentId], coordinator: agentId }, connectors: [{ id: 'github' }, { id: 'github' }] });
         expect(created).toMatchObject({ name: 'Agentic platform', description: 'the repo', members: { agentIds: [agentId], coordinator: agentId }, folders: {}, connectors: [{ id: 'github' }], features: {} });
