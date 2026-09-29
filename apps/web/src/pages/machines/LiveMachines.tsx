@@ -20,8 +20,9 @@ import { actor } from '@sigx/actors';
 import { useActorState } from '@sigx/actors/app';
 import type { MachineUpdateView } from '@agentic/platform';
 import { EmptyState } from '@agentic/ui';
+import { useWorkspaceStore } from '@agentic/client';
 import { useActorDefs, useViewer } from '../../actors/defs';
-import { machineKeyOf, routingKeyOf, workspaceKeyOf } from '../../actors/keys';
+import { machineKeyOf, routingKeyOf } from '../../actors/keys';
 import { useAgentDirectory } from '../chat/directory';
 import { OpsPage } from '../ops/OpsPage';
 import { LIVE_PLATFORM_ROW, defaultForByEnvironment, liveCapacity, machineLoadOf, machineOf, platformAgents, queuedByEnvironment } from './live';
@@ -52,7 +53,7 @@ export const LiveMachines = component(() => {
     const defs = useActorDefs();
     const viewer = useViewer()();
     const directory = useAgentDirectory(defs, viewer);
-    const index = useActorState(defs.Workspace, () => { const ws = viewer.workspaceId; return ws && ([workspaceKeyOf(ws), 'listMachines'] as const); }, { live: true });
+    const index = useWorkspaceStore().machinesRead;
     const routing = useActorState(defs.Routing, () => { const ws = viewer.workspaceId; return ws && ([routingKeyOf(ws), 'get'] as const); }, { live: true });
     const st = signal({ updates: {} as Record<string, MachineUpdateView>, results: null as UpdateAllResult[] | null, busy: false });
     // Inside the desktop app (#846): which machine, if any, is this computer. Client only; `null` in a browser.

@@ -7,10 +7,9 @@
  */
 import { component, type JSXElement } from 'sigx';
 import { Link } from '@sigx/router';
-import { useActorState } from '@sigx/actors/app';
 import { Icon } from '@agentic/ui';
+import { useWorkspaceStore } from '@agentic/client';
 import { useActorDefs, useViewer } from '../../actors/defs';
-import { workspaceKeyOf } from '../../actors/keys';
 import { Panel } from '../../components/Panel';
 import { useWorkspaceReadiness } from '../plugins/readiness';
 import { setupSteps } from './setup';
@@ -19,7 +18,7 @@ export const SetupChecklist = component(() => {
     const defs = useActorDefs();
     const viewer = useViewer()();
     const readiness = useWorkspaceReadiness(defs, viewer);
-    const ws = useActorState(defs.Workspace, () => viewer.workspaceId && ([workspaceKeyOf(viewer.workspaceId), 'get'] as const), { live: true });
+    const ws = useWorkspaceStore().indexRead;
     return (): JSXElement => {
         const overview = readiness.overview();
         const w = ws.value;

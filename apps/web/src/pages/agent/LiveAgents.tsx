@@ -12,10 +12,10 @@
 import { component, signal, useHead, type Define } from 'sigx';
 import { useRouter } from '@sigx/router';
 import { actor } from '@sigx/actors';
-import { useActorState } from '@sigx/actors/app';
 import type { AgentId } from '@agentic/core';
 import { AgentTile, EmptyState, EnvironmentLine, ErrorNote, Icon, Label, StatusPill } from '@agentic/ui';
 import { Col, Row, Stack } from '@sigx/zero';
+import { useWorkspaceStore } from '@agentic/client';
 import { useActorDefs, useViewer, type ActorDefs } from '../../actors/defs';
 import { agentKeyOf, workspaceKeyOf } from '../../actors/keys';
 import { useAgentDirectory } from '../chat/directory';
@@ -62,7 +62,7 @@ export const LiveAgents = component(() => {
     const tasks = useWorkspaceTasks(defs, viewer);
     const projects = useProjects(defs, viewer);
     const readiness = useWorkspaceReadiness(defs, viewer);
-    const workspace = useActorState(defs.Workspace, () => viewer.workspaceId && ([workspaceKeyOf(viewer.workspaceId), 'get'] as const), { live: true });
+    const workspace = useWorkspaceStore().indexRead;
     const runtimes = () => { const plugins = readiness.overview()?.plugins; return plugins ? runtimeOptions(plugins, readiness.byId()) : undefined; };
     const st = signal({ busy: false, error: '' });
     const create = async (input: NewAgentInput): Promise<void> => {

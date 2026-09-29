@@ -6,11 +6,11 @@
  */
 import { useData } from 'sigx';
 import { actor } from '@sigx/actors';
-import { useActorState } from '@sigx/actors/app';
 import type { FieldOption } from '@agentic/ui';
 import type { MachineView } from '@agentic/platform';
+import { useWorkspaceStore } from '@agentic/client';
 import type { ActorDefs, ViewerState } from '../../actors/defs';
-import { machineKeyOf, workspaceKeyOf } from '../../actors/keys';
+import { machineKeyOf } from '../../actors/keys';
 import { environmentOptions } from './live';
 
 export interface EnvironmentOptions {
@@ -20,7 +20,7 @@ export interface EnvironmentOptions {
 }
 
 export function useEnvironmentOptions(defs: ActorDefs, viewer: ViewerState): EnvironmentOptions {
-    const index = useActorState(defs.Workspace, () => { const ws = viewer.workspaceId; return ws && ([workspaceKeyOf(ws), 'listMachines'] as const); }, { live: true });
+    const index = useWorkspaceStore().machinesRead;
     const machines = useData(
         () => {
             const ws = viewer.workspaceId;

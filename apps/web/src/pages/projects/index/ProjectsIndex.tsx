@@ -7,13 +7,12 @@
  */
 import type { ProjectRecord } from '@agentic/core';
 import { component, useHead } from 'sigx';
-import { useActorState } from '@sigx/actors/app';
 import { ageText, EmptyState } from '@agentic/ui';
+import { useWorkspaceStore } from '@agentic/client';
 import { Page } from '../../../components/Page';
 import { defineTopbar } from '../../../components/topbar';
 import { dataMode } from '../../../data-mode';
 import { useActorDefs, useViewer } from '../../../actors/defs';
-import { workspaceKeyOf } from '../../../actors/keys';
 import { MOCK_OPEN_LINKS, MOCK_PROJECT_CARDS, MOCK_UNASSIGNED } from '../../../mock/projects/index';
 import { agentNamed } from '../../../mock/workspace';
 import { useAgentDirectory } from '../../chat/directory';
@@ -57,7 +56,7 @@ const LiveProjectsIndex = component(() => {
     const directory = useAgentDirectory(defs, viewer);
     const projects = useProjects(defs, viewer);
     const workdirs = useLiveWorkdirEnvironments(defs, viewer);
-    const summaries = useActorState(defs.Workspace, () => viewer.workspaceId && ([workspaceKeyOf(viewer.workspaceId), 'projectSummaries'] as const), { live: true });
+    const summaries = useWorkspaceStore().projectSummariesRead;
     const links = useLiveLinks(defs, viewer, () => projects.list());
     return () => {
         if (!viewer.pending && !viewer.workspaceId) {

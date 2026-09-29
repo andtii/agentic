@@ -6,8 +6,9 @@
  */
 import { effect } from 'sigx';
 import { useActorState } from '@sigx/actors/app';
+import { useWorkspaceStore } from '@agentic/client';
 import { useActorDefs, useViewer } from '../actors/defs';
-import { inboxKeyOf, workspaceKeyOf } from '../actors/keys';
+import { inboxKeyOf } from '../actors/keys';
 import { desktopHost } from './bridge';
 import { noticeTracker } from './notices';
 
@@ -23,7 +24,7 @@ export function useDesktopNotifications(badge: () => number): void {
     const defs = useActorDefs();
     const viewer = useViewer()();
     const list = useActorState(defs.Inbox, () => viewer.workspaceId && ([inboxKeyOf(viewer.workspaceId), 'list'] as const), { live: true });
-    const workspace = useActorState(defs.Workspace, () => viewer.workspaceId && ([workspaceKeyOf(viewer.workspaceId), 'get'] as const), { live: true });
+    const workspace = useWorkspaceStore().indexRead;
     // One tracker per workspace: switching workspaces without a reload takes the new one's first read as seen too.
     let tracker = noticeTracker();
     let trackedWorkspace = viewer.workspaceId;

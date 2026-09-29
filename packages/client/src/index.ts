@@ -7,3 +7,4 @@ export { useActorDefs, type ActorDefs } from './defs';
 export { useViewer, type ViewerHook, type ViewerState } from './viewer';
 export { memoryKeyValueStorage, useKeyValueStorage, type KeyValueStorage } from './storage';
 export { defineAppStore, initAppStores, useLiveActorState, type LiveActorState } from './stores/index';
+export { DEFAULT_WORKSPACE_ZONE, useWorkspaceStore } from './stores/index';

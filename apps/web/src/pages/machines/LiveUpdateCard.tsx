@@ -17,8 +17,8 @@ import { component, effect, onMounted, onUnmounted, signal, type Define, type JS
 import { actor } from '@sigx/actors';
 import { useActorState } from '@sigx/actors/app';
 import { DEFAULT_UPDATE_SETTINGS, type HostOs, type ReleaseChannel } from '@agentic/core';
-import { useActorDefs, useViewer } from '../../actors/defs';
-import { workspaceKeyOf } from '../../actors/keys';
+import { useWorkspaceStore } from '@agentic/client';
+import { useActorDefs } from '../../actors/defs';
 import { CLIENT_TIMEOUT_MS } from '../workdir/model';
 import { pageOrigin } from './LivePair';
 import { UpdateCard, type TurnLabel } from './UpdateCard';
@@ -37,9 +37,8 @@ export type LiveUpdateCardProps =
 
 export const LiveUpdateCard = component<LiveUpdateCardProps>(({ props }) => {
     const defs = useActorDefs();
-    const viewer = useViewer()();
     const view = useActorState(defs.Machine, () => [props.machineKey, 'updateState'] as const, { live: true });
-    const workspace = useActorState(defs.Workspace, () => { const ws = viewer.workspaceId; return ws && ([workspaceKeyOf(ws), 'get'] as const); }, { live: true });
+    const workspace = useWorkspaceStore().indexRead;
     const client = () => actor(defs.Machine, props.machineKey);
 
     const st = signal({ busy: false, failure: null as string | null, reinstall: false, requestId: '', waiting: false, checking: false });

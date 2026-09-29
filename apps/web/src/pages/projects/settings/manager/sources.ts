@@ -13,6 +13,7 @@ import { actor } from '@sigx/actors';
 import { useActorState } from '@sigx/actors/app';
 import { PM_PERSONALITIES, type ProjectId, type ProjectManagerSpec, type ProjectRecord } from '@agentic/core';
 import type { AgentView } from '@agentic/platform';
+import { useWorkspaceStore } from '@agentic/client';
 import { useActorDefs, useViewer } from '../../../../actors/defs';
 import { agentKeyOf, workspaceKeyOf } from '../../../../actors/keys';
 import { dataMode } from '../../../../data-mode';
@@ -102,7 +103,7 @@ function useLiveSource(project: () => ProjectRecord): ManagerSource {
         { live: true }
     );
     // The workspace's skills: what its agents carry (the roster from the live Workspace index).
-    const index = useActorState(defs.Workspace, () => viewer.workspaceId && ([workspaceKeyOf(viewer.workspaceId), 'get'] as const), { live: true });
+    const index = useWorkspaceStore().indexRead;
     const skills = useData(
         () => {
             const ws = viewer.workspaceId;

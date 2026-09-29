@@ -11,6 +11,7 @@ import { component, effect, onUnmounted, signal, useHead, type JSXElement } from
 import { actor } from '@sigx/actors';
 import { useActorState } from '@sigx/actors/app';
 import { AgentTile, DataTable, EmptyState, EnvironmentLine, ErrorNote, Icon, Switch, Tag } from '@agentic/ui';
+import { useWorkspaceStore } from '@agentic/client';
 import { useActorDefs, useViewer, type ActorDefs } from '../../actors/defs';
 import { scheduleKeyOf, workspaceKeyOf } from '../../actors/keys';
 import type { OpsSchedule } from '../../mock/ops';
@@ -110,7 +111,7 @@ export const LiveSchedules = component(() => {
     const workdirs = useLiveWorkdirEnvironments(defs, viewer);
     // The "Project" option of an agent task (#333).
     const projects = useProjects(defs, viewer);
-    const index = useActorState(defs.Workspace, () => viewer.workspaceId && ([workspaceKeyOf(viewer.workspaceId), 'get'] as const), { live: true });
+    const index = useWorkspaceStore().indexRead;
     const st = signal({ busy: false, error: '' });
     const fail = (e: unknown): void => { st.error = e instanceof Error ? e.message : String(e); };
     const tz = (): string => index.value?.settings.timeZone ?? 'UTC';

@@ -16,11 +16,11 @@
 import { component, onMounted, signal, useData, type JSXElement } from 'sigx';
 import { actor } from '@sigx/actors';
 import { Card } from '@sigx/zero';
-import { useActorState } from '@sigx/actors/app';
 import type { LedgerSummary } from '@agentic/platform';
 import { AgentTile, Button, DataTable, ErrorNote, Label, Segmented, StatusPill } from '@agentic/ui';
+import { useWorkspaceStore } from '@agentic/client';
 import { useActorDefs, useViewer, type ActorDefs, type ViewerState } from '../../actors/defs';
-import { ledgerKeyOf, ledgerMonthOf, workspaceKeyOf } from '../../actors/keys';
+import { ledgerKeyOf, ledgerMonthOf } from '../../actors/keys';
 import { OpsPage } from '../ops/OpsPage';
 import { LiveLimits } from './Limits';
 import { UsageStats } from './UsageStats';
@@ -77,7 +77,7 @@ export const LiveUsage = component(() => {
     const defs = useActorDefs();
     const viewer = useViewer()();
     const directory = useAgentDirectory(defs, viewer);
-    const ws = useActorState(defs.Workspace, () => viewer.workspaceId && ([workspaceKeyOf(viewer.workspaceId), 'get'] as const), { live: true });
+    const ws = useWorkspaceStore().indexRead;
     const timeZone = (): string | undefined => ws.value?.settings.timeZone;
     const ui = signal<{ by: LiveUsageBy; month: string }>({ by: 'agent', month: ledgerMonthOf(Date.now()) });
     const grouped = useMonthSummary(defs, viewer, () => ui.by, () => ui.month, timeZone);

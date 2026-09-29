@@ -13,11 +13,10 @@
  */
 import { component, effect, onUnmounted, type Define } from 'sigx';
 import { Link, useRoute } from '@sigx/router';
-import { useActorState } from '@sigx/actors/app';
 import type { ProjectRecord } from '@agentic/core';
 import { EmptyState } from '@agentic/ui';
+import { useWorkspaceStore } from '@agentic/client';
 import { useActorDefs, useViewer } from '../../../actors/defs';
-import { workspaceKeyOf } from '../../../actors/keys';
 import { Page } from '../../../components/Page';
 import { dataMode } from '../../../data-mode';
 import { LAST_PROJECT_ID, PROJECTS, projectNamed } from '../../../mock/workspace';
@@ -53,7 +52,7 @@ const LiveProjectLayout = component<LayoutProps>(({ props }) => {
     const defs = useActorDefs();
     const viewer = useViewer()();
     const projects = useProjects(defs, viewer);
-    const summaries = useActorState(defs.Workspace, () => viewer.workspaceId && ([workspaceKeyOf(viewer.workspaceId), 'projectSummaries'] as const), { live: true });
+    const summaries = useWorkspaceStore().projectSummariesRead;
     // The head and counts this instance published: a later layout (the next project page) may already have replaced them.
     let mine: ProjectHead | null = null;
     let myCounts: typeof projectCounts.value = null;
