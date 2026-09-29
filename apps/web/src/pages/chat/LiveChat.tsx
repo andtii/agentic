@@ -47,8 +47,8 @@ import { Composer, ConfirmDialog, EmptyState, ErrorNote, NOBODY_HINT, prepareIma
 import { Page } from '../../components/Page';
 import { baseTurnId, capacityWaitText, FailureNotice, interruptionOf, machineOfflineText, useInterruptionReads } from '../../components/status';
 import { useActorDefs, useViewer } from '../../actors/defs';
-import { useInboxStore } from '@agentic/client';
-import { chatKeyOf, machineKeyOf, routingKeyOf, sessionKeyOf, taskIndexKeyOf, taskKeyOf, workspaceKeyOf } from '../../actors/keys';
+import { useInboxStore, useTaskStore } from '@agentic/client';
+import { chatKeyOf, machineKeyOf, routingKeyOf, sessionKeyOf, taskKeyOf, workspaceKeyOf } from '../../actors/keys';
 import type { MockChatMember, MockChatSummary } from '../../mock/workspace';
 import { useWorkspaceZone, zoneFormat } from '../../time';
 import { ChatSearchPanel, SEARCH_LIMIT } from './ChatSearchPanel';
@@ -98,8 +98,8 @@ export const LiveChat = component<{ id: string; projectId?: string }>(({ props }
     const summary = useActorState(defs.Chat, () => { const k = key(); return k && ([k, 'get'] as const); }, { live: true });
     const history = useActorState(defs.Chat, () => { const k = key(); return k && ([k, 'history', null, HISTORY_LIMIT] as const); }, { live: true });
 
-    // Every task of the workspace, live: the panel keeps this chat's chains (`chatTasks`).
-    const index = useActorState(defs.TaskIndex, () => viewer.workspaceId && ([taskIndexKeyOf(viewer.workspaceId), 'list'] as const), { live: true });
+    // Every task of the workspace, live through the task store (#1122): the panel keeps this chat's chains (`chatTasks`).
+    const index = useTaskStore().read;
     // Which session asked each open question (#285): a question that outlived its session is answered from its own card.
     const inbox = useInboxStore();
     const zone = useWorkspaceZone(defs, viewer);

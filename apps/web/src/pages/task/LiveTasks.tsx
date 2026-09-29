@@ -10,12 +10,12 @@
 import { component, signal, useHead, type JSXElement } from 'sigx';
 import { Link } from '@sigx/router';
 import { actor } from '@sigx/actors';
-import { useActorState } from '@sigx/actors/app';
 import { AgentTile, Button, ConfirmDialog, DataTable, EmptyState, EnvironmentLine, ErrorNote, FilterChips, SectionHeading, StatusPill, WaitReasonLine } from '@agentic/ui';
 import { Age } from '../../components/Age';
 import { Page } from '../../components/Page';
+import { useTaskStore } from '@agentic/client';
 import { useActorDefs, useViewer, type ActorDefs, type ViewerState } from '../../actors/defs';
-import { taskIndexKeyOf, taskKeyOf } from '../../actors/keys';
+import { taskKeyOf } from '../../actors/keys';
 import { useAgentDirectory, type AgentDirectory } from '../chat/directory';
 import { useMachineNames } from '../../components/status';
 import { chainRoots, countTasks, filterTasks, isActiveRow, TASK_FILTERS, TASK_TABLE_COLS, TASK_TABLE_COLUMNS, taskListRow, type TaskFilter, type TaskListRow } from './live';
@@ -28,9 +28,9 @@ export interface TaskRows {
     readonly error: Error | null;
 }
 
-/** Called in a component's setup: the index as a live read, joined with the directory at render. */
+/** Called in a component's setup: the index as a live read (the task store's, #1122), joined with the directory at render. */
 export function useTaskRows(defs: ActorDefs, viewer: ViewerState, directory: AgentDirectory): TaskRows {
-    const index = useActorState(defs.TaskIndex, () => viewer.workspaceId && ([taskIndexKeyOf(viewer.workspaceId), 'list'] as const), { live: true });
+    const index = useTaskStore().read;
     // A row waiting on its machine (#366) names it in the wait column.
     const machineName = useMachineNames(defs, viewer);
     return {
@@ -39,7 +39,7 @@ export function useTaskRows(defs: ActorDefs, viewer: ViewerState, directory: Age
             return index.loading || directory.loading;
         },
         get error() {
-            return index.error ?? directory.error;
+            return (index.error as Error | null) ?? directory.error;
         }
     };
 }

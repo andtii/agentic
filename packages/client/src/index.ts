@@ -13,3 +13,4 @@ export { useRegistryStore } from './stores/index';
 export { isAuthError, readinessById, readinessFacts, readyRuntimeIds, signedOutPluginIds } from './readiness';
 export { foldEnvironments, machineKeyOf, pairedOf, useMachineStore, type EnvironmentEntry, type MachineEntry } from './stores/index';
 export { useAgentStore, type AgentEntry } from './stores/index';
+export { useTaskStore } from './stores/index';

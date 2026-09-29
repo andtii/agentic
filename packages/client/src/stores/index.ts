@@ -9,3 +9,4 @@ export { INTERRUPTION_AUDIT_KINDS, INTERRUPTION_AUDIT_ROWS, useInboxStore } from
 export { useRegistryStore } from './registry';
 export { foldEnvironments, machineKeyOf, pairedOf, useMachineStore, type EnvironmentEntry, type MachineEntry } from './machines';
 export { useAgentStore, type AgentEntry } from './agents';
+export { useTaskStore } from './tasks';

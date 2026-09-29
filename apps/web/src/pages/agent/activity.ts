@@ -9,9 +9,9 @@ import { actor } from '@sigx/actors';
 import { useActorState } from '@sigx/actors/app';
 import type { AgentId, MemoryEntry } from '@agentic/core';
 import type { AgentView, PendingProposal, TaskIndexRow } from '@agentic/platform';
-import { useRegistryStore } from '@agentic/client';
+import { useRegistryStore, useTaskStore } from '@agentic/client';
 import type { ActorDefs, ViewerState } from '../../actors/defs';
-import { agentKeyOf, ledgerKeyOf, memoryKeyOf, taskIndexKeyOf, taskKeyOf } from '../../actors/keys';
+import { agentKeyOf, ledgerKeyOf, memoryKeyOf, taskKeyOf } from '../../actors/keys';
 import { activeTasks, isoWeekOf, weekMonths, type AgentActivity } from './live';
 
 /** Entries read per `Memory.exportPage` call. */
@@ -92,12 +92,12 @@ export function useMemoryCount(defs: ActorDefs, viewer: ViewerState, agentId: ()
 /**
  * The workspace's task index, read live. A live read's arguments are part of
  * its key and must be JSON primitives, so the query object stays out: the
- * whole index (capped at `TASK_INDEX_CAP` rows) is read once — the roster and
- * the agent page share the read — and filtered here.
+ * whole index (capped at `TASK_INDEX_CAP` rows) is read once — in the task
+ * store (#1122), which every page shares — and filtered here.
  */
-export function useWorkspaceTasks(defs: ActorDefs, viewer: ViewerState): () => TaskIndexRow[] {
-    const rows = useActorState(defs.TaskIndex, () => viewer.workspaceId && ([taskIndexKeyOf(viewer.workspaceId), 'list'] as const), { live: true });
-    return () => rows.value ?? [];
+export function useWorkspaceTasks(_defs: ActorDefs, _viewer: ViewerState): () => TaskIndexRow[] {
+    const rows = useTaskStore().read;
+    return () => (rows.value ?? []) as TaskIndexRow[];
 }
 
 export interface AgentActivityRead {
