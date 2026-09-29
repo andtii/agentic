@@ -21,6 +21,7 @@
   },
   "dependencies": {
     "@agentic/a2a": "workspace:*",
+    "@agentic/client": "workspace:*",
     "@agentic/connectors": "workspace:*",
     "@agentic/core": "workspace:*",
     "@agentic/learning": "workspace:*",

@@ -1,0 +1,39 @@
+{
+  "name": "@agentic/client",
+  "version": "0.0.0",
+  "private": true,
+  "description": "DOM-free client layer: the app-lifetime @sigx/store stores and the injectables they need (actor defs, viewer, key-value storage), shared by the web shell and the planned Lynx shell.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "development": "./dist/index.js",
+      "production": "./dist/index.prod.js",
+      "import": "./dist/index.js"
+    }
+  },
+  "sideEffects": false,
+  "scripts": {
+    "build": "vite build && vite build --mode prod-dist && tsc -p tsconfig.build.json"
+  },
+  "dependencies": {
+    "@agentic/core": "workspace:*",
+    "@agentic/platform": "workspace:*",
+    "@sigx/actors": "catalog:",
+    "@sigx/store": "catalog:"
+  },
+  "peerDependencies": {
+    "@sigx/reactivity": "catalog:",
+    "@sigx/runtime-core": "catalog:"
+  },
+  "devDependencies": {
+    "@sigx/reactivity": "catalog:",
+    "@sigx/runtime-core": "catalog:",
+    "@sigx/runtime-dom": "catalog:",
+    "@sigx/vite": "catalog:",
+    "typescript": "^7.0.2",
+    "vite": "^8.0.3"
+  }
+}

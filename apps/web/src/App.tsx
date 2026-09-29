@@ -1,4 +1,4 @@
-import { component, useData, useHead, type JSXElement } from 'sigx';
+import { component, defineProvide, useData, useHead, type JSXElement } from 'sigx';
 import { Link, RouterView, useRoute, useRouter } from '@sigx/router';
 import { Avatar, Breadcrumbs, themeInitScript, ThemeProvider } from '@sigx/zero';
 import { AppShell, Button, ConnectionStrip, connectionRows, OfflineBanner, type NavGroup } from '@agentic/ui';
@@ -9,6 +9,8 @@ import { topbarFor } from './components/topbar';
 import { clientConnection, LiveConnection } from './components/status';
 import { dataMode } from './data-mode';
 import { useActorDefs, useViewer } from './actors/defs';
+import { initAppStores, useKeyValueStorage } from '@agentic/client';
+import { webKeyValueStorage } from './actors/storage';
 import { signInOptions } from './api/sign-in.server';
 import { DEV_LOGIN_PATH } from './auth/dev-login';
 import { localLoginHref } from './auth/sign-in';
@@ -156,6 +158,9 @@ const FLUSH_ROUTES = new Set(['chat', 'project-chat', 'session', 'session-change
 const BARE_ROUTE = 'quick';
 
 export const App = component(() => {
+    // The app stores (#1116) are created here, in the persistent shell, so their live reads outlive every route.
+    defineProvide(useKeyValueStorage, () => webKeyValueStorage);
+    initAppStores();
     useHead({
         titleTemplate: '%s · agentic',
         script: [{ innerHTML: themeInitScript() }],
