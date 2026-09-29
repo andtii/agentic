@@ -6,8 +6,8 @@
  * authors). Nothing here touches a hook or the DOM, so every rule is
  * unit-testable and `LiveChat.tsx` stays wiring.
  */
-import { isChatFilePart, isTerminal, parseChatFileUri, type AccountRef, type AgentId, type ChatEntry, type ChatFilePart, type ChatId, type MachineId, type MessageId, type ProjectId, type PromptPart, type TaskContract, type TaskId, type WaitReason, type WorkdirRef } from '@agentic/core';
-import type { AgentView, ChatSummary, InboxNotification, IndexedEntry, SessionInfo, TaskIndexRow } from '@agentic/platform';
+import { isChatFilePart, isTerminal, parseChatFileUri, type AccountRef, type AgentId, type AgentSummary, type ChatEntry, type ChatFilePart, type ChatId, type MachineId, type MessageId, type ProjectId, type PromptPart, type TaskContract, type TaskId, type WaitReason, type WorkdirRef } from '@agentic/core';
+import type { ChatSummary, InboxNotification, IndexedEntry, SessionInfo, TaskIndexRow } from '@agentic/platform';
 import { createTranscript, type AgentCapabilities, type AgentEvent, type Decision } from '@sigx/ai-agent';
 import type { AgentMessage, AgentPart, AgentTranscript, OpenRequest } from '@sigx/ai-agent/app';
 import { WIRE_PROTOCOL_VERSION, type SessionTransport, type WireCommand, type WireFrame, type WireReply } from '@sigx/ai-agent/wire';
@@ -45,7 +45,8 @@ const UNKNOWN_ENVIRONMENT: EnvironmentParts = { machine: '—', runtime: '—', 
 export const unknownAgent = (id: string): AgentIdentity => ({ id, name: id, role: '', description: '', hue: 1, environment: UNKNOWN_ENVIRONMENT, configVersion: 0 });
 
 /**
- * `Agent.get()` → identity. The hue is the agent's creation index in the
+ * An agent's summary (`Workspace.get().agentSummaries`, #1125) — or a full
+ * `Agent.get()`, whose shape it is a subset of — → identity. The hue is the agent's creation index in the
  * workspace (`hueFor`), so it is stable across pages; the environment line
  * is the agent's default execution (EXE-06: all three parts, always): the
  * platform runtime runs on the platform under the BYO key, a daemon
@@ -53,7 +54,7 @@ export const unknownAgent = (id: string): AgentIdentity => ({ id, name: id, role
  * bound to an account (#414), as that login on whichever machine the chat
  * names.
  */
-export function identityOf(view: AgentView, index: number): AgentIdentity {
+export function identityOf(view: AgentSummary, index: number): AgentIdentity {
     const { config } = view;
     const runtime = config.execution.runtime;
     const platform = runtime === 'anthropic-api';

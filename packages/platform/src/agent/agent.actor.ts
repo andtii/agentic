@@ -11,15 +11,20 @@
 import { defineActor } from '@sigx/actors';
 import {
     type AgentId,
+    type AgentSummary,
     type FrozenAgentConfig,
     type MemoryScope,
     type Principal,
     type WorkspaceId,
     actorKey,
+    agentSummaryOf,
     hasScope,
     sameWorkspace
 } from '@agentic/core';
 import { recordAudit } from '../audit/port.js';
+import { asPrincipal } from '../auth/agent-token.js';
+import { userPrincipal } from '../auth/principal.js';
+import { workspaceKey } from '../auth/same-workspace.js';
 import { type AgentConfigPatch, assertAgentConfigPatch, clone } from './config.js';
 import {
     type AgentGrantsAt,
@@ -58,6 +63,21 @@ export interface AgentView {
     /** Instruction proposals waiting for review (LRN-08). */
     readonly pendingProposals: number;
 }
+
+/**
+ * The Workspace, as the hop target the summary is written to (#1125): a call is routed by the actor type, so the
+ * app's own Workspace answers it. Declared here with its one write, not imported: the Workspace module imports
+ * this one.
+ */
+const WorkspaceRef = defineActor({
+    type: 'Workspace',
+    state: () => ({}),
+    methods: () => ({
+        setAgentSummary: async (_summary: AgentSummary): Promise<void> => {
+            throw new Error('[agent] the Workspace ref is a hop target, never a host');
+        }
+    })
+});
 
 const PROPOSAL_ORIGINS: ReadonlySet<string> = new Set<ProposalOrigin['kind']>(['task-end', 'correction']);
 
@@ -139,10 +159,29 @@ export const AgentActor = defineActor({
             });
         }
 
+        /**
+         * The agent's summary onto the Workspace index (#1125), in the turn that saved the version, so every list
+         * shows a rename or a new default environment without an `Agent` read of its own. Written as the workspace
+         * owner: the caller may be an agent or a client the Workspace does not admit. A Workspace that cannot be
+         * reached never fails the version, which is saved already; the index keeps the older summary.
+         */
+        async function syncSummary(): Promise<void> {
+            const { id, workspaceId, configVersion, config } = ctx.state;
+            try {
+                await ctx
+                    .actor(WorkspaceRef, workspaceKey(workspaceId))
+                    .with({ context: asPrincipal(userPrincipal(workspaceId, workspaceId)) })
+                    .setAgentSummary(agentSummaryOf(id, configVersion, config));
+            } catch (error) {
+                console.warn(`[agent] ${id}: the summary did not reach the workspace index:`, error);
+            }
+        }
+
         /** One durable version: fold, then persist inside the same turn (Workers eviction rule). */
         async function commit(patch: AgentConfigPatch, reason: string, rollbackOf?: number): Promise<AgentVersionInfo> {
             const info = foldVersion(patch, reason, rollbackOf);
             await ctx.save();
+            await syncSummary();
             await auditVersion(info);
             return info;
         }
@@ -232,7 +271,10 @@ export const AgentActor = defineActor({
                     ...(version === undefined ? {} : { version })
                 });
                 await ctx.save();
-                if (folded) await auditVersion(folded);
+                if (folded) {
+                    await syncSummary();
+                    await auditVersion(folded);
+                }
                 await recordAudit(ctx, ctx.state.workspaceId, {
                     key: `${ctx.key}:proposal:${id}:review`,
                     kind: 'proposal.reviewed',

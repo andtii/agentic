@@ -1,11 +1,10 @@
 /**
  * The workspace's agents as identities (#34), read through the app's agent
- * store (#1119, `@agentic/client`): one live read of the Workspace index (the
- * workspace store), `Agent.get()` per id in one SSR-seeded fetch, and a live
- * `Agent.get` subscription per agent (#258) — opened once per app, not per
- * page, so a route change redials nothing. The pages resolve names, hues and
- * environments synchronously through a lookup — the same shape the mock
- * `agentNamed` has.
+ * store (#1119, `@agentic/client`): the agents' summaries on the Workspace
+ * index (#1125), from the workspace store's one live `Workspace.get` — no
+ * `Agent` read or socket per agent, so a route change redials nothing. The
+ * pages resolve names, hues and environments synchronously through a lookup —
+ * the same shape the mock `agentNamed` has.
  */
 import { computed } from 'sigx';
 import { useAgentStore } from '@agentic/client';
