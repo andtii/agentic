@@ -47,7 +47,8 @@ import { Composer, ConfirmDialog, EmptyState, ErrorNote, NOBODY_HINT, prepareIma
 import { Page } from '../../components/Page';
 import { baseTurnId, capacityWaitText, FailureNotice, interruptionOf, machineOfflineText, useInterruptionReads } from '../../components/status';
 import { useActorDefs, useViewer } from '../../actors/defs';
-import { chatKeyOf, inboxKeyOf, machineKeyOf, routingKeyOf, sessionKeyOf, taskIndexKeyOf, taskKeyOf, workspaceKeyOf } from '../../actors/keys';
+import { useInboxStore } from '@agentic/client';
+import { chatKeyOf, machineKeyOf, routingKeyOf, sessionKeyOf, taskIndexKeyOf, taskKeyOf, workspaceKeyOf } from '../../actors/keys';
 import type { MockChatMember, MockChatSummary } from '../../mock/workspace';
 import { useWorkspaceZone, zoneFormat } from '../../time';
 import { ChatSearchPanel, SEARCH_LIMIT } from './ChatSearchPanel';
@@ -100,7 +101,7 @@ export const LiveChat = component<{ id: string; projectId?: string }>(({ props }
     // Every task of the workspace, live: the panel keeps this chat's chains (`chatTasks`).
     const index = useActorState(defs.TaskIndex, () => viewer.workspaceId && ([taskIndexKeyOf(viewer.workspaceId), 'list'] as const), { live: true });
     // Which session asked each open question (#285): a question that outlived its session is answered from its own card.
-    const inbox = useActorState(defs.Inbox, () => viewer.workspaceId && ([inboxKeyOf(viewer.workspaceId), 'list'] as const), { live: true });
+    const inbox = useInboxStore();
     const zone = useWorkspaceZone(defs, viewer);
     const workdirs = useLiveWorkdirEnvironments(defs, viewer);
     // The chat's project (#333): its folder per environment is what a member without an override runs in.
@@ -699,7 +700,7 @@ export const LiveChat = component<{ id: string; projectId?: string }>(({ props }
                     {viewer.workspaceId && s?.projectId ? visitors.map((v) => (
                         <ChatRequestsFrom key={v.projectId} workspaceId={viewer.workspaceId!} chatId={props.id} chatProjectId={s.projectId!} {...(project ? { homeProjectName: project.name } : {})} projectId={v.projectId} projectName={v.projectName} managerName={directory.lookup(v.agentId).name} time={time} onRequests={reportRequests} headless />
                     )) : null}
-                    {detachedQuestions(entries, inbox.value ?? [], feeds.list, s?.sessions).map((q) => (
+                    {detachedQuestions(entries, inbox.notifications, feeds.list, s?.sessions).map((q) => (
                         <div key={`${q.sessionId}:${q.requestId}`} data-chat-question>
                             <DetachedQuestionCard question={q} lookup={directory.lookup} onError={fail} />
                         </div>
