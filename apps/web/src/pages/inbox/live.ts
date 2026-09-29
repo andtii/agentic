@@ -1,6 +1,6 @@
 /**
  * `liveNeedsSource` — "Needs you" over the platform actors (#40): the
- * workspace Inbox's list as a live read (every unread `approval` / `input`
+ * workspace Inbox's list as a live read through the inbox store (#1123; every unread `approval` / `input`
  * notification the Sessions pushed), each row's `Session.request(id)` as a
  * live read (the record every client shares), and `Session.respond` for the
  * answer. Both reads re-run on the page's live channel after any turn that
@@ -28,7 +28,8 @@ import type { AuditEvent, InboxNotification, RoutingView } from '@agentic/platfo
 import type { AgentId, TaskId } from '@agentic/core';
 import type { AgentHue } from '@agentic/ui';
 import type { ActorDefs, ViewerState } from '../../actors/defs';
-import { interruptionCause, interruptionOf, useInterruptionReads, useMachineNames } from '../../components/status';
+import { useInboxStore } from '@agentic/client';
+import { interruptionCause, interruptionOf, useMachineNames } from '../../components/status';
 import { chatKeyOf, inboxKeyOf, routingKeyOf, sessionKeyOf } from '../../actors/keys';
 import { answerRequest } from '../chat/live';
 import { clockNow, zoneFormat } from '../../time';
@@ -101,10 +102,11 @@ export function liveNeedsSource(defs: LiveNeedsDefs, viewer: Pick<ViewerState, '
     const sessionKey = (ref: RequestRef): string | null => (viewer.workspaceId ? sessionKeyOf(viewer.workspaceId, ref.sessionId) : null);
     return {
         useRows() {
-            const list = useActorState(defs.Inbox, () => viewer.workspaceId && ([inboxKeyOf(viewer.workspaceId), 'list'] as const), { live: true });
-            const cuts = useInterruptionReads(defs, viewer);
+            // The inbox store (#1123) holds the Inbox list, the routes and the interruption rows for the app's lifetime:
+            // the shell's badge and every page read the same subscriptions.
+            const store = useInboxStore();
             const machineName = useMachineNames(defs, viewer);
-            return () => [...(list.value ?? []).map(rowOf).filter((r): r is NeedsRow => r !== null), ...interruptedRows({ routes: cuts.routes() }, cuts.audit(), machineName)];
+            return () => [...store.notifications.map(rowOf).filter((r): r is NeedsRow => r !== null), ...interruptedRows({ routes: store.routes }, store.interruptions, machineName)];
         },
         useRequest(ref) {
             const state = useActorState(defs.Session, () => {

@@ -5,19 +5,19 @@
  * cause, and whether it went on) and the router's routes (`Routing.get()`:
  * whether a parked route re-opens its session or resumes on its own). Both
  * are live, so "resuming automatically" turns into "resumed" without a
- * reload. `interruptionOf` folds them.
+ * reload. `interruptionOf` folds them. Both workspace reads are the inbox store's
+ * (#1123), so a page mount opens no socket for them.
  */
-import { onMounted, useData } from 'sigx';
+import { useData } from 'sigx';
 import { actor } from '@sigx/actors';
-import { useActorState } from '@sigx/actors/app';
 import type { AuditEvent, AuditPage, Route } from '@agentic/platform';
 import type { ActorDefs, ViewerState } from '../../actors/defs';
-import { useWorkspaceStore } from '@agentic/client';
-import { auditKeyOf, routingKeyOf } from '../../actors/keys';
+import { INTERRUPTION_AUDIT_ROWS, useInboxStore, useWorkspaceStore } from '@agentic/client';
+import { auditKeyOf } from '../../actors/keys';
 import { INTERRUPTION_KINDS } from './interruption';
 
 /** How many of the newest interruption rows a page reads: enough for what is still on screen. */
-export const INTERRUPTION_ROWS = 50;
+export const INTERRUPTION_ROWS = INTERRUPTION_AUDIT_ROWS;
 
 export interface InterruptionReads {
     /** The Audit rows, newest first; empty while loading or unreadable. */
@@ -26,26 +26,26 @@ export interface InterruptionReads {
     routes(): readonly Route[];
 }
 
-/** Called in a component's setup. `taskId`, when given, narrows the Audit read to that task's rows. */
+/**
+ * Called in a component's setup. The routes and the workspace's interruption rows come from the inbox store (#1123),
+ * the app's one live read of each; `taskId`, when given and set, narrows the Audit read to that task's rows — a page
+ * read of its own, keyed by the store's live `stats` so every recorded row re-reads it.
+ */
 export function useInterruptionReads(defs: Pick<ActorDefs, 'Audit' | 'Routing'>, viewer: Pick<ViewerState, 'workspaceId'>, taskId?: () => string | undefined): InterruptionReads {
-    // `list` takes a query object, which a live read's key cannot carry: the log's live `stats` keys the read instead
-    // (as the History page does), so every recorded row re-reads it.
-    const stats = useActorState(defs.Audit, () => viewer.workspaceId && ([auditKeyOf(viewer.workspaceId), 'stats'] as const), { live: true });
-    const audit = useData(
-        () => {
-            const ws = viewer.workspaceId;
-            return ws ? (['interruptions', ws, taskId?.() ?? '', stats.value?.recorded ?? -1] as const) : false;
-        },
-        async (key): Promise<AuditPage> => actor(defs.Audit, auditKeyOf(key[1])).list({ kinds: [...INTERRUPTION_KINDS], limit: INTERRUPTION_ROWS, ...(key[2] ? { taskId: key[2] } : {}) })
-    );
-    // The page cache restores `stats` on a remount without a fetch; re-reading it moves the key.
-    onMounted(() => {
-        if (stats.hasValue) void stats.refresh();
-    });
-    const routing = useActorState(defs.Routing, () => viewer.workspaceId && ([routingKeyOf(viewer.workspaceId), 'get'] as const), { live: true });
+    const store = useInboxStore();
+    const audit = taskId
+        ? useData(
+            () => {
+                const ws = viewer.workspaceId;
+                const task = taskId();
+                return ws && task ? (['interruptions', ws, task, store.auditRecorded] as const) : false;
+            },
+            async (key): Promise<AuditPage> => actor(defs.Audit, auditKeyOf(key[1])).list({ kinds: [...INTERRUPTION_KINDS], limit: INTERRUPTION_ROWS, taskId: key[2] })
+        )
+        : null;
     return {
-        audit: () => audit.value?.events ?? [],
-        routes: () => routing.value?.routes ?? []
+        audit: () => (audit && taskId?.() ? (audit.value?.events ?? []) : store.interruptions),
+        routes: () => store.routes
     };
 }
 

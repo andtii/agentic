@@ -5,10 +5,8 @@
  * notifications and the "Needs you" count to the shell.
  */
 import { effect } from 'sigx';
-import { useActorState } from '@sigx/actors/app';
-import { useWorkspaceStore } from '@agentic/client';
-import { useActorDefs, useViewer } from '../actors/defs';
-import { inboxKeyOf } from '../actors/keys';
+import { useInboxStore, useWorkspaceStore } from '@agentic/client';
+import { useViewer } from '../actors/defs';
 import { desktopHost } from './bridge';
 import { noticeTracker } from './notices';
 
@@ -21,15 +19,14 @@ export function useDesktopNotifications(badge: () => number): void {
     if (typeof window === 'undefined') return;
     const host = desktopHost();
     if (!host) return;
-    const defs = useActorDefs();
     const viewer = useViewer()();
-    const list = useActorState(defs.Inbox, () => viewer.workspaceId && ([inboxKeyOf(viewer.workspaceId), 'list'] as const), { live: true });
+    const inbox = useInboxStore();
     const workspace = useWorkspaceStore().indexRead;
     // One tracker per workspace: switching workspaces without a reload takes the new one's first read as seen too.
     let tracker = noticeTracker();
     let trackedWorkspace = viewer.workspaceId;
     effect(() => {
-        const notifications = list.value;
+        const notifications = inbox.listRead.value;
         const settings = workspace.value?.settings;
         if (viewer.workspaceId !== trackedWorkspace) {
             trackedWorkspace = viewer.workspaceId;
