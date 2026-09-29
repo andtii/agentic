@@ -12,11 +12,11 @@ const EVERYTHING = [/^pnpm-lock\.yaml$/, /^pnpm-workspace\.yaml$/, /^package\.js
 
 const LANES = {
     // Worker + ActorHost DO inside workerd, and the acceptance suite.
-    workers: [/^apps\/web\//, /^packages\/(core|platform|runtimes|memory|learning|connectors|plugins-git|mcp|a2a|daemon-protocol)\//],
+    workers: [/^apps\/web\//, /^packages\/(core|platform|runtimes|memory|learning|connectors|plugins-git|mcp|a2a|daemon-protocol|client)\//],
     // The same acceptance suite against the Node host (#995): what workers covers, plus the host itself.
-    node: [/^apps\/(web|node)\//, /^packages\/(core|platform|runtimes|memory|learning|connectors|plugins-git|mcp|a2a|daemon-protocol)\//],
+    node: [/^apps\/(web|node)\//, /^packages\/(core|platform|runtimes|memory|learning|connectors|plugins-git|mcp|a2a|daemon-protocol|client)\//],
     // Playwright against the app: the app, the UI it renders, the data under it.
-    e2e: [/^apps\/web\//, /^packages\/(ui|core|platform)\//],
+    e2e: [/^apps\/web\//, /^packages\/(ui|core|platform|client)\//],
     // .size-limit.json entries.
     size: [/^packages\/(core|ui|connectors|plugins-git)\//],
     scripts: [/^scripts\//]
