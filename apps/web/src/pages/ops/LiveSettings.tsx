@@ -20,6 +20,7 @@ import { DAEMON_HOSTED_CAPABILITY, DEFAULT_UPDATE_SETTINGS, type UpdateSettings 
 import type { RegistryOverview } from '@agentic/platform';
 import { virtualListbox } from '@sigx/zero/virtual-listbox';
 import { Button, ConfirmDialog, EmptyState, ErrorNote, Icon, Label, SelectField, StatusPill, Switch, TextField, type RuntimeOption } from '@agentic/ui';
+import { useWorkspaceStore } from '@agentic/client';
 import { useActorDefs, useViewer } from '../../actors/defs';
 import { registryKeyOf, workspaceKeyOf } from '../../actors/keys';
 import { formatAge } from '../../mock/workspace';
@@ -52,7 +53,7 @@ export const LiveSettings = component(() => {
     const viewer = useViewer()();
     const environments = useEnvironmentDirectory(defs, viewer);
     const wsKey = (): string | null => (viewer.workspaceId ? workspaceKeyOf(viewer.workspaceId) : null);
-    const workspace = useActorState(defs.Workspace, () => { const k = wsKey(); return k && ([k, 'get'] as const); }, { live: true });
+    const workspace = useWorkspaceStore().indexRead;
     const secrets = useActorState(defs.Registry, () => (viewer.workspaceId ? ([registryKeyOf(viewer.workspaceId), 'secrets'] as const) : null), { live: true });
     const plugins = useWorkspaceReadiness(defs, viewer);
 

@@ -9,8 +9,9 @@ import { component, effect, onUnmounted, signal, type JSXElement } from 'sigx';
 import { useActorState } from '@sigx/actors/app';
 import type { ProjectRecord } from '@agentic/core';
 import type { ScheduleView } from '@agentic/platform';
+import { useWorkspaceStore } from '@agentic/client';
 import { useActorDefs, useViewer } from '../../../actors/defs';
-import { chatKeyOf, scheduleKeyOf, workspaceKeyOf } from '../../../actors/keys';
+import { chatKeyOf, scheduleKeyOf } from '../../../actors/keys';
 import { useAgentDirectory } from '../../chat/directory';
 import { LIST_TAIL } from '../../chat/live';
 import { useChatRows } from '../../chat/LiveChats';
@@ -70,7 +71,7 @@ export function useLiveOverview(project: () => ProjectRecord): LiveOverview {
     const uiOf = useFeatureUi(defs, viewer);
     const pulls = usePullsState(() => project().id);
     const plans = usePlans(() => project().id, { defs, viewer });
-    const workspace = useActorState(defs.Workspace, () => viewer.workspaceId && ([workspaceKeyOf(viewer.workspaceId), 'get'] as const), { live: true });
+    const workspace = useWorkspaceStore().indexRead;
     const schedules = signal<{ map: Record<string, ScheduleRead> }>({ map: {} });
     const readSchedule = (id: string, read: ScheduleRead): void => {
         if (schedules.map[id] === read) return;

@@ -18,6 +18,7 @@ import { actor } from '@sigx/actors';
 import { useActorState } from '@sigx/actors/app';
 import type { PluginView, ScheduleView } from '@agentic/platform';
 import { Button, ErrorNote, Label, SelectField, Switch, TextareaField, TextField } from '@agentic/ui';
+import { useWorkspaceStore } from '@agentic/client';
 import { useViewer, type ActorDefs } from '../../actors/defs';
 import { scheduleKeyOf, workspaceKeyOf } from '../../actors/keys';
 import { useAgentDirectory } from '../chat/directory';
@@ -91,7 +92,7 @@ export type LiveConnectorTriggerProps =
 export const LiveConnectorTrigger = component<LiveConnectorTriggerProps>(({ props }) => {
     const viewer = useViewer()();
     const agents = useAgentDirectory(props.defs, viewer);
-    const index = useActorState(props.defs.Workspace, () => [workspaceKeyOf(props.workspaceId), 'get'] as const, { live: true });
+    const index = useWorkspaceStore().indexRead;
     const st = signal({ busy: false, notice: '', error: '', created: '' });
     // The entry that watches this connector: one `get` per schedule when the index changes (a handful per workspace).
     const found = useData(

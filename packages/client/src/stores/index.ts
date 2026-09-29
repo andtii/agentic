@@ -4,3 +4,4 @@
  */
 export { defineAppStore, initAppStores } from './define';
 export { useLiveActorState, type LiveActorState } from './live';
+export { DEFAULT_WORKSPACE_ZONE, useWorkspaceStore } from './workspace';

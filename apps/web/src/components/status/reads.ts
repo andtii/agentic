@@ -12,7 +12,8 @@ import { actor } from '@sigx/actors';
 import { useActorState } from '@sigx/actors/app';
 import type { AuditEvent, AuditPage, Route } from '@agentic/platform';
 import type { ActorDefs, ViewerState } from '../../actors/defs';
-import { auditKeyOf, routingKeyOf, workspaceKeyOf } from '../../actors/keys';
+import { useWorkspaceStore } from '@agentic/client';
+import { auditKeyOf, routingKeyOf } from '../../actors/keys';
 import { INTERRUPTION_KINDS } from './interruption';
 
 /** How many of the newest interruption rows a page reads: enough for what is still on screen. */
@@ -49,10 +50,10 @@ export function useInterruptionReads(defs: Pick<ActorDefs, 'Audit' | 'Routing'>,
 }
 
 /**
- * A machine id → its name, from the Workspace's machine index (`Workspace.get().machines`, live): one read, no
- * `Machine.get` per machine — what a page needs to name the machine a wait or a cut turn names.
+ * A machine id → its name, from the Workspace's machine index (`Workspace.get().machines`, live, through the workspace
+ * store, #1118): one read, no `Machine.get` per machine — what a page needs to name the machine a wait or a cut turn names.
  */
-export function useMachineNames(defs: Pick<ActorDefs, 'Workspace'>, viewer: Pick<ViewerState, 'workspaceId'>): (id: string) => string | undefined {
-    const ws = useActorState(defs.Workspace, () => viewer.workspaceId && ([workspaceKeyOf(viewer.workspaceId), 'get'] as const), { live: true });
-    return (id) => ws.value?.machines.find((m) => m.id === id)?.name;
+export function useMachineNames(_defs: Pick<ActorDefs, 'Workspace'>, _viewer: Pick<ViewerState, 'workspaceId'>): (id: string) => string | undefined {
+    const store = useWorkspaceStore();
+    return (id) => store.machineNames.get(id);
 }

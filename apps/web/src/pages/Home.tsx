@@ -1,10 +1,9 @@
 import { component, signal, type JSXElement } from 'sigx';
 import { Link } from '@sigx/router';
-import { useActorState } from '@sigx/actors/app';
 import { Progress } from '@sigx/zero';
 import { AgentTile, Button, ConfirmDialog, DataTable, EmptyState, EnvironmentLine, SectionHeading, StatusPill, WaitReasonLine } from '@agentic/ui';
+import { useWorkspaceStore } from '@agentic/client';
 import { useActorDefs, useViewer } from '../actors/defs';
-import { workspaceKeyOf } from '../actors/keys';
 import { Age } from '../components/Age';
 import { Page } from '../components/Page';
 import { Panel } from '../components/Panel';
@@ -75,7 +74,7 @@ export const LiveHome = component(() => {
     const defs = useActorDefs();
     const viewer = useViewer()();
     const needs = useNeedsSource()();
-    const ws = useActorState(defs.Workspace, () => viewer.workspaceId && ([workspaceKeyOf(viewer.workspaceId), 'get'] as const), { live: true });
+    const ws = useWorkspaceStore().indexRead;
     const spend = useMonthSpend(defs, viewer);
     const feed = createWorkspacePulls();
     const pulls = livePullNeeds(feed, defs, () => viewer.workspaceId, () => viewer.login);

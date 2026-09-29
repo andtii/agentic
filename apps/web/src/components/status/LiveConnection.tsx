@@ -11,8 +11,9 @@
 import { component, effect, onUnmounted, signal, type JSXElement } from 'sigx';
 import { useActorState } from '@sigx/actors/app';
 import { ConnectionStrip, connectionRows, type MachineConnection } from '@agentic/ui';
+import { useWorkspaceStore } from '@agentic/client';
 import { useActorDefs, useViewer } from '../../actors/defs';
-import { machineKeyOf, workspaceKeyOf } from '../../actors/keys';
+import { machineKeyOf } from '../../actors/keys';
 import { clientConnection } from './client';
 
 export interface MachinePresence {
@@ -55,9 +56,8 @@ const MachineWatch = component<{ id: string; workspaceId: string; onPresence: (i
 });
 
 export const LiveConnection = component(() => {
-    const defs = useActorDefs();
     const viewer = useViewer()();
-    const machines = useActorState(defs.Workspace, () => { const ws = viewer.workspaceId; return ws && ([workspaceKeyOf(ws), 'listMachines'] as const); }, { live: true });
+    const machines = useWorkspaceStore().machinesRead;
     const presence = signal<{ map: Record<string, MachinePresence> }>({ map: {} });
     const report = (id: string, p: MachinePresence): void => {
         const prev = presence.map[id];

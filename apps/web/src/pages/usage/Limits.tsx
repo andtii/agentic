@@ -10,8 +10,9 @@ import { useActorState } from '@sigx/actors/app';
 import { Card } from '@sigx/zero';
 import type { MachineView } from '@agentic/platform';
 import { Label, QuotaPanel } from '@agentic/ui';
+import { useWorkspaceStore } from '@agentic/client';
 import { useActorDefs, useViewer } from '../../actors/defs';
-import { machineKeyOf, workspaceKeyOf } from '../../actors/keys';
+import { machineKeyOf } from '../../actors/keys';
 import { limitAccountsOf, type LimitAccount } from './limit-accounts';
 
 export type LimitsSectionProps =
@@ -65,9 +66,8 @@ const MachineQuotaWatch = component<{ id: string; workspaceId: string; onRead: (
 });
 
 export const LiveLimits = component<Define.Prop<'compact', boolean>>(({ props }) => {
-    const defs = useActorDefs();
     const viewer = useViewer()();
-    const index = useActorState(defs.Workspace, () => viewer.workspaceId && ([workspaceKeyOf(viewer.workspaceId), 'listMachines'] as const), { live: true });
+    const index = useWorkspaceStore().machinesRead;
     const reads = signal<{ map: Record<string, MachineView> }>({ map: {} });
     return (): JSXElement => {
         const ws = viewer.workspaceId;

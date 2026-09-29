@@ -13,6 +13,7 @@ import { useRoute, useRouter } from '@sigx/router';
 import type { ChatSummary, IndexedEntry } from '@agentic/platform';
 import { projectFolderFor, projectFolderKey, type AgentId, type EnvironmentId, type MachineId, type ProjectId, type ProjectRecord } from '@agentic/core';
 import { EmptyState, ErrorNote } from '@agentic/ui';
+import { useWorkspaceStore } from '@agentic/client';
 import { Page } from '../../components/Page';
 import { useActorDefs, useViewer, type ActorDefs, type ViewerState } from '../../actors/defs';
 import { chatKeyOf, workspaceKeyOf } from '../../actors/keys';
@@ -48,7 +49,7 @@ export interface ChatRows {
 /** The workspace's chats, newest activity first, as list rows. */
 export function useChatRows(defs: ActorDefs, viewer: ViewerState, directory: AgentDirectory): ChatRows {
     const live = signal<{ map: Record<string, ChatRead> }>({ map: {} });
-    const index = useActorState(defs.Workspace, () => viewer.workspaceId && ([workspaceKeyOf(viewer.workspaceId), 'get'] as const), { live: true });
+    const index = useWorkspaceStore().indexRead;
     const reads = useData(
         () => {
             const ws = viewer.workspaceId;

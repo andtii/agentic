@@ -8,9 +8,8 @@
  * module-level "current zone": two server renders for two workspaces share
  * this module.
  */
-import { useActorState } from '@sigx/actors/app';
+import { useWorkspaceStore } from '@agentic/client';
 import type { ActorDefs, ViewerState } from './actors/defs';
-import { workspaceKeyOf } from './actors/keys';
 import { dataMode } from './data-mode';
 import { MOCK_NOW } from './mock/workspace';
 
@@ -66,8 +65,11 @@ export function zoneFormat(zone: string = DEFAULT_ZONE): ZoneFormat {
 /** The clock ages are measured against: the real one on the platform, the mock workspace's frozen one otherwise. */
 export const clockNow = (): number => (dataMode() === 'live' ? Date.now() : MOCK_NOW);
 
-/** The workspace's zone, read live — call in a component's setup; the getter is reactive. */
-export function useWorkspaceZone(defs: ActorDefs, viewer: ViewerState): () => string {
-    const workspace = useActorState(defs.Workspace, () => viewer.workspaceId && ([workspaceKeyOf(viewer.workspaceId), 'get'] as const), { live: true });
-    return () => workspace.value?.settings.timeZone || DEFAULT_ZONE;
+/**
+ * The workspace's zone, read live — call in a component's setup; the getter is reactive. The workspace store (#1118)
+ * owns the read; the arguments stay for the call sites' shape (the store reads the same injected defs and viewer).
+ */
+export function useWorkspaceZone(_defs: ActorDefs, _viewer: ViewerState): () => string {
+    const store = useWorkspaceStore();
+    return () => store.zone;
 }

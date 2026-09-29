@@ -13,8 +13,9 @@ import { Link } from '@sigx/router';
 import { Card } from '@sigx/zero';
 import { useActorState } from '@sigx/actors/app';
 import { Label, StatusPill, type Tone } from '@agentic/ui';
+import { useWorkspaceStore } from '@agentic/client';
 import { useActorDefs, useViewer } from '../../actors/defs';
-import { machineKeyOf, workspaceKeyOf } from '../../actors/keys';
+import { machineKeyOf } from '../../actors/keys';
 import { RUNTIME_MACHINE_TEXT, runtimeMachineLine, runtimeOnMachine, type RuntimeMachine } from '../machines/harness';
 
 const TONE: Readonly<Record<RuntimeMachine['state'], Tone>> = { has: 'live', lacks: 'muted', broken: 'failed', unknown: 'muted' };
@@ -68,9 +69,8 @@ const LiveRuntimeMachine = component<{ runtime: string; id: string; name: string
 
 /** The section on the platform: the paired machines, each read live. */
 export const LiveRuntimeMachines = component<Define.Prop<'runtime', string, true> & Define.Prop<'name', string, true>>(({ props }) => {
-    const defs = useActorDefs();
     const viewer = useViewer()();
-    const index = useActorState(defs.Workspace, () => { const ws = viewer.workspaceId; return ws && ([workspaceKeyOf(ws), 'listMachines'] as const); }, { live: true });
+    const index = useWorkspaceStore().machinesRead;
     return (): JSXElement | null => {
         const ws = viewer.workspaceId;
         if (!ws || !index.value) return null;

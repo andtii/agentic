@@ -6,7 +6,7 @@
  * `saveProjectWith` (New project and the Settings tabs).
  */
 import { actor } from '@sigx/actors';
-import { useActorState } from '@sigx/actors/app';
+import { useWorkspaceStore } from '@agentic/client';
 import type { ProjectPatch, ProjectRecord } from '@agentic/core';
 import type { ActorDefs, ViewerState } from '../../actors/defs';
 import { workspaceKeyOf } from '../../actors/keys';
@@ -20,16 +20,16 @@ export interface Projects {
     lastProjectId(): string | null;
 }
 
-export function useProjects(defs: Pick<ActorDefs, 'Workspace'>, viewer: Pick<ViewerState, 'workspaceId'>): Projects {
-    const projects = useActorState(defs.Workspace, () => viewer.workspaceId && ([workspaceKeyOf(viewer.workspaceId), 'projects'] as const), { live: true });
-    const index = useActorState(defs.Workspace, () => viewer.workspaceId && ([workspaceKeyOf(viewer.workspaceId), 'get'] as const), { live: true });
+/** Over the workspace store (#1118), which owns both reads; the arguments stay for the call sites' shape. */
+export function useProjects(_defs: Pick<ActorDefs, 'Workspace'>, _viewer: Pick<ViewerState, 'workspaceId'>): Projects {
+    const store = useWorkspaceStore();
     return {
-        list: () => projects.value ?? [],
-        byId: (id) => (id ? (projects.value ?? []).find((p) => p.id === id) : undefined),
+        list: () => store.projects,
+        byId: (id) => (id ? store.projects.find((p) => p.id === id) : undefined),
         get loading() {
-            return projects.loading;
+            return store.projectsRead.loading;
         },
-        lastProjectId: () => index.value?.lastProjectId ?? null
+        lastProjectId: () => store.lastProjectId
     };
 }
 
