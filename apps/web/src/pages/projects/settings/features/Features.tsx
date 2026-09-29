@@ -6,10 +6,10 @@
  */
 import { component, signal } from 'sigx';
 import { actor } from '@sigx/actors';
-import { useActorState } from '@sigx/actors/app';
 import type { ProjectPatch } from '@agentic/core';
+import { useRegistryStore } from '@agentic/client';
 import { useActorDefs, useViewer } from '../../../../actors/defs';
-import { registryKeyOf, workspaceKeyOf } from '../../../../actors/keys';
+import { workspaceKeyOf } from '../../../../actors/keys';
 import { dataMode } from '../../../../data-mode';
 import { MOCK_FEATURE_CATALOGUE } from '../../../../mock/projects/features';
 import { projectFeatureCatalogue } from '../../../../plugins/features';
@@ -26,8 +26,8 @@ const MockFeatures = component<ProjectPageProps>(({ props }) => {
 const LiveFeatures = component<ProjectPageProps>(({ props }) => {
     const defs = useActorDefs();
     const viewer = useViewer()();
-    const views = useActorState(defs.Registry, () => viewer.workspaceId && ([registryKeyOf(viewer.workspaceId), 'projectFeatures'] as const), { live: true });
-    const overview = useActorState(defs.Registry, () => viewer.workspaceId && ([registryKeyOf(viewer.workspaceId), 'overview'] as const), { live: true });
+    const views = useRegistryStore().projectFeaturesRead;
+    const overview = useRegistryStore().overviewRead;
     const save = async (patch: ProjectPatch): Promise<void> => {
         const ws = viewer.workspaceId;
         if (!ws) throw new Error('Sign in to change the project.');

@@ -19,6 +19,7 @@ import { Link } from '@sigx/router';
 import { actor } from '@sigx/actors';
 import { useActorState } from '@sigx/actors/app';
 import { Button, ErrorNote, Icon } from '@agentic/ui';
+import { useRegistryStore } from '@agentic/client';
 import { useActorDefs, useViewer } from '../actors/defs';
 import { inboxKeyOf, registryKeyOf } from '../actors/keys';
 import { formatAge } from '../mock/workspace';
@@ -31,7 +32,7 @@ import { desktopHost } from '../desktop/bridge';
 export const PushDevices = component(() => {
     const defs = useActorDefs();
     const viewer = useViewer()();
-    const overview = useActorState(defs.Registry, () => (viewer.workspaceId ? ([registryKeyOf(viewer.workspaceId), 'overview'] as const) : null), { live: true });
+    const overview = useRegistryStore().overviewRead;
     const subscriptions = useActorState(defs.Inbox, () => (viewer.workspaceId ? ([inboxKeyOf(viewer.workspaceId), 'subscriptions'] as const) : null), { live: true });
     // Client only: the server render knows nothing of this browser.
     const st = signal<{ support: PushSupport | null; here: string | null; busy: boolean; error: string; desktop: boolean }>({ support: null, here: null, busy: false, error: '', desktop: false });

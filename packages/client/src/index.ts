@@ -9,3 +9,5 @@ export { memoryKeyValueStorage, useKeyValueStorage, type KeyValueStorage } from 
 export { defineAppStore, initAppStores, useLiveActorState, type LiveActorState } from './stores/index';
 export { DEFAULT_WORKSPACE_ZONE, useWorkspaceStore } from './stores/index';
 export { INTERRUPTION_AUDIT_KINDS, INTERRUPTION_AUDIT_ROWS, useInboxStore } from './stores/index';
+export { useRegistryStore } from './stores/index';
+export { isAuthError, readinessById, readinessFacts, readyRuntimeIds, signedOutPluginIds } from './readiness';

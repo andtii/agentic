@@ -8,7 +8,8 @@ import { useActorState } from '@sigx/actors/app';
 import type { AgentId, Plan, PlanItem, ProjectFeatureUi, ProjectRecord, PullRequest, TaskId } from '@agentic/core';
 import type { PullsReadiness, TaskIndexRow } from '@agentic/platform';
 import { useActorDefs, useViewer, type ActorDefs, type ViewerState } from '../../../actors/defs';
-import { planKeyOf, pullsKeyOf, registryKeyOf, taskIndexKeyOf } from '../../../actors/keys';
+import { planKeyOf, pullsKeyOf, taskIndexKeyOf } from '../../../actors/keys';
+import { useRegistryStore } from '@agentic/client';
 import { dataMode } from '../../../data-mode';
 import { MOCK_WORK, mockFeatureUi } from '../../../mock/projects/work';
 import type { WorkFeatures, WorkTask } from './model';
@@ -106,10 +107,10 @@ export function featuresOf(project: Pick<ProjectRecord, 'features'>, uiOf: (id: 
 
 export const mockWorkFeatures = (project: Pick<ProjectRecord, 'features'>): WorkFeatures => featuresOf(project, mockFeatureUi);
 
-/** The Registry's project features as a `ui` lookup (empty until the read lands, so the stages fall back meanwhile). */
-export function useFeatureUi(defs: Pick<ActorDefs, 'Registry'>, viewer: Pick<ViewerState, 'workspaceId'>): (id: string) => ProjectFeatureUi | undefined {
-    const views = useActorState(defs.Registry, () => viewer.workspaceId && ([registryKeyOf(viewer.workspaceId), 'projectFeatures'] as const), { live: true });
-    return (id) => (views.value ?? []).find((v) => v.id === id)?.ui;
+/** The Registry's project features as a `ui` lookup, from the registry store (empty until the read lands, so the stages fall back meanwhile); the arguments stay for the call sites. */
+export function useFeatureUi(_defs: Pick<ActorDefs, 'Registry'>, _viewer: Pick<ViewerState, 'workspaceId'>): (id: string) => ProjectFeatureUi | undefined {
+    const store = useRegistryStore();
+    return (id) => store.projectFeatures.find((v) => v.id === id)?.ui;
 }
 
 /** The workspace's TaskIndex, live. */
