@@ -6,16 +6,15 @@
  * card, where it is installed, updated or removed — and, once installed, to
  * its environments, where one on the runtime is added and signed in (#527).
  * The live section reads
- * the Workspace's machine index and each machine's `get` live.
+ * the Workspace's machine index and each machine's `get` live, both from
+ * the app stores (#1120).
  */
 import { component, type Define, type JSXElement } from 'sigx';
 import { Link } from '@sigx/router';
 import { Card } from '@sigx/zero';
-import { useActorState } from '@sigx/actors/app';
 import { Label, StatusPill, type Tone } from '@agentic/ui';
-import { useWorkspaceStore } from '@agentic/client';
-import { useActorDefs, useViewer } from '../../actors/defs';
-import { machineKeyOf } from '../../actors/keys';
+import { useMachineStore, useWorkspaceStore } from '@agentic/client';
+import { useViewer } from '../../actors/defs';
 import { RUNTIME_MACHINE_TEXT, runtimeMachineLine, runtimeOnMachine, type RuntimeMachine } from '../machines/harness';
 
 const TONE: Readonly<Record<RuntimeMachine['state'], Tone>> = { has: 'live', lacks: 'muted', broken: 'failed', unknown: 'muted' };
@@ -57,11 +56,10 @@ export const RuntimeMachines = component<Define.Prop<'name', string, true> & Def
     </Card.Root>
 ));
 
-const LiveRuntimeMachine = component<{ runtime: string; id: string; name: string; workspaceId: string }>(({ props }) => {
-    const defs = useActorDefs();
-    const view = useActorState(defs.Machine, () => [machineKeyOf(props.workspaceId, props.id), 'get'] as const, { live: true });
+const LiveRuntimeMachine = component<{ runtime: string; id: string; name: string }>(({ props }) => {
+    const store = useMachineStore();
     return (): JSXElement | null => {
-        const v = view.value;
+        const v = store.machine(props.id);
         if (!v || v.revoked) return null;
         return <RuntimeMachineRow machine={runtimeOnMachine(props.runtime, { machineId: props.id, name: v.name || props.name, online: v.online, ...(v.harnesses ? { harnesses: v.harnesses } : {}), ...(v.harnessesAvailable ? { harnessesAvailable: v.harnessesAvailable } : {}) })} />;
     };
@@ -77,7 +75,7 @@ export const LiveRuntimeMachines = component<Define.Prop<'runtime', string, true
         const paired = index.value.filter((m) => m.status === 'paired');
         return (
             <RuntimeMachines name={props.name} empty={paired.length === 0}>
-                {paired.map((m) => <LiveRuntimeMachine runtime={props.runtime} id={m.id} name={m.name} workspaceId={ws} />)}
+                {paired.map((m) => <LiveRuntimeMachine runtime={props.runtime} id={m.id} name={m.name} />)}
             </RuntimeMachines>
         );
     };

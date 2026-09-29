@@ -1,7 +1,7 @@
 /**
  * `/machines` on the platform (#144): the Workspace's machine index read
- * live, each paired machine's record a live read of its own
- * (`Machine.get`: online, last seen, the environments the daemon reported
+ * live, each paired machine's record the machines store's live read
+ * (#1120, `Machine.get`: online, last seen, the environments the daemon reported
  * with their auth status), the router's parked tasks as the queued counts
  * (EXE-12), the directory's agents on the "Default for" tiles — rendered
  * as the same machine groups the mock page draws. Each environment card
@@ -20,7 +20,7 @@ import { actor } from '@sigx/actors';
 import { useActorState } from '@sigx/actors/app';
 import type { MachineUpdateView } from '@agentic/platform';
 import { EmptyState } from '@agentic/ui';
-import { useWorkspaceStore } from '@agentic/client';
+import { useMachineStore, useWorkspaceStore } from '@agentic/client';
 import { useActorDefs, useViewer } from '../../actors/defs';
 import { machineKeyOf, routingKeyOf } from '../../actors/keys';
 import { useAgentDirectory } from '../chat/directory';
@@ -37,12 +37,12 @@ import { desktopHost, isThisComputer, offerPairing, type ThisComputer } from '..
 /** One machine's group over a live read of its record; busy (and empty) until the first value. */
 const LiveMachineGroup = component<{ id: string; name: string; workspaceId: string; here: boolean; queued: Readonly<Record<string, number>>; agents: readonly AgentIdentity[]; report: (id: string, update: MachineUpdateView | null) => void }>(({ props }) => {
     const defs = useActorDefs();
-    const view = useActorState(defs.Machine, () => [machineKeyOf(props.workspaceId, props.id), 'get'] as const, { live: true });
+    const store = useMachineStore();
     const update = useActorState(defs.Machine, () => [machineKeyOf(props.workspaceId, props.id), 'updateState'] as const, { live: true });
     const stopReport = effect(() => { props.report(props.id, update.value ?? null); });
     onUnmounted(() => { stopReport(); props.report(props.id, null); });
     return (): JSXElement => {
-        const v = view.value;
+        const v = store.machine(props.id);
         if (!v) return <Card.Root asChild>{(card) => <section {...card} data-machine-group data-machine={props.id} aria-label={props.name} aria-busy="true" />}</Card.Root>;
         // "Default for" per environment (#414): pinned agents by id, account-bound ones by the login this machine reports.
         return <MachineGroup machine={machineOf(v, props.name, Date.now())} environments={liveCapacity(v)} queued={props.queued} defaultFor={defaultForByEnvironment(props.agents, v.environments)} quota={v.quota ?? {}} {...(v.telemetry ? { load: v.telemetry.environments, machineLoad: machineLoadOf(v.telemetry, Date.now()) } : {})} update={v.revoked ? null : updateBadge(update.value)} harnessUpdates={v.revoked ? 0 : harnessUpdates(v)} here={props.here} />;

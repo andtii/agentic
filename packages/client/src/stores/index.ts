@@ -7,3 +7,4 @@ export { useLiveActorState, type LiveActorState } from './live';
 export { DEFAULT_WORKSPACE_ZONE, useWorkspaceStore } from './workspace';
 export { INTERRUPTION_AUDIT_KINDS, INTERRUPTION_AUDIT_ROWS, useInboxStore } from './inbox';
 export { useRegistryStore } from './registry';
+export { foldEnvironments, machineKeyOf, pairedOf, useMachineStore, type EnvironmentEntry, type MachineEntry } from './machines';
