@@ -11,8 +11,10 @@
  * The `socketTransport()` from `@sigx/actors-ws` is ONE multiplexed link and its
  * `connect` seam is not told which actor it is for, so this router keeps one
  * `socketTransport` per actor, keyed by the subscription's `type`/`key`,
- * opened on the first subscription and closed with the last. Calls stay on
- * `calls` (POSTs): one-shot calls do not keep an object awake.
+ * opened on the first subscription. When the last one ends the socket lingers
+ * for `LINGER_MS` before it closes (#1117): a page that unmounts and the next
+ * one that reads the same actor share the open socket instead of redialling
+ * it. Calls stay on `calls` (POSTs): one-shot calls do not keep an object awake.
  */
 import type { ActorLiveChannel, ActorTransport } from '@sigx/actors/client';
 import { socketTransport, type SocketTransportOptions } from '@sigx/actors-ws/client';
@@ -39,9 +41,32 @@ export interface SocketReport {
  */
 export const DROP_GRACE_MS = 5_000;
 
+/**
+ * How long a socket with no subscribers stays open before it closes (#1117). Page-owned reads unmount on every route
+ * change and the next page often reads the same actors; an idle socket to a hibernating object costs nothing.
+ */
+export const LINGER_MS = 10_000;
+
+/**
+ * The link between `liveOverSockets` and one actor's socket while it lingers (#1117). The router sets `idle` while the
+ * socket has no subscribers. A close nobody asked for while idle is then no drop for the pill (nothing redials an idle
+ * socket, so nothing would ever report it open again); it is told to `onIdleDrop` instead, which retires the socket.
+ */
+export interface SocketLinger {
+    idle: boolean;
+    onIdleDrop?: () => void;
+}
+
+/** An actor's socket transport that can linger: `browserSocketFor` returns one. */
+export interface LingeringTransport extends ActorTransport {
+    readonly linger?: SocketLinger;
+}
+
 export interface ReportingOptions {
     /** How long a drop may wait for a reopen before it is reported. Default `0`: at once. */
     readonly graceMs?: number;
+    /** A close nobody asked for while `linger.idle` is not a drop: it goes to `linger.onIdleDrop` (#1117). */
+    readonly linger?: SocketLinger;
     /** Timers; injected by tests. */
     readonly setTimer?: (run: () => void, ms: number) => unknown;
     readonly clearTimer?: (handle: unknown) => void;
@@ -59,7 +84,7 @@ export interface ReportingOptions {
  * transport made itself, cancels it.
  */
 export function reportingConnect(connect: SocketConnect, report: SocketReport, options: ReportingOptions = {}): SocketConnect {
-    const { graceMs = 0 } = options;
+    const { graceMs = 0, linger } = options;
     const setTimer = options.setTimer ?? ((run, ms) => setTimeout(run, ms));
     const clearTimer = options.clearTimer ?? ((h) => clearTimeout(h as ReturnType<typeof setTimeout>));
     let pending: unknown = null;
@@ -85,7 +110,12 @@ export function reportingConnect(connect: SocketConnect, report: SocketReport, o
             },
             onMessage: (message) => handlers.onMessage(message),
             onClose() {
-                if (!closing) drop();
+                if (!closing) {
+                    if (linger?.idle) {
+                        cancel();
+                        linger.onIdleDrop?.();
+                    } else drop();
+                }
                 handlers.onClose();
             }
         });
@@ -250,30 +280,55 @@ const webSocketConnect =
         return { send: (message) => ws.send(message), close: () => ws.close() };
     };
 
-/** The browser default: a same-origin `ws(s):` URL for the actor's socket, its opens and drops told to `report`. */
-export function browserSocketFor(type: string, key: string, report: SocketReport = {}): ActorTransport {
+/**
+ * The browser default: a same-origin `ws(s):` URL for the actor's socket, its opens and drops told to `report`. It
+ * carries the `linger` link `liveOverSockets` sets while the socket has no subscribers (#1117).
+ */
+export function browserSocketFor(type: string, key: string, report: SocketReport = {}): LingeringTransport {
     const url = new URL(actorSocketPath(type, key), location.href);
     url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
     // The transport's own backoff is off: `resilientConnect` paces the redials (jittered, cut short by a wake). A drop
     // that a redial recovers from within `DROP_GRACE_MS` is a handover, and the pill does not hear about it (#1024).
-    return socketTransport({ connect: reportingConnect(resilientConnect(webSocketConnect(url.href)), report, { graceMs: DROP_GRACE_MS }), retryMs: 0 });
+    const linger: SocketLinger = { idle: false };
+    const connect = reportingConnect(resilientConnect(webSocketConnect(url.href)), report, { graceMs: DROP_GRACE_MS, linger });
+    return Object.assign(socketTransport({ connect, retryMs: 0 }), { linger });
 }
 
 export interface LiveOverSocketsOptions {
     /** Calls and streams — the existing `fetchTransport`. */
     readonly calls: ActorTransport;
-    /** One actor's socket transport. Default `browserSocketFor`. */
-    readonly socketFor?: (type: string, key: string) => ActorTransport;
+    /** One actor's socket transport. Default `browserSocketFor`. A `LingeringTransport` also hears when it idles. */
+    readonly socketFor?: (type: string, key: string) => LingeringTransport;
+    /** How long a socket with no subscribers stays open (#1117). Default `LINGER_MS`; `0` closes it with the last. */
+    readonly lingerMs?: number;
+    /** Timers; injected by tests. */
+    readonly setTimer?: (run: () => void, ms: number) => unknown;
+    readonly clearTimer?: (handle: unknown) => void;
 }
 
 interface ActorSocket {
-    readonly transport: ActorTransport;
+    readonly transport: LingeringTransport;
     readonly channel: ActorLiveChannel;
     subscribers: number;
+    /** The pending close while the socket has no subscribers. */
+    linger: unknown;
 }
 
-export function liveOverSockets({ calls, socketFor = browserSocketFor }: LiveOverSocketsOptions): ActorTransport {
+export function liveOverSockets({ calls, socketFor = browserSocketFor, lingerMs = LINGER_MS, ...options }: LiveOverSocketsOptions): ActorTransport {
+    const setTimer = options.setTimer ?? ((run, ms) => setTimeout(run, ms));
+    const clearTimer = options.clearTimer ?? ((h) => clearTimeout(h as ReturnType<typeof setTimeout>));
     const sockets = new Map<string, ActorSocket>();
+    const stopLinger = (socket: ActorSocket): void => {
+        if (socket.linger !== null) clearTimer(socket.linger);
+        socket.linger = null;
+        if (socket.transport.linger) socket.transport.linger.idle = false;
+    };
+    /** Close a socket and forget it, unless a newer socket already holds its place. */
+    const retire = (id: string, socket: ActorSocket): void => {
+        stopLinger(socket);
+        if (sockets.get(id) === socket) sockets.delete(id);
+        void socket.transport.close?.();
+    };
     const channel: ActorLiveChannel = {
         subscribe(sub, onValue, onError) {
             const id = `${sub.type}\u0000${sub.key}`;
@@ -282,9 +337,14 @@ export function liveOverSockets({ calls, socketFor = browserSocketFor }: LiveOve
                 const transport = socketFor(sub.type, sub.key);
                 const live = transport.live?.();
                 if (!live) throw new Error(`transport ${transport.name} has no live channel`);
-                socket = { transport, channel: live, subscribers: 0 };
+                const created: ActorSocket = { transport, channel: live, subscribers: 0, linger: null };
+                // A lingering socket that closes on its own is dropped; the next subscription dials a fresh one.
+                if (transport.linger) transport.linger.onIdleDrop = () => void (created.subscribers === 0 && retire(id, created));
+                socket = created;
                 sockets.set(id, socket);
             }
+            // A subscription within the linger reuses the open socket.
+            stopLinger(socket);
             socket.subscribers++;
             const unsubscribe = socket.channel.subscribe(sub, onValue, onError);
             let done = false;
@@ -292,10 +352,13 @@ export function liveOverSockets({ calls, socketFor = browserSocketFor }: LiveOve
                 if (done) return;
                 done = true;
                 unsubscribe();
-                if (--socket.subscribers === 0 && sockets.get(id) === socket) {
-                    sockets.delete(id);
-                    void socket.transport.close?.();
-                }
+                if (--socket.subscribers > 0 || sockets.get(id) !== socket) return;
+                if (lingerMs <= 0) return retire(id, socket);
+                if (socket.transport.linger) socket.transport.linger.idle = true;
+                socket.linger = setTimer(() => {
+                    socket.linger = null;
+                    retire(id, socket);
+                }, lingerMs);
             };
         }
     };
@@ -305,7 +368,10 @@ export function liveOverSockets({ calls, socketFor = browserSocketFor }: LiveOve
         stream: (symbol, args, init) => calls.stream(symbol, args, init),
         live: () => channel,
         close() {
-            for (const socket of sockets.values()) void socket.transport.close?.();
+            for (const socket of sockets.values()) {
+                stopLinger(socket);
+                void socket.transport.close?.();
+            }
             sockets.clear();
             return calls.close?.();
         }

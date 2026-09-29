@@ -25,9 +25,9 @@ const calls: ActorTransport = { name: 'fetch', call: async (symbol) => `called $
 const sub = (type: string, key: string, method = 'get'): ActorSubscription => ({ type, key, method });
 
 describe('liveOverSockets', () => {
-    it('opens one socket per actor, shared by its subscriptions, closed with the last', () => {
+    it('opens one socket per actor, shared by its subscriptions, closed with the last when it does not linger', () => {
         const { opened, closed, socketFor } = fakeSockets();
-        const live = liveOverSockets({ calls, socketFor }).live!();
+        const live = liveOverSockets({ calls, socketFor, lingerMs: 0 }).live!();
         const values: unknown[] = [];
 
         const a1 = live.subscribe(sub('Chat', 'ws:c1'), (v) => values.push(v));
