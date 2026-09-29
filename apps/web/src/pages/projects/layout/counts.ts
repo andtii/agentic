@@ -11,6 +11,7 @@
  * needs-you badge on your-move ones — its open plan items (the Plan section) and its requests that need a person.
  */
 import { signal } from 'sigx';
+import { defineWebStore, forward } from '../../../stores/define';
 
 export interface ProjectMenuCounts {
     /** Open chats in the project. */
@@ -71,5 +72,9 @@ export function countsFor(projectId: string, lines: readonly CountableSummaryLin
     return chats ? countsFromChats(projectId, chats) : undefined;
 }
 
-/** Live: the counts `ProjectLayout` read for the open project. */
-export const projectCounts = signal<{ value: { readonly id: string; readonly counts: ProjectMenuCounts } | null }>({ value: null });
+/** Live: the counts `ProjectLayout` read for the open project — a web store, one per app (#1124, `stores/define.ts`). */
+export const useProjectCountsStore = defineWebStore('project-counts', () => ({
+    counts: signal<{ value: { readonly id: string; readonly counts: ProjectMenuCounts } | null }>({ value: null })
+}));
+
+export const projectCounts = forward(() => useProjectCountsStore().counts);

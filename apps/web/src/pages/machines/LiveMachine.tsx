@@ -50,7 +50,7 @@ import { MachineView, likelyRoot, type EnvRequestState, type RestartState } from
 import { LinkButton } from '../ops/LinkButton';
 import { OpsPage } from '../ops/OpsPage';
 import { CLIENT_TIMEOUT_MS } from '../workdir/model';
-import { machineHead } from './head';
+import { useMachineHeadStore } from './head';
 import { LIVE_DOCTOR_FOOTNOTE, defaultForByEnvironment, doctorChecksOf, liveCapacity, machineLoadOf, machineOf, queuedByEnvironment, sessionsOf } from './live';
 import { answerFailure, callFailure, runtimesOf } from './manage';
 import { browserPendingStore, elevateUrl, isElevationRequired, savePending, takePending, type PendingChange, type PendingKind } from './elevate';
@@ -66,6 +66,7 @@ const isEnvironmentInput = (v: unknown): v is EnvironmentInput => !!v && typeof 
 
 export const LiveMachine = component<{ id: string; focusEnv?: string }>(({ props }) => {
     const defs = useActorDefs();
+    const { head: machineHead } = useMachineHeadStore();
     const viewer = useViewer()();
     const router = useRouter();
     const directory = useAgentDirectory(defs, viewer);

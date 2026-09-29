@@ -13,9 +13,10 @@ import { ssrClientPlugin } from '@sigx/server-renderer/client';
 import { plainCodeRenderer, useCodeRenderer } from '@agentic/ui';
 import { createServerRouter } from '../../src/router';
 import { USER } from '../../src/mock/workspace';
-import { resetViewPrefs, setViewPin } from '../../src/pages/chat/view-prefs';
+import { useKeyValueStorage } from '@agentic/client';
+import { webKeyValueStorage } from '../../src/actors/storage';
 import { tick } from './mount';
-import { clearViewPrefs } from './chat-view-prefs';
+import { clearViewPrefs, savePin } from './chat-view-prefs';
 
 const CHAT = '/projects/p_agentic/chats/cm2';
 const THREAD = '[data-scope="ai-thread"][data-part="root"]';
@@ -26,6 +27,7 @@ async function appAt(path: string) {
     const app = defineApp(<RouterView />);
     app.use(router);
     app.defineProvide(useCodeRenderer, () => plainCodeRenderer);
+    app.defineProvide(useKeyValueStorage, () => webKeyValueStorage);
     return app;
 }
 
@@ -47,8 +49,7 @@ describe('chat view prefs hydrate (#1113)', () => {
         expect(html).not.toContain('data-chat-lanes');
 
         // The viewer saved a Lanes pin on an earlier visit; this page load has not read it yet.
-        setViewPin(USER.workspace, 'cm2', 'lanes');
-        resetViewPrefs();
+        savePin('cm2', 'lanes', USER.workspace);
 
         const logs: string[] = [];
         const warn = vi.spyOn(console, 'warn').mockImplementation((...a: unknown[]) => { logs.push(a.map(String).join(' ')); });

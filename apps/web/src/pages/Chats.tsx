@@ -6,7 +6,7 @@ import { defineTopbar } from '../components/topbar';
 import { dataMode } from '../data-mode';
 import { AGENTS, LAST_PROJECT_ID, PROJECTS, loadChats } from '../mock/workspace';
 import { ChatList } from './chat/ChatList';
-import { closeNewChat, newChatRequest, openNewChat } from './chat/head';
+import { openNewChat, useChatHeadStore } from './chat/head';
 import { LiveChats } from './chat/LiveChats';
 import { NewChatDialog } from './chat/NewChatDialog';
 import { newChatProjectOf, newProjectLink } from './chat/new-chat-prefill';
@@ -20,6 +20,7 @@ defineTopbar('chats', () => ({ actions: () => <Button intent="primary" icon="plu
  * Opened from a folder (#336, `/chats/new?…`) it carries the prefill; "Create project from this folder" goes to the form.
  */
 export const Chats = component(() => {
+    const { newChat: newChatRequest, closeNewChat } = useChatHeadStore();
     const chats = loadChats();
     const router = useRouter();
     const route = useRoute();

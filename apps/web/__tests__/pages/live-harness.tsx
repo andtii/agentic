@@ -27,6 +27,8 @@ import { clientDefs } from '../../src/actors/client';
 import { useActorDefs, useViewer } from '../../src/actors/defs';
 import { setDataMode } from '../../src/data-mode';
 import { createServerRouter } from '../../src/router';
+import { useKeyValueStorage } from '@agentic/client';
+import { webKeyValueStorage } from '../../src/actors/storage';
 
 export const USER = 'u_live';
 export const WS = USER as WorkspaceId;
@@ -156,6 +158,7 @@ export async function mountLive(path: string, harness: LiveHarness, tree: JSXEle
     app.defineProvide(useActorDefs, clientDefs);
     app.defineProvide(useViewer, () => () => ({ workspaceId: USER, pending: false }));
     app.defineProvide(useCodeRenderer, () => plainCodeRenderer);
+    app.defineProvide(useKeyValueStorage, () => webKeyValueStorage);
     app.mount(container);
     await tick();
     closers.push(() => {

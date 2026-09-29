@@ -34,7 +34,7 @@ import { AGENT_TABS, type AgentTab } from '../Agent';
 import { useAgentActivity } from './activity';
 import { useAgentCatalog } from './catalog';
 import { ConfigTab, type ConfigStore } from './ConfigTab';
-import { agentHead } from './head';
+import { useAgentHeadStore } from './head';
 import { accountOptions, configPatch, learningPatch, profileOf, sessionRowsOf } from './live';
 import { MemoryTab, type MemoryTabStore } from './MemoryTab';
 import { OverviewTab } from './OverviewTab';
@@ -46,6 +46,7 @@ import { chatHref } from '../chat/href';
 
 export const LiveAgent = component<{ id: string }>(({ props }) => {
     const defs = useActorDefs();
+    const { head: agentHead } = useAgentHeadStore();
     const viewer = useViewer()();
     const route = useRoute();
     const router = useRouter();

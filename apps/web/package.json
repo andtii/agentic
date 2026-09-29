@@ -39,6 +39,7 @@
     "@sigx/router": "catalog:",
     "@sigx/server": "catalog:",
     "@sigx/server-renderer": "catalog:",
+    "@sigx/store": "catalog:",
     "@sigx/zero": "catalog:",
     "sigx": "catalog:"
   },

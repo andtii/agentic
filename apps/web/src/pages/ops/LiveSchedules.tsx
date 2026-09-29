@@ -17,7 +17,7 @@ import { scheduleKeyOf, workspaceKeyOf } from '../../actors/keys';
 import type { OpsSchedule } from '../../mock/ops';
 import { useAgentDirectory, type AgentDirectory } from '../chat/directory';
 import { useEnvironmentDirectory, type EnvironmentDirectory } from './environments';
-import { closeNewSchedule, newScheduleRequest } from './head';
+import { useScheduleRequestStore } from './head';
 import { dstRuleFor, newScheduleSpec, SCHEDULES_COLS, scheduleRow, type NewScheduleInput } from './live';
 import { NewScheduleDialog } from './NewScheduleDialog';
 import { useProjects } from '../projects/live';
@@ -104,6 +104,7 @@ const ScheduleRow = component<{ ws: string; id: string; tz: string; agents: Agen
 
 export const LiveSchedules = component(() => {
     useHead({ title: 'Schedules' });
+    const { newSchedule: newScheduleRequest, closeNewSchedule } = useScheduleRequestStore();
     const defs = useActorDefs();
     const viewer = useViewer()();
     const agents = useAgentDirectory(defs, viewer);

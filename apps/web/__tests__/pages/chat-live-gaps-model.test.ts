@@ -1,5 +1,5 @@
-/** The live chat's pure rules added by #152: tasks in a chat, what a stop reaches, open requests, unread, the settings change, the list filter, the read marks. */
-import { describe, it, expect, afterEach } from 'vitest';
+/** The live chat's pure rules added by #152: tasks in a chat, what a stop reaches, open requests, unread, the settings change, the list filter. */
+import { describe, it, expect } from 'vitest';
 import type { AgentId, MessageId, QuotaSnapshot, TaskId } from '@agentic/core';
 import type { WorkdirEnvironment } from '@agentic/ui';
 import type { ChatSummary, InboxNotification, IndexedEntry, TaskIndexRow } from '@agentic/platform';
@@ -9,7 +9,6 @@ import { settingsChange } from '../../src/pages/chat/ChatSettingsDialog';
 import { NO_PLAN_LIMITS, memberQuota, type QuotaMachine } from '../../src/pages/chat/quota';
 import { configPatch } from '../../src/pages/agent/live';
 import { chatRow, chatTasks, detachedQuestions, entryTranscript, keepEntries, lastOf, lookupOver, membersOf, notStoppedLine, openRequests, stopTargets, stoppable, unreadOf, waitingAgents, workingAgents, type AgentIdentity } from '../../src/pages/chat/live';
-import { baselineReadMarks, loadReadMarks, markSeen, readMarks, resetReadMarks } from '../../src/pages/chat/read-marks';
 import { zoneFormat } from '../../src/time';
 
 const fullConfig = { name: 'x', description: '', role: '', instructions: '', skills: [], tools: [], connectors: [], approvalPolicy: [], memoryPolicy: { shared: [], autoLearn: 'off' }, collaborators: 'all' };
@@ -230,45 +229,6 @@ describe('matchingChats', () => {
         expect(matchingChats(chats, 'MOBILE').map((c) => c.id)).toEqual(['c1']);
         expect(matchingChats(chats, 'scout clients').map((c) => c.id)).toEqual(['c2']);
         expect(matchingChats(chats, 'mobile scout')).toEqual([]);
-    });
-});
-
-describe('read marks', () => {
-    afterEach(() => {
-        resetReadMarks();
-        localStorage.clear();
-    });
-
-    it('load from storage, only move forward, and are kept per workspace', () => {
-        localStorage.setItem('agentic:chat-seen:u1', JSON.stringify({ c1: 4, junk: 'x' }));
-        expect(readMarks('u1')).toEqual({});
-        loadReadMarks('u1');
-        expect(readMarks('u1')).toEqual({ c1: 4 });
-        markSeen('u1', 'c1', 2);
-        markSeen('u1', 'c2', 7);
-        expect(readMarks('u1')).toEqual({ c1: 4, c2: 7 });
-        expect(JSON.parse(localStorage.getItem('agentic:chat-seen:u1')!)).toEqual({ c1: 4, c2: 7 });
-        expect(readMarks('u2')).toEqual({});
-    });
-
-    it('a first sight starts a chat at its present end and leaves known chats alone', () => {
-        markSeen('u1', 'c1', 3);
-        baselineReadMarks('u1', [{ id: 'c1', seq: 9 }, { id: 'c2', seq: 5 }]);
-        expect(readMarks('u1')).toEqual({ c1: 3, c2: 5 });
-    });
-
-    it('survives storage that refuses or holds garbage', () => {
-        localStorage.setItem('agentic:chat-seen:u1', '{not json');
-        loadReadMarks('u1');
-        expect(readMarks('u1')).toEqual({});
-        const setItem = Storage.prototype.setItem;
-        Storage.prototype.setItem = () => { throw new Error('quota'); };
-        try {
-            markSeen('u1', 'c1', 1);
-            expect(readMarks('u1')).toEqual({ c1: 1 });
-        } finally {
-            Storage.prototype.setItem = setItem;
-        }
     });
 });
 

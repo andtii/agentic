@@ -12,12 +12,13 @@ import { component, onMounted, onUnmounted, watch } from 'sigx';
 import { useRoute, useRouter } from '@sigx/router';
 import { defineTopbar } from '../../components/topbar';
 import { Chats } from '../Chats';
-import { closeNewChat, newChatRequest, openNewChat, openNewChatWith } from './head';
+import { useChatHeadStore } from './head';
 import { newChatPrefillOf, newChatProjectOf } from './new-chat-prefill';
 
 defineTopbar('chat-new', () => ({ crumb: 'New chat' }));
 
 export const NewChatEntry = component(() => {
+    const { newChat: newChatRequest, closeNewChat, openNewChat, openNewChatWith } = useChatHeadStore();
     const route = useRoute();
     const router = useRouter();
     // Read once: the query is the request, and it is replaced as soon as the dialog answers.

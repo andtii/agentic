@@ -21,9 +21,9 @@ import type { ArchiveRequest, ChatListRow } from './archive';
 import { ChatList } from './ChatList';
 import { chatHref } from './href';
 import { useAgentDirectory, type AgentDirectory } from './directory';
-import { closeNewChat, newChatRequest, openNewChat } from './head';
+import { useChatHeadStore } from './head';
 import { LIST_TAIL, chatRow } from './live';
-import { baselineReadMarks, loadReadMarks, readMarks } from './read-marks';
+import { useReadMarks } from './read-marks';
 import { NewChatDialog, type NewChatCreate } from './NewChatDialog';
 import { newChatProjectOf, newProjectLink, type NewChatPrefill } from './new-chat-prefill';
 import { useProjects } from '../projects/live';
@@ -48,6 +48,7 @@ export interface ChatRows {
 
 /** The workspace's chats, newest activity first, as list rows. */
 export function useChatRows(defs: ActorDefs, viewer: ViewerState, directory: AgentDirectory): ChatRows {
+    const { baselineReadMarks, loadReadMarks, readMarks } = useReadMarks();
     const live = signal<{ map: Record<string, ChatRead> }>({ map: {} });
     const index = useWorkspaceStore().indexRead;
     const reads = useData(
@@ -226,6 +227,7 @@ export function memberEnvironmentFor(lookup: (id: string) => Pick<AgentIdentity,
 export const LiveChats = component(() => {
     const defs = useActorDefs();
     const viewer = useViewer()();
+    const { newChat: newChatRequest, closeNewChat, openNewChat } = useChatHeadStore();
     const router = useRouter();
     const route = useRoute();
     const directory = useAgentDirectory(defs, viewer);

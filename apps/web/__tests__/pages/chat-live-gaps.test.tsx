@@ -10,7 +10,7 @@ import { AgentActor, Chat, TaskActor, Workspace, agentKey, taskKey, workspaceKey
 import { chatKeyOf } from '../../src/actors/keys';
 import { topbarFor } from '../../src/components/topbar';
 import { chatHead, chatSearchRequest, chatSettingsRequest, openChatSettings, toggleChatSearch } from '../../src/pages/chat/head';
-import { readMarks, resetReadMarks } from '../../src/pages/chat/read-marks';
+import { chatSeenKey, parseReadMarks } from '@agentic/client';
 import { buttonNamed, setText, tick } from './helpers';
 import { USER, WS, mountLive, owner, startLive, texts, until, type LiveHarness } from './live-harness';
 
@@ -40,7 +40,6 @@ beforeEach(async () => {
 });
 afterEach(async () => {
     await h.stop();
-    resetReadMarks();
     localStorage.clear();
     chatSearchRequest.open = false;
     chatSettingsRequest.open = false;
@@ -163,7 +162,7 @@ describe('unread (live)', () => {
         const dom = await mountLive(`/chats/${chatId}`, h);
         await until(() => dom.querySelectorAll('[data-chat-row]').length === 2, 'two rows');
         // First sight on this device: the other chat starts at its present end, so nothing is unread yet.
-        await until(() => readMarks(USER)[second.chatId] !== undefined, 'the baseline');
+        await until(() => parseReadMarks(localStorage.getItem(chatSeenKey(USER)))[second.chatId] !== undefined, 'the baseline');
         expect(dom.querySelector('[data-chat-unread]')).toBeNull();
 
         const { task } = await runTask(second.chatId, atlas, 'say hi');
@@ -174,9 +173,9 @@ describe('unread (live)', () => {
         // The open chat never counts.
         expect(rowOf(dom, chatId)!.querySelector('[data-chat-unread]')).toBeNull();
 
-        // Opening it — in this tab's list, from another tab of the same device — clears it.
-        const opened = await mountLive(`/chats/${second.chatId}`, h);
-        await until(() => opened.querySelector('[data-chat-row][data-current] [data-chat-title]')?.textContent === 'Other', 'the other chat open');
+        // Opening it from this tab's list clears it. The marks are the app's (#1124): another tab reads them from storage when it loads.
+        rowOf(dom, second.chatId)!.querySelector<HTMLAnchorElement>(`a[href="/chats/${second.chatId}"]`)!.click();
+        await until(() => dom.querySelector('[data-chat-row][data-current] [data-chat-title]')?.textContent === 'Other', 'the other chat open');
         await until(() => rowOf(dom, second.chatId)?.querySelector('[data-chat-unread]') === null, 'the count to clear');
         expect(JSON.parse(localStorage.getItem(`agentic:chat-seen:${USER}`)!)[second.chatId]).toBe((await other.get()).seq);
     });

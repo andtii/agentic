@@ -1,42 +1,67 @@
 import { signal } from 'sigx';
+import { defineWebStore, forward } from '../../stores/define';
 import type { MockChatMember } from '../../mock/workspace';
 import type { AgentIdentity } from './live';
 import type { NewChatPrefill } from './new-chat-prefill';
 
-/**
- * What the live chat page tells the topbar (#34): the title for the
- * breadcrumb and the members for the app bar's sub-line. The topbar
- * contribution is a pure function of the route (`components/topbar.ts`)
- * and the page owns the data, so the page publishes here and the
- * contribution reads it — keyed by chat id, so a stale entry for another
- * chat is never shown. Module-level like `context-drawer.ts`: on the
- * server the SSR render of the page sets it before the App reads it.
- */
-export const chatHead = signal<{ value: { id: string; title: string; members: MockChatMember[]; identities: Record<string, AgentIdentity>; project?: { id: string; name: string }; machine?: { id: string; name: string; online: boolean } } | null }>({ value: null });
+export interface ChatHead {
+    readonly id: string;
+    readonly title: string;
+    readonly members: MockChatMember[];
+    readonly identities: Record<string, AgentIdentity>;
+    readonly project?: { id: string; name: string };
+    readonly machine?: { id: string; name: string; online: boolean };
+}
 
 /**
- * The "New chat" request: the topbar's button raises it, the page's dialog answers it (client-only interaction, like
- * `context-drawer.ts`). `/chats/new?env=&path=&origin=` (#336, `agentic-daemon open`) raises it with a prefill: the
- * folder the chat starts in and the repo it is a checkout of.
+ * The chat page's shared state (#1124: a web store, one per app — `stores/define.ts`):
+ *
+ * - `head` — what the live chat page tells the topbar (#34): the title for the breadcrumb and the members for the
+ *   app bar's sub-line. The topbar contribution is a pure function of the route (`components/topbar.ts`) and the
+ *   page owns the data, so the page publishes here and the contribution reads it — keyed by chat id, so a stale
+ *   entry for another chat is never shown. On the server the SSR render of the page sets it before the App reads it.
+ * - `newChat` — the "New chat" request: the topbar's button raises it, the page's dialog answers it.
+ *   `/chats/new?env=&path=&origin=` (#336, `agentic-daemon open`) raises it with a prefill: the folder the chat
+ *   starts in and the repo it is a checkout of.
+ * - `search`, `settings` — "Search this chat" and "Chat settings" (#152), the same seam.
  */
-export const newChatRequest = signal<{ open: boolean; prefill: NewChatPrefill | null }>({ open: false, prefill: null });
-export const openNewChat = (): void => {
-    newChatRequest.prefill = null;
-    newChatRequest.open = true;
-};
-export const openNewChatWith = (prefill: NewChatPrefill): void => {
-    newChatRequest.prefill = prefill;
-    newChatRequest.open = true;
-};
-export const closeNewChat = (): void => {
-    newChatRequest.open = false;
-    newChatRequest.prefill = null;
-};
+export const useChatHeadStore = defineWebStore('chat-head', () => {
+    const head = signal<{ value: ChatHead | null }>({ value: null });
+    const newChat = signal<{ open: boolean; prefill: NewChatPrefill | null }>({ open: false, prefill: null });
+    const search = signal({ open: false });
+    const settings = signal({ open: false });
+    return {
+        head,
+        newChat,
+        search,
+        settings,
+        openNewChat(): void {
+            newChat.prefill = null;
+            newChat.open = true;
+        },
+        openNewChatWith(prefill: NewChatPrefill): void {
+            newChat.prefill = prefill;
+            newChat.open = true;
+        },
+        closeNewChat(): void {
+            newChat.open = false;
+            newChat.prefill = null;
+        },
+        toggleChatSearch(): void { search.open = !search.open; },
+        closeChatSearch(): void { search.open = false; },
+        openChatSettings(): void { settings.open = true; },
+        closeChatSettings(): void { settings.open = false; }
+    };
+});
 
-/** "Search this chat" and "Chat settings" (#152): the topbar's buttons raise them, the live page answers — the same seam as `newChatRequest`. */
-export const chatSearchRequest = signal({ open: false });
-export const toggleChatSearch = (): void => { chatSearchRequest.open = !chatSearchRequest.open; };
-export const closeChatSearch = (): void => { chatSearchRequest.open = false; };
-export const chatSettingsRequest = signal({ open: false });
-export const openChatSettings = (): void => { chatSettingsRequest.open = true; };
-export const closeChatSettings = (): void => { chatSettingsRequest.open = false; };
+export const chatHead = forward(() => useChatHeadStore().head);
+export const newChatRequest = forward(() => useChatHeadStore().newChat);
+export const chatSearchRequest = forward(() => useChatHeadStore().search);
+export const chatSettingsRequest = forward(() => useChatHeadStore().settings);
+export const openNewChat = (): void => useChatHeadStore().openNewChat();
+export const openNewChatWith = (prefill: NewChatPrefill): void => useChatHeadStore().openNewChatWith(prefill);
+export const closeNewChat = (): void => useChatHeadStore().closeNewChat();
+export const toggleChatSearch = (): void => useChatHeadStore().toggleChatSearch();
+export const closeChatSearch = (): void => useChatHeadStore().closeChatSearch();
+export const openChatSettings = (): void => useChatHeadStore().openChatSettings();
+export const closeChatSettings = (): void => useChatHeadStore().closeChatSettings();
