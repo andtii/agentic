@@ -34,9 +34,9 @@
   "devDependencies": {
     "@sigx/vite": "catalog:",
     "typescript": "^7.0.2",
-    "vite": "^8.0.3",
+    "vite": "^8.3.1",
     "@sigx/reactivity": "catalog:",
     "@sigx/runtime-core": "catalog:",
-    "@modelcontextprotocol/sdk": "^1.30.0"
+    "@modelcontextprotocol/sdk": "^1.30.1"
   }
 }
