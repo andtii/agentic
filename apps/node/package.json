@@ -18,7 +18,7 @@
     "@agentic/platform": "workspace:*",
     "@sigx/actors": "catalog:",
     "@sigx/actors-sqlite": "catalog:",
-    "ws": "^8.21.0"
+    "ws": "^8.22.0"
   },
   "devDependencies": {
     "@types/ws": "^8.18.1"
