@@ -29,7 +29,7 @@
     "@sigx/ai": "catalog:",
     "@sigx/ai-agent": "catalog:",
     "@sigx/ai-agent-node": "catalog:",
-    "zod": "^4.6.5"
+    "zod": "^4.6.6"
   },
   "devDependencies": {
     "@sigx/vite": "catalog:",

@@ -27,7 +27,7 @@
   "dependencies": {
     "@agentic/core": "workspace:*",
     "@sigx/ai-agent": "catalog:",
-    "zod": "^4.6.5"
+    "zod": "^4.6.6"
   },
   "devDependencies": {
     "@sigx/vite": "catalog:",
